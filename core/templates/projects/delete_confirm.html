@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Delete project{% endblock %}
+{% block content %}
+<div class="card shadow-sm rounded-4">
+  <div class="card-body">
+    <h3 class="h5 mb-3">
+      <i class="fa-solid fa-trash-can text-danger me-2"></i>
+      Delete project "{{ project.name }}"?
+    </h3>
+
+    <p class="text-muted">
+      This action cannot be undone. All project members and settings will be removed.
+    </p>
+
+    <form method="post">
+      {% csrf_token %}
+      <button class="btn btn-danger">
+        <i class="fa-solid fa-check me-1"></i> Yes, delete
+      </button>
+
+      <a href="{% url 'project_detail' project.pk %}" class="btn btn-secondary">
+        <i class="fa-solid fa-xmark me-1"></i> Cancel
+      </a>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Projects{% endblock %}
+
+{% block content %}
+
+<style>
+    /* Top panel */
+    .projects-header {
+        background: linear-gradient(135deg, #0d6efd, #6610f2);
+        color: #fff;
+        border-radius: 1rem;
+        padding: 1rem 1.5rem;
+        box-shadow: 0 0.5rem 1.5rem rgba(13, 110, 253, 0.35);
+    }
+
+    .projects-header h2 {
+        margin: 0;
+    }
+
+    /* Project cards */
+    .project-card {
+        cursor: pointer;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        border: 1px solid rgba(0,0,0,0.08);
+    }
+
+    .project-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 0.5rem 1rem rgba(15, 23, 42, 0.18);
+    }
+
+    .project-card.active {
+        border: 2px solid #0d6efd !important;
+        box-shadow: 0 0.6rem 1.4rem rgba(13, 110, 253, 0.45);
+    }
+
+    .project-meta {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+
+    .badge-active {
+        background-color: rgba(25, 135, 84, 0.12);
+        color: #198754;
+        border-radius: 999px;
+        padding: 0.2rem 0.6rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    .search-input {
+        max-width: 260px;
+    }
+</style>
+
+<!-- Header block -->
+<div class="projects-header mb-4">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+
+        <div>
+            <h2 class="h5">
+                <i class="fa-regular fa-folder-open me-2"></i>
+                Your projects
+            </h2>
+            <p class="mb-0 small opacity-75">
+                Select or create a project. You can set one project as active for quick access.
+            </p>
+        </div>
+
+        <div class="d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center gap-2">
+
+            <!-- Search -->
+            <div class="input-group search-input">
+                <span class="input-group-text">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </span>
+                <input type="text"
+                       id="projectSearch"
+                       class="form-control form-control-sm"
+                       placeholder="Search project...">
+            </div>
+
+            <!-- Buttons -->
+            <div class="d-flex gap-2">
+                <!-- Connect existing project -->
+                <a href="{% url 'project_create' %}?mode=connect"
+                   class="btn btn-sm btn-outline-light">
+                    <i class="fa-solid fa-link me-1"></i>
+                    Connect from folder
+                </a>
+
+                <!-- New project -->
+                <a href="{% url 'project_create' %}"
+                   class="btn btn-sm btn-light text-primary fw-semibold">
+                    <i class="fa-solid fa-plus me-1"></i>
+                    New project
+                </a>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- Projects grid -->
+<div class="row g-3" id="projectsGrid">
+
+    {% for p in projects %}
+    <div class="col-12 col-md-6 col-lg-4 project-item"
+         data-project-name="{{ p.name|lower }}">
+
+        <div class="card h-100 project-card
+                    {% if active_project and active_project.pk == p.pk %}active{% endif %}"
+             data-project-id="{{ p.pk }}">
+
+            <div class="card-body d-flex flex-column justify-content-between">
+
+                <!-- Top: name + owner + active badge -->
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <h5 class="card-title mb-1">
+                            {{ p.name }}
+                        </h5>
+
+                        <div class="text-end">
+                            {% if active_project and active_project.pk == p.pk %}
+                                <span class="badge-active">
+                                    <i class="fa-solid fa-circle-check me-1"></i>
+                                    Active
+                                </span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="project-meta">
+                        <i class="fa-regular fa-user me-1"></i>
+                        Owner: {{ p.owner.username }}
+                    </div>
+                </div>
+
+                <!-- Middle: path info -->
+                <div class="mb-3">
+                    <div class="project-meta">
+                        <div>
+                            <i class="fa-solid fa-folder-tree me-1"></i>
+                            {{ p.root_path }}
+                        </div>
+                        <div>
+                            <i class="fa-solid fa-folder me-1"></i>
+                            {{ p.folder_name }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bottom: buttons -->
+                <div class="d-flex justify-content-between align-items-center mt-auto">
+
+                    <!-- Open -->
+                    <a href="{% url 'project_detail' p.pk %}"
+                       class="btn btn-sm btn-outline-primary">
+                        <i class="fa-regular fa-folder-open me-1"></i>
+                        Open
+                    </a>
+
+                    <div class="btn-group">
+
+                        <!-- Set active -->
+                        <a href="{% url 'project_set_active' p.pk %}"
+                           class="btn btn-sm btn-outline-success">
+                            {% if active_project and active_project.pk == p.pk %}
+                                <i class="fa-solid fa-circle-check me-1"></i>
+                                Active
+                            {% else %}
+                                <i class="fa-regular fa-circle me-1"></i>
+                                Set active
+                            {% endif %}
+                        </a>
+
+                        <!-- Delete (owner only) -->
+                        {% if p.owner == request.user %}
+                        <button class="btn btn-sm btn-outline-danger"
+                                data-bs-toggle="modal"
+                                data-bs-target="#deleteModal{{ p.pk }}">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                        {% endif %}
+                    </div>
+
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete confirmation modal -->
+    {% if p.owner == request.user %}
+    <div class="modal fade" id="deleteModal{{ p.pk }}" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fa-solid fa-trash-can text-danger me-2"></i>
+                        Delete project
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+
+                <div class="modal-body">
+                    Are you sure you want to delete
+                    <b>{{ p.name }}</b>?<br>
+                    This action cannot be undone.
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button"
+                            class="btn btn-secondary"
+                            data-bs-dismiss="modal">
+                        Cancel
+                    </button>
+
+                    <form method="post" action="{% url 'project_delete' p.pk %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-danger">
+                            <i class="fa-solid fa-check me-1"></i>
+                            Delete
+                        </button>
+                    </form>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% empty %}
+    <div class="col-12">
+        <div class="alert alert-light border d-flex align-items-center" role="alert">
+            <i class="fa-regular fa-circle-question me-2"></i>
+            <div>No projects yet. Create a new project or connect from an existing folder.</div>
+        </div>
+    </div>
+    {% endfor %}
+
+</div>
+
+<!-- JS: click on card to open project, and search filter -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+    const cards = document.querySelectorAll('.project-card');
+    const searchInput = document.getElementById('projectSearch');
+    const items = document.querySelectorAll('.project-item');
+
+    // Click on card = open project (except buttons/links)
+    cards.forEach(card => {
+        card.addEventListener('click', function (event) {
+
+            // Ignore delete button clicks
+            if (event.target.closest('.btn-outline-danger')) return;
+
+            // Ignore clicks on any links (Open, Set active)
+            if (event.target.closest('a')) return;
+
+            const projectId = this.dataset.projectId;
+            window.location.href = `/projects/${projectId}/`;
+        });
+    });
+
+    // Simple search filter by project name
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            const value = this.value.trim().toLowerCase();
+
+            items.forEach(item => {
+                const name = item.getAttribute('data-project-name') || '';
+                if (!value || name.includes(value)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+    }
+});
+</script>
+
+{% endblock %}

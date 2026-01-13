@@ -1,0 +1,60 @@
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+
+    {% block sidebar_toggle %}
+    <button class="btn btn-outline-light me-2"
+            type="button"
+            data-bs-toggle="offcanvas"
+            data-bs-target="#sidebarOffcanvas"
+            aria-controls="sidebarOffcanvas">
+      <i class="fa-solid fa-bars"></i>
+    </button>
+    {% endblock %}
+
+    <a class="navbar-brand" href="/">
+      <i class="fa-solid fa-wave-square me-2"></i>SeisWebLog
+    </a>
+
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="topNav">
+
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item">
+          <a class="nav-link" href="{% url 'projects' %}">
+            Projects
+          </a>
+        </li>
+      </ul>
+
+      <ul class="navbar-nav">
+
+        {% if user.is_authenticated %}
+        <li class="nav-item">
+          <span class="navbar-text me-3">
+            <i class="fa-regular fa-user"></i> {{ user.username }}
+          </span>
+        </li>
+
+        <li class="nav-item">
+          <a class="btn btn-outline-light" href="{% url 'logout' %}">
+            Exit
+          </a>
+        </li>
+
+        {% else %}
+        <li class="nav-item">
+          <a class="btn btn-outline-light" href="{% url 'login' %}">
+            Login
+          </a>
+        </li>
+        {% endif %}
+
+      </ul>
+
+    </div>
+
+  </div>
+</nav>

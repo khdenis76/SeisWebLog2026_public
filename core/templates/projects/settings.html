@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block title %}Project settings{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-9">
+    <div class="card shadow-sm rounded-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">
+          <i class="fa-solid fa-sliders me-2"></i>
+          Project settings – {{ project.name }}
+        </h2>
+
+        <!-- Tabs -->
+        <ul class="nav nav-tabs mb-3" id="settingsTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="main-tab" data-bs-toggle="tab"
+                    data-bs-target="#tab-main" type="button" role="tab">
+              Main
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="geom-tab" data-bs-toggle="tab"
+                    data-bs-target="#tab-geom" type="button" role="tab">
+              Geometry
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="qc-tab" data-bs-toggle="tab"
+                    data-bs-target="#tab-qc" type="button" role="tab">
+              QC
+            </button>
+          </li>
+        </ul>
+
+        <form method="post">
+          {% csrf_token %}
+
+          <div class="tab-content">
+            <!-- ===================== MAIN TAB ===================== -->
+            <div class="tab-pane fade show active" id="tab-main" role="tabpanel">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Project name</label>
+                  <input type="text" name="main_name" class="form-control"
+                         value="{{ main.name }}">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Location</label>
+                  <input type="text" name="main_location" class="form-control"
+                         value="{{ main.location }}">
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Area</label>
+                  <input type="text" name="main_area" class="form-control"
+                         value="{{ main.area }}">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Client</label>
+                  <input type="text" name="main_client" class="form-control"
+                         value="{{ main.client }}">
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Contractor</label>
+                  <input type="text" name="main_contractor" class="form-control"
+                         value="{{ main.contractor }}">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Client project ID</label>
+                  <input type="text" name="main_project_client_id" class="form-control"
+                         value="{{ main.project_client_id }}">
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">Contractor project ID</label>
+                  <input type="text" name="main_project_contractor_id" class="form-control"
+                         value="{{ main.project_contractor_id }}">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">EPSG</label>
+                  <input type="text" name="main_epsg" class="form-control"
+                         value="{{ main.epsg }}">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">Line code</label>
+                  <input type="text" name="main_line_code" class="form-control"
+                         value="{{ main.line_code }}">
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label">Start date</label>
+                  <input type="date" name="main_start_project" class="form-control"
+                         value="{{ main.start_project }}">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Project duration (days)</label>
+                  <input type="number" name="main_project_duration" class="form-control"
+                         value="{{ main.project_duration }}">
+                </div>
+              </div>
+            </div>
+
+            <!-- ===================== GEOMETRY TAB ===================== -->
+            <div class="tab-pane fade" id="tab-geom" role="tabpanel">
+              <div class="row g-3">
+                <div class="col-md-3">
+                  <label class="form-label">RPI (m)</label>
+                  <input type="number" step="0.01" name="geom_rpi" class="form-control"
+                         value="{{ geom.rpi }}">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">RLI (m)</label>
+                  <input type="number" step="0.01" name="geom_rli" class="form-control"
+                         value="{{ geom.rli }}">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">SPI (m)</label>
+                  <input type="number" step="0.01" name="geom_spi" class="form-control"
+                         value="{{ geom.spi }}">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">SLI (m)</label>
+                  <input type="number" step="0.01" name="geom_sli" class="form-control"
+                         value="{{ geom.sli }}">
+                </div>
+
+                <div class="col-md-3">
+                  <label class="form-label">RL heading (°)</label>
+                  <input type="number" step="0.01" name="geom_rl_heading" class="form-control"
+                         value="{{ geom.rl_heading }}">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">SL heading (°)</label>
+                  <input type="number" step="0.01" name="geom_sl_heading" class="form-control"
+                         value="{{ geom.sl_heading }}">
+                </div>
+
+                <div class="col-md-3">
+                  <label class="form-label">Production code</label>
+                  <input type="text" name="geom_production_code" class="form-control"
+                         value="{{ geom.production_code }}">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">Non-production code</label>
+                  <input type="text" name="geom_non_production_code" class="form-control"
+                         value="{{ geom.non_production_code }}">
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label">RL mask</label>
+                  <input type="text" name="geom_rl_mask" class="form-control"
+                         value="{{ geom.rl_mask }}">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">SL mask</label>
+                  <input type="text" name="geom_sl_mask" class="form-control"
+                         value="{{ geom.sl_mask }}">
+                </div>
+              </div>
+            </div>
+
+            <!-- ===================== QC TAB ===================== -->
+            <div class="tab-pane fade" id="tab-qc" role="tabpanel">
+              <!-- Node QC block -->
+              <div class="mb-3">
+                <h5 class="h6 mb-3">
+                  <i class="fa-solid fa-wave-square me-1"></i> Node QC
+                </h5>
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <label class="form-label">Max IL offset (m)</label>
+                    <input type="number" step="0.01" name="node_max_il_offset" class="form-control"
+                           value="{{ node_qc.max_il_offset }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Max XL offset (m)</label>
+                    <input type="number" step="0.01" name="node_max_xl_offset" class="form-control"
+                           value="{{ node_qc.max_xl_offset }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Max radial offset (m)</label>
+                    <input type="number" step="0.01" name="node_max_radial_offset" class="form-control"
+                           value="{{ node_qc.max_radial_offset }}">
+                  </div>
+
+                  <div class="col-md-4">
+                    <label class="form-label">Percent of depth (%)</label>
+                    <input type="number" step="0.01" name="node_percent_of_depth" class="form-control"
+                           value="{{ node_qc.percent_of_depth }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Offset mode</label>
+                    <select name="node_use_offset" class="form-select">
+                      <option value="0" {% if node_qc.use_offset == 0 %}selected{% endif %}>
+                        Use radial offset
+                      </option>
+                      <option value="1" {% if node_qc.use_offset == 1 %}selected{% endif %}>
+                        Use inline offset
+                      </option>
+                      <option value="2" {% if node_qc.use_offset == 2 %}selected{% endif %}>
+                        Use crossline offset
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <hr class="my-4">
+
+              <!-- Gun QC block -->
+              <div class="mb-3">
+                <h5 class="h6 mb-3">
+                  <i class="fa-solid fa-bullseye me-1"></i> Gun QC
+                </h5>
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <label class="form-label">Number of arrays</label>
+                    <input type="number" name="gun_num_of_arrays" class="form-control"
+                           value="{{ gun_qc.num_of_arrays }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Number of strings</label>
+                    <input type="number" name="gun_num_of_strings" class="form-control"
+                           value="{{ gun_qc.num_of_strings }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Number of guns</label>
+                    <input type="number" name="gun_num_of_guns" class="form-control"
+                           value="{{ gun_qc.num_of_guns }}">
+                  </div>
+
+                  <div class="col-md-4">
+                    <label class="form-label">Depth (m)</label>
+                    <input type="number" step="0.01" name="gun_depth" class="form-control"
+                           value="{{ gun_qc.depth }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Depth tolerance (m)</label>
+                    <input type="number" step="0.01" name="gun_depth_tolerance" class="form-control"
+                           value="{{ gun_qc.depth_tolerance }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Time warning (ms)</label>
+                    <input type="number" step="0.01" name="gun_time_warning" class="form-control"
+                           value="{{ gun_qc.time_warning }}">
+                  </div>
+
+                  <div class="col-md-4">
+                    <label class="form-label">Time error (ms)</label>
+                    <input type="number" step="0.01" name="gun_time_error" class="form-control"
+                           value="{{ gun_qc.time_error }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Pressure (psi)</label>
+                    <input type="number" step="0.01" name="gun_pressure" class="form-control"
+                           value="{{ gun_qc.pressure }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Pressure drop (psi)</label>
+                    <input type="number" step="0.01" name="gun_pressure_drop" class="form-control"
+                           value="{{ gun_qc.pressure_drop }}">
+                  </div>
+
+                  <div class="col-md-4">
+                    <label class="form-label">Total volume (in³)</label>
+                    <input type="number" step="0.01" name="gun_volume" class="form-control"
+                           value="{{ gun_qc.volume }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Max IL offset (m)</label>
+                    <input type="number" step="0.01" name="gun_max_il_offset" class="form-control"
+                           value="{{ gun_qc.max_il_offset }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Max XL offset (m)</label>
+                    <input type="number" step="0.01" name="gun_max_xl_offset" class="form-control"
+                           value="{{ gun_qc.max_xl_offset }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Max radial offset (m)</label>
+                    <input type="number" step="0.01" name="gun_max_radial_offset" class="form-control"
+                           value="{{ gun_qc.max_radial_offset }}">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="my-4">
+
+          <button class="btn btn-primary">
+            <i class="fa-solid fa-floppy-disk me-1"></i> Save
+          </button>
+          <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+            Cancel
+          </a>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

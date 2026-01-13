@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Проект: {{ project.name }}{% endblock %}
+{% block content %}
+<div class="card shadow-sm rounded-4">
+  <div class="card-body">
+    <h2 class="h5 mb-3"><i class="fa-regular fa-folder-open me-2"></i>{{ project.name }}</h2>
+    <dl class="row">
+      <dt class="col-sm-3">Корневой путь</dt><dd class="col-sm-9">{{ project.root_path }}</dd>
+      <dt class="col-sm-3">Папка</dt><dd class="col-sm-9">{{ project.folder_name }}</dd>
+      <dt class="col-sm-3">Абсолютный путь</dt><dd class="col-sm-9">{{ project.abs_path }}</dd>
+      <dt class="col-sm-3">Примечание</dt><dd class="col-sm-9">{{ project.note|default:"—" }}</dd>
+    </dl>
+  </div>
+</div>
+{% endblock %}

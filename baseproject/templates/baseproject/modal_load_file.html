@@ -1,0 +1,118 @@
+{% load static %}
+
+     <!-- MODAL: UPLOAD FORM -->
+  <div class="modal fade" id="uploadModal" tabindex="-1" aria-labelledby="uploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+
+        <div class="modal-header">
+          <h5 class="modal-title" id="uploadModalLabel">
+            <i class="fa-solid fa-upload me-2"></i>Upload preplots
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+          <form method="post"
+                id="preplot-load-form"
+                name="preplot-load-form"
+                enctype="multipart/form-data"
+                action="{% url 'upload_preplots' %}"
+                class="row g-3">
+            {% csrf_token %}
+
+            <!-- FILE TYPE -->
+            <div class="col-12">
+              <label for="id_file_type" class="form-label">File type</label>
+              {{ form.file_type }}
+            </div>
+
+            <!-- FILE INPUT -->
+            <div class="col-12">
+              <label for="id_files" class="form-label">Files</label>
+              {{ form.files }}
+              <div class="form-text">
+                Select one or many files. All selected files will be stored as the chosen type.
+              </div>
+            </div>
+            <div class="col-12">
+              <label for="id_files" class="form-label">SPS Revision</label>
+                   {{ form.sps_revision }}
+            </div>
+            <!-- TIER -->
+            <div class="col-6">
+              <label for="id_tier" class="form-label">Tier/Phase</label>
+              {{ form.tier }}
+            </div>
+
+            <!-- BEARING -->
+            <div class="col-6">
+              <label for="id_bearing" class="form-label">Line angle in degrees (0.0-360.0)</label>
+              {{ form.bearing }}
+            </div>
+            <!-- IMPORT OPTIONS -->
+<div class="col-12">
+  <hr>
+  <h6 class="mb-2">Import options</h6>
+</div>
+
+<!-- DUPLICATE HANDLING (one option only) -->
+<div class="col-12">
+  <hr class="my-2">
+  <label class="form-label mb-2">Duplicates</label>
+
+  <div class="form-check">
+    <input class="form-check-input"
+           type="radio"
+           name="dup_mode"
+           id="dup_add"
+           value="add"
+           checked>
+    <label class="form-check-label" for="dup_add">
+      Add all duplicates (PointIndex++)
+    </label>
+  </div>
+
+  <div class="form-check">
+    <input class="form-check-input"
+           type="radio"
+           name="dup_mode"
+           id="dup_first"
+           value="keep_first">
+    <label class="form-check-label" for="dup_first">
+      Keep first only (ignore duplicates)
+    </label>
+  </div>
+
+  <div class="form-check">
+    <input class="form-check-input"
+           type="radio"
+           name="dup_mode"
+           id="dup_last"
+           value="keep_last">
+    <label class="form-check-label" for="dup_last">
+      Keep last only (overwrite)
+    </label>
+  </div>
+</div>
+
+
+
+          </form>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+            Cancel
+          </button>
+
+          <!-- SUBMIT (кнопка вне формы, но с form="preplot-load-form") -->
+          <button type="submit" class="btn btn-primary" form="preplot-load-form">
+            <i class="fa-solid fa-upload me-1"></i>Upload to database
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+

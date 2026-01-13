@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-md-6 col-lg-4">
+    <div class="card shadow-lg border-0 rounded-4">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-3 text-center">
+          <i class="fa-solid fa-lock me-2"></i>Sign in
+        </h1>
+
+        {% if form.errors %}
+          <div class="alert alert-danger">
+            Invalid username or password. Please try again.
+          </div>
+        {% endif %}
+
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <div class="mb-3">
+            <label class="form-label">Username</label>
+            <input type="text" name="username" class="form-control form-control-lg"
+                   autofocus required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Password</label>
+            <input type="password" name="password" class="form-control form-control-lg"
+                   required>
+          </div>
+          <button class="btn btn-primary w-100">
+            <i class="fa-solid fa-right-to-bracket me-2"></i>Sign in
+          </button>
+        </form>
+
+        <hr class="my-4">
+
+        <p class="text-center mb-2">Don’t have an account yet?</p>
+        <a href="{% url 'signup' %}" class="btn btn-outline-secondary w-100">
+          <i class="fa-solid fa-user-plus me-2"></i>Create account
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

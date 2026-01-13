@@ -1,0 +1,12 @@
+/* Sticky table header */
+.table-scroll {
+  height: 70vh;
+  overflow: auto;
+}
+
+.table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bs-body-bg);
+}

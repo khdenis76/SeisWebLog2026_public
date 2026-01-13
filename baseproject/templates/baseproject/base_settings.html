@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Base project settings — {{ project.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+
+  <!-- HEADER CARD -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <h5 class="mb-0">
+        <i class="fa-solid fa-database me-2"></i>
+        Base project settings
+        <small class="text-muted">/ {{ project.name }}</small>
+      </h5>
+
+      <!-- ICON BUTTON: OPEN MODAL -->
+      <button type="button"
+              class="btn btn-sm btn-primary"
+              data-bs-toggle="modal"
+              data-bs-target="#uploadModal"
+              title="Upload files">
+        <i class="fa-solid fa-upload"></i>
+      </button>
+    </div>
+  </div>
+
+{% include "baseproject/modal_load_file.html" %}
+<div class="row">
+    <div class="col-4">
+        <div class="clearfix">
+         <button type="button"
+                     class="btn btn-sm float-end"
+                     onclick="resize_left_collumn()">
+                 <i class="fas fa-maximize"></i>
+             </button>
+        </div>
+        {% include "baseproject/partials/rlpreplot_table.html"%}
+    </div><!--End of left column-->
+    <div class="col-8">
+        <div class="clearfix">
+           <button type="button"
+                     class="btn btn-sm float-end"
+                     onclick="resize_left_collumn()">
+                 <i class="fas fa-maximize"></i>
+             </button>
+        </div>
+    </div><!-- end of right collumn-->
+</div>
+</div><!-- End of container fluid-->
+{% endblock %}

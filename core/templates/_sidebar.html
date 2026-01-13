@@ -1,0 +1,45 @@
+{# templates/_sidebar.html #}
+
+<!-- OFFCANVAS MENU -->
+<div class="offcanvas offcanvas-start"
+     tabindex="-1"
+     id="sidebarOffcanvas"
+     aria-labelledby="sidebarOffcanvasLabel">
+
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="sidebarOffcanvasLabel">
+      <i class="fa-solid fa-bars-staggered me-2"></i>Меню
+    </h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+  </div>
+
+  <div class="offcanvas-body">
+
+    <div class="text-muted text-uppercase small mb-2">Проект</div>
+    <ul class="nav flex-column mb-3">
+      <li class="nav-item"><a class="nav-link" href="{% url 'projects' %}">Все проекты</a></li>
+      <li class="nav-item"><a class="nav-link" href="{% url 'project_settings' %}">Настройки проекта</a></li>
+    </ul>
+
+    <div class="text-muted text-uppercase small mb-2">Навигация</div>
+    <ul class="nav flex-column mb-3">
+      <li class="nav-item"><a class="nav-link" href="{% url 'base_project_settings' %}">Preplot</a></li>
+      <li class="nav-item"><a class="nav-link" href="#">DSR таблица</a></li>
+      <li class="nav-item"><a class="nav-link" href="#">ROV линии</a></li>
+    </ul>
+
+    <div class="text-muted text-uppercase small mb-2">QC & Production</div>
+    <ul class="nav flex-column mb-3">
+      <li class="nav-item"><a class="nav-link" href="#">QC Dashboard</a></li>
+      <li class="nav-item"><a class="nav-link" href="#">Vessel Activity</a></li>
+      <li class="nav-item"><a class="nav-link" href="#">Production log</a></li>
+    </ul>
+
+    <div class="text-muted text-uppercase small mb-2">Сервис</div>
+    <ul class="nav flex-column mb-3">
+      <li class="nav-item"><a class="nav-link" href="#">Логи</a></li>
+      <li class="nav-item"><a class="nav-link" href="{% url 'admin:index' %}">Админка</a></li>
+    </ul>
+
+  </div>
+</div>

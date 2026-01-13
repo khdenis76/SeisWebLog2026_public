@@ -1,0 +1,32 @@
+<div class="table-scroll border rounded">
+  <table class="table table-hover table-sm table-striped mb-0" id="rlpreplotTable">
+    <thead class="table-light">
+      <tr>
+       <th><input type="checkbox" id="MainRLPreplotCheckbox"></th>
+        <th>Line</th>
+        <th>Points</th>
+        <th>SOL</th>
+        <th>EOL</th>
+        <th>Length</th>
+        <th>Tier</th>
+      </tr>
+    </thead>
+    <tbody id="rlBody">
+      {% for r in rows %}
+        <tr>
+          <td><input type="checkbox" class="rl-preplot-checkbox" data-line-id="{{ r.ID }}" data-tier-line ="{{ r.TierLine }}"></td>
+          <td>{{ r.Line }}</td>
+          <td>{{ r.Points }}</td>
+          <td>{{ r.FirstPoint }}</td>
+          <td>{{ r.LastPoint }}</td>
+          <td>{{ r.LineLength|floatformat:0 }}</td>
+          <td>{{ r.Tier }}</td>
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="7" class="text-muted">No data</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
