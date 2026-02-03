@@ -1,0 +1,74 @@
+<div class="modal fade" id="csvuploadModal" tabindex="-1" aria-hidden="true">
+             <div class="modal-dialog modal-dialog-centered">
+                         <div class="modal-content">
+                                  <div class="modal-header">
+                                      <h5><i class="fas fa-file-csv me-2"></i> New layer from CSV file  </h5>
+                                  </div>
+                                  <div class="modal-body">
+                                  <form id="csv-load-form" method="post" action="{% url 'upload_csv_layer_ajax' %}">
+                                      <input id="csvFileInput"
+                                             class="form-control"
+                                             type="file"
+                                             accept=".csv"
+                                             name="csv_file"
+                                             data-headers-url="{% url 'csv_headers' %}">
+                                       <div class="mb-2">
+                                          <label for="layer-name" class="form-label">Layer name</label>
+                                          <input id="layer-name" name="layer_name" class="form-control">
+                                       </div>
+                                       <div class="mb-2">
+                                           <label for="selPointName" class="form-label">Point name</label>
+                                           <select id="selPointName" name="pointfield" class="form-select form-control"></select>
+                                       </div>
+                                      <div class="mb-2">
+                                          <label for="selX" class="form-label">X-Coordinate</label>
+                                           <select id="selX" name="xfield" class="form-select"></select>
+                                      </div>
+                                      <div class="mb-2">
+                                           <label for="selY" class="form-label">Y-coordinate</label>
+                                           <select id="selY" name="yfield" class="form-select"></select>
+                                      </div>
+                                      <div class="mb-2">
+
+
+                                            <label for="selZ" class="form-label">Elevtion</label>
+                                            <select id="selZ" name="zfield" class="form-select"></select>
+                                      </div>
+                                      <div class="mt-2 mb-2">
+                                            <label for="attr1-name" class="form-label">Name for attribute1</label>
+                                            <input id="attr1-name" name="attr1_name" value="Attribute One" class="form-control">
+
+                                            <label for="attr1" class="form-label">Attribute1</label>
+                                            <select id="attr1" name="attr1"  class="form-select"></select>
+                                      </div>
+                                       <div class="mb-2">
+                                            <label for="attr2-name" class="form-label">Name for attribute2</label>
+                                            <input id="attr2-name" name="attr2_name" value="Attribute Two" class="form-control">
+
+                                            <label for="attr2" class="form-label">Attribute2</label>
+                                            <select id="attr2" name="attr2"  class="form-select"></select>
+                                      </div>
+                                       <div class="mb-2">
+                                            <label for="attr3-name" class="form-label">Name for attribute3</label>
+                                            <input id="attr3-name" name="attr3_name" value="Attribute Three" class="form-control">
+
+                                            <label for="attr3" class="form-label">Attribute3</label>
+                                            <select id="attr3" name="attr3" class="form-select"></select>
+                                      </div>
+                                   </form>
+<div id="csvErr" class="alert alert-danger d-none mt-2"></div>
+                                  </div>
+                                  <div class="modal-footer">
+                                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                            Cancel
+                                      </button>
+                                      <button id="btnSaveCsv"
+                                              type="button"
+                                              class="btn btn-danger"
+                                              data-bs-dismiss="modal">
+                                              Save
+                                      </button>
+                                  </div>
+                         </div>
+             </div>
+</div>

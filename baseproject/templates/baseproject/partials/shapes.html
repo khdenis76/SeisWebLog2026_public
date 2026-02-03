@@ -1,0 +1,57 @@
+{% load static %}
+        <nav>
+            <div class="input-group mb-2">
+                <div class="form-floating">
+                    <input class="form-control" type="text" id="shape-folder-input" value="{{ folders.shapes_folder }}">
+                    <label for="shape-folder-input">Select folder with shape files </label>
+                </div>
+                    <button class="btn btn-sm btn-primary"
+                            id="shape-folder-search-button" type="button"
+                            data-search-url = "{% url 'update_shape_folder_view' %}">
+                        <i class="fas fa-magnifying-glass"></i>
+                    </button>
+                </div>
+        </nav>
+        <div class="row">
+            <div class="col-3">
+               <div class="card shadow">
+                    <div class="card-body">
+                          <div class="table-scroll w-100" style="--table-height: 30vh;">
+                <table class="table table-hover">
+                    <thead>
+                        <th>#</th>
+                        <th><input type="checkbox" id="mainshapefileCheckbox"></th>
+                        <th>File Name</th>
+                        <th>Size, kB</th>
+                    </thead>
+                    <tbody id="shape-folder-body">
+                         {% for shp in shp_list %}
+                          {% if shp.is_indb == 0 %}
+                         <tr>
+                             <td>{{ forloop.counter }}</td>
+                             <td><input type="checkbox" class="shape-checkbox" data-fullname = "{{ shp.full_name }}"></td>
+                             <td>{{ shp.file_name }}</td>
+                             <td>{{ shp.file_size|floatformat:1 }}</td>
+                         </tr>
+                         {% endif %}
+                         {% endfor %}
+                    </tbody>
+                </table>
+               </div>
+                    </div>
+                    <div class="card-footer clearfix">
+                         <button
+                                 id="btnAddShapes"
+                                 type="button"
+                                 class="btn btn-sm btn-primary float-end me-2"
+                                 data-post-url="{% url 'add_shape_to_db' %}">
+                             <i class="fas fa-plus-circle me-2"></i>ADD
+                         </button>
+                    </div>
+               </div>
+            </div><!-- End of left col-->
+
+            <div class="col-8">
+              {% include "baseproject/partials/shapesindb.html" %}
+            </div><!-- End of right col-->
+        </div><!-- End of row-->

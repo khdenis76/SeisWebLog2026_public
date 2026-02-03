@@ -1,0 +1,112 @@
+<div class="card-header">
+    <h6><i class="fas fa-pie-chart me-2"></i> PREPLOT STATISTICS</h6>
+  </div>
+
+   <div class="card-body">
+          <div class="row clearfix">
+                <h5 class="text-danger text-center fw-bold">SOURCE PREPLOT</h5>
+          </div>
+           <table class="table table-hover table-sm table-danger">
+                   <tbody>
+                       {% if sou_preplot_summary %}
+          <tr>
+            <td class="bg-danger text-white">Source Preplot File:</td>
+            <td class="text-danger fw-bold">{{ sou_preplot_summary.FileNames }}</td>
+          </tr>
+          <tr>
+            <td class="bg-danger text-white">Total Source Lines:</td>
+            <td  class="text-danger fw-bold">{{ sou_preplot_summary.LinesCount }}</td>
+          </tr>
+          <tr>
+            <td class="bg-danger text-white">Total Source Points:</td>
+            <td class="text-danger fw-bold">{{ sou_preplot_summary.TotalPoints }}</td>
+          </tr>
+          <tr>
+            <td class="bg-danger text-white">Avg. Points per line:</td>
+            <td class="text-danger fw-bold">{{ sou_preplot_summary.AvgPointsPerLine }}</td>
+          </tr>
+          <tr>
+            <td class="bg-danger text-white">Avg. line length:</td>
+            <td class="text-danger fw-bold">{{ sou_preplot_summary.AvgRealLineLength|floatformat:1 }}</td>
+          </tr>
+          <tr>
+               <td class="bg-danger text-white">Max Points per Line({{ sou_preplot_summary.LongestPointsLine }}):</td>
+               <td class="text-danger fw-bold">{{ sou_preplot_summary.LongestPoints }}</td>
+          </tr>
+          <tr>
+               <td class="bg-danger text-white">Min Points per Line({{ sou_preplot_summary.ShortestPointsLine }}):</td>
+               <td class="text-danger fw-bold">{{ sou_preplot_summary.ShortestPoints }}</td>
+          </tr>
+          <tr>
+               <td class="bg-danger text-white">Longest Line({{ sou_preplot_summary.LongestLengthLine }}):</td>
+               <td class="text-danger fw-bold">{{ sou_preplot_summary.LongestLength|floatformat:1 }}</td>
+          </tr>
+          <tr>
+               <td class="bg-danger text-white">Shortest Line({{ sou_preplot_summary.ShortestLengthLine }}):</td>
+               <td class="text-danger fw-bold">{{ sou_preplot_summary.ShortestLength|floatformat:1 }}</td>
+          </tr>
+                         {% else %}
+                             <tr class="text-muted">
+            <td colspan="2">
+              <i class="fas fa-info-circle me-1"></i>
+              No source preplot data available
+            </td>
+          </tr>
+                          {% endif %}
+                   </tbody>
+          </table>
+   </div>
+    <div class="card-body">
+    <div class="row clearfix">
+                <h5 class="text-primary text-center fw-bold">RECEIVER PREPLOT</h5>
+          </div>
+         <table class="table table-hover table-sm table-primary">
+      <tbody>
+        {% if rec_preplot_summary %}
+          <tr>
+            <td class="bg-primary text-white">Receiver Preplot File:</td>
+            <td class="text-primary fw-bold">{{ rec_preplot_summary.FileNames }}</td>
+          </tr>
+          <tr>
+            <td class="bg-primary text-white">Total Receiver Lines:</td>
+            <td class="text-primary fw-bold">{{ rec_preplot_summary.LinesCount }}</td>
+          </tr>
+          <tr>
+            <td class="bg-primary text-white">Total Receiver Points:</td>
+            <td class="text-primary fw-bold">{{ rec_preplot_summary.TotalPoints }}</td>
+          </tr>
+          <tr>
+            <td class="bg-primary text-white">Avg. Points per line:</td>
+            <td class="text-primary fw-bold">{{ rec_preplot_summary.AvgPointsPerLine }}</td>
+          </tr>
+          <tr>
+            <td class="bg-primary text-white">Avg. line length:</td>
+            <td class="text-primary fw-bold">{{ rec_preplot_summary.AvgRealLineLength|floatformat:1 }}</td>
+          </tr>
+          <tr>
+               <td class="bg-primary text-white">Max Points per Line({{ rec_preplot_summary.LongestPointsLine }}):</td>
+               <td class="text-primary fw-bold">{{ rec_preplot_summary.LongestPoints }}</td>
+          </tr>
+          <tr>
+               <td class="bg-primary text-white">Min Points per Line({{ rec_preplot_summary.ShortestPointsLine }}):</td>
+               <td class="text-primary fw-bold">{{ rec_preplot_summary.ShortestPoints }}</td>
+          </tr>
+          <tr>
+               <td class="bg-primary text-white">Longest Line({{ rec_preplot_summary.LongestLengthLine }}):</td>
+               <td class="text-primary fw-bold">{{ rec_preplot_summary.LongestLength|floatformat:1 }}</td>
+          </tr>
+          <tr>
+               <td class="bg-primary text-white">Shortest Line({{ rec_preplot_summary.ShortestLengthLine }}):</td>
+               <td class="text-primary fw-bold">{{ rec_preplot_summary.ShortestLength|floatformat:1 }}</td>
+          </tr>
+        {% else %}
+          <tr class="text-muted">
+            <td colspan="2">
+              <i class="fas fa-info-circle me-1"></i>
+              No receiver preplot data available
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+    </div>

@@ -1,0 +1,15 @@
+{% if layers_list %}
+    {% for l in layers_list %}
+         <tr>
+         <td><input class="form-control layers-checkbox"></td>
+         <td>{{ l.Name }}</td>
+         <td>{{ l.Points }}</td>
+         <td>{{ l.Attr1Name }}</td>
+         <td>{{ l.Attr2Name }}</td>
+         <td>{{ l.Attr3Name }}</td>
+         <td>{{ l.Comments }}</td>
+         </tr>
+    {% endfor %}
+{% else %}
+    <td colspan="6"> No data </td>
+{% endif %}

@@ -31,6 +31,11 @@
               QC
             </button>
           </li>
+           <li class="nav-item" role="presentation">
+               <button class="nav-link" id="folder-tab" data-bs-toggle="tab" data-bs-target="#folder-page" type="button" role="tab">
+                   Folders
+               </button>
+           </li> 
         </ul>
 
         <form method="post">
@@ -286,6 +291,34 @@
                 </div>
               </div>
             </div>
+            <!-- ===================== FOLDERS TAB ===================== -->
+            <div class="tab-pane fade" id="folder-page" role="tabpanel">
+                 <div class="input-group">
+                      <label class="form-label">Shapes folder</label>
+                      <input type="text" name="shapes_folder" class="form-control"
+                         value="{{ folders.shapes_folder }}">
+                </div>
+                <div class="input-group">
+                      <label class="form-label">Image's folder</label>
+                      <input type="text" name="image_folder" class="form-control  ms-2"
+                         value="{{ folders.image_folder }}">
+                </div>
+                <div class="input-group">
+                      <label class="form-label">Project folder</label>
+                      <input type="text" name="local_prj_folder" class="form-control ms-2"
+                         value="{{ folders.local_prj_folder }}">
+                </div>
+                <div class="input-group">
+                      <label class="form-label">BB folder</label>
+                      <input type="text" name="bb_folder" class="form-control  ms-2"
+                         value="{{ folders.bb_folder }}">
+                </div>
+                <div class="input-group">
+                      <label class="form-label">SEGY folder</label>
+                      <input type="text" name="segy_folder" class="form-control  ms-2"
+                         value="{{ folders.segy_folder }}">
+                </div>
+            </div><!--End of folder tab-pane-->  
           </div>
 
           <hr class="my-4">

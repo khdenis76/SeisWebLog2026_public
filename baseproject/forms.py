@@ -81,3 +81,21 @@ class BaseProjectUploadForm(forms.Form):
         ),
         help_text="You can select many files at once.",
     )
+class BaseProjectCSVForm(forms.Form):
+    files = forms.FileField(
+        required=True,
+        label="Files",
+        widget=MultiFileInput(
+            attrs={
+                "class": "form-control",
+            }
+        ),
+        help_text="You can select many files at once.",
+    )
+    layer=forms.TextInput(attrs={
+                "class": "form-control",
+            })
+    point = forms.TextInput(attrs={
+        "class": "form-control",
+    })
+

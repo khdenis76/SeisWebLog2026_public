@@ -23,3 +23,9 @@ export async function ensureLoadingModal() {
 
   return modalEl;
 }
+export function cleanupModalArtifacts() {
+  document.body.classList.remove("modal-open");
+  document.body.style.removeProperty("overflow");
+  document.body.style.removeProperty("padding-right");
+  document.querySelectorAll(".modal-backdrop").forEach(b => b.remove());
+}

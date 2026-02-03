@@ -1,0 +1,19 @@
+<div class="clearfix">
+    <button class="btn btn-danger btn-sm me-2 float-end" id="deleteLayersBtn">
+            <i class="fas fa-trash-can me-2"></i> DELETE
+    </button>
+</div>
+<table class="table table-hover" id="layers-table">
+    <thead>
+          <th> <input type ="checkbox" id="mainLayersCheckbox"> </th>
+          <th>Name</th>
+          <th>Total points</th>
+          <th>Attribute1</th>
+          <th>Attribute2</th>
+          <th>Attribute3</th>
+          <th>Description</th>
+    </thead>
+    <tbody id="layersTbody">
+        {{ layers_body|safe }}
+    </tbody>
+</table>

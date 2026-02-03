@@ -67,7 +67,12 @@ class Project(models.Model):
         Path to per-project SQLite database.
         """
         return self.data_dir / "project.sqlite3"
-
+    @property
+    def hdr_dir(self)->Path:
+        """
+         Path to folder with headers.
+        """
+        return self.abs_path / "headers"
     @property
     def export_dir(self) -> Path:
         return self.abs_path / "export"
@@ -84,6 +89,28 @@ class Project(models.Model):
     def export_sps21(self) -> Path:
         return self.export_dir / "sps_v21"
 
+    @property
+    def export_shapes(self)->Path:
+        return self.export_dir / "shapes"
+
+    @property
+    def export_gpkg(self)->Path:
+        return self.export_dir / "gpkg"
+    @property
+    def export_rline_shapes(self)->Path:
+        return self.export_shapes / "rec_line_shapes"
+
+    @property
+    def export_rpoint_shapes(self) -> Path:
+        return self.export_shapes / "rec_point_shapes"
+
+    @property
+    def export_sline_shapes(self) -> Path:
+        return self.export_shapes / "sou_line_shapes"
+
+    @property
+    def export_spoint_shapes(self) -> Path:
+        return self.export_shapes / "sou_point_shapes"
     @property
     def logs_dir(self) -> Path:
         return self.abs_path / "logs"
@@ -278,12 +305,20 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
     instance.export_csv.mkdir(parents=True, exist_ok=True)
     instance.export_sps1.mkdir(parents=True, exist_ok=True)
     instance.export_sps21.mkdir(parents=True, exist_ok=True)
+    instance.export_shapes.mkdir(parents=True, exist_ok=True)
 
+    instance.export_rline_shapes.mkdir(parents=True, exist_ok=True)
+    instance.export_rpoint_shapes.mkdir(parents=True, exist_ok=True)
+    instance.export_sline_shapes.mkdir(parents=True, exist_ok=True)
+    instance.export_spoint_shapes.mkdir(parents=True, exist_ok=True)
+    instance.export_gpkg.mkdir(parents=True, exist_ok=True)
     # other folders
     instance.logs_dir.mkdir(parents=True, exist_ok=True)
     instance.reports_dir.mkdir(parents=True, exist_ok=True)
     instance.plots_dir.mkdir(parents=True, exist_ok=True)
+    instance.hdr_dir.mkdir(parents=True,exist_ok=True)
     instance.tmp_dir.mkdir(parents=True, exist_ok=True)
+
 
     # SQLite DB file
     db_path = instance.db_path

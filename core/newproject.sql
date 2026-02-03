@@ -31,11 +31,18 @@ CREATE TABLE  IF NOT EXISTS  RLPreplot (
                               UPoints INTEGER,
                               FirstPoint INTEGER,
                               LastPoint INTEGER,
+                              MinPoint INTEGER,
+                              MaxPoint INTEGER,
+                              RealStartX REAL,
+                              RealStartY REAL,
+                              RealEndX REAL,
+                              RealEndY REAL,
                               StartX REAL,
                               StartY REAL,
                               EndX REAL,
                               EndY REAL,
                               LineLength REAL DEFAULT 0,
+                              RealLineLength REAL DEFAULT 0,
                               LineBearing REAL DEFAULT 0,
                               CalcLineBearing REAL DEFAULT 0,
 
@@ -102,27 +109,50 @@ CREATE TABLE  IF NOT EXISTS  SLPreplot (
                               Line INTEGER,
                               TierLine INTEGER UNIQUE, -- Unique constraint added to TierLine column
                               Points INTEGER,
+                              UPoints INTEGER,
                               FirstPoint INTEGER,
                               LastPoint INTEGER,
+                              MinPoint INTEGER,
+                              MaxPoint INTEGER,
+                              RealStartX REAL,
+                              RealStartY REAL,
+                              RealEndX REAL,
+                              RealEndY REAL,
                               StartX REAL,
                               StartY REAL,
                               EndX REAL,
                               EndY REAL,
                               LineLength REAL DEFAULT 0,
+                              RealLineLength REAL DEFAULT 0,
                               LineBearing REAL DEFAULT 0,
+                              CalcLineBearing REAL DEFAULT 0,
+
                               isLineClicked INTEGER DEFAULT 0,
                               isLineDeployed INTEGER DEFAULT 0,
                               isLinePinged INTEGER DEFAULT 0,
                               isLineRecovered INTEGER DEFAULT 0,
+                              isMessaged INTEGER DEFAULT 0,
+                              isValidated INTEGER DEFAULT 0,
+
                               RPIndex INTEGER DEFAULT 0,
                               Tier INTEGER DEFAULT 1,
+
                               PointsDep INTEGER DEFAULT 0,
                               PointsRec INTEGER DEFAULT 0,
                               PointsProc INTEGER DEFAULT 0,
+
                               Comments TEXT DEFAULT '',
+                              Message Text DEFAULT '',
+                              ValidationTime TEXT,
+
                               Spare1 INTEGER DEFAULT 0,
                               Spare2 INTEGER DEFAULT 0,
                               Spare3 INTEGER DEFAULT 0,
+
+                              Spare4 REAL DEFAULT 0,
+                              Spare5 REAL DEFAULT 0,
+                              Spare6 REAL DEFAULT 0,
+
                               File_FK INTEGER,
                               FOREIGN KEY (File_FK) REFERENCES Files(ID)  ON DELETE CASCADE,
                               UNIQUE (TierLine, ID)
@@ -133,10 +163,12 @@ CREATE TABLE  IF NOT EXISTS  SPPreplot (
                               Line INTEGER,
                               TierLine INTEGER,
                               Point INTEGER,
-                              PointIndex INTEGER DEFAULT 0,
+                              PointCode TEXT DEFAULT "",
+                              PointIndex INTEGER DEFAULT 1,
                               LinePoint INTEGER DEFAULT 0,
-                              TLinePoint REAL  UNIQUE,
+                              TLinePoint REAL,
                               LinePointIndex REAL DEFAULT 0,
+                              TLinePointIndex REAL DEFAULT 0,
                               X REAL,
                               Y REAL,
                               Z REAL,
@@ -148,8 +180,17 @@ CREATE TABLE  IF NOT EXISTS  SPPreplot (
                               File_FK INTEGER,
                               FOREIGN KEY (Line_FK) REFERENCES SLPreplot(ID) ON DELETE CASCADE,
                               FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE,
-                              UNIQUE(LinePointIndex, ID)
+                              UNIQUE(ID)
                             );
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sppreplot
+       ON SPPreplot (Tier, Line, Point, PointIndex);
+-- for fast WHERE Line_FK = ?
+CREATE INDEX IF NOT EXISTS ix_sppreplot_linefk ON SPPreplot(Line_FK);
+CREATE INDEX IF NOT EXISTS ix_rppreplot_linefk ON RPPreplot(Line_FK);
+-- for fast ORDER BY Point and fast MIN/MAX by Point
+CREATE INDEX IF NOT EXISTS ix_sppreplot_linefk_point ON SPPreplot(Line_FK, Point);
+CREATE INDEX IF NOT EXISTS ix_rppreplot_linefk_point ON RPPreplot(Line_FK, Point);
+
 --Create DSR table
 CREATE TABLE  IF NOT EXISTS  "DSR" (
                     "ID" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -601,3 +642,120 @@ CREATE TABLE  IF NOT EXISTS  RPSolution (
 		FOREIGN KEY (Solution_FK) REFERENCES Solutions(ID) ON DELETE CASCADE,
 		FOREIGN KEY (PP_Line_FK) REFERENCES RLPreplot(ID) ON DELETE CASCADE,
 		FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE);
+CREATE TABLE  IF NOT EXISTS  CSVLayers (
+    ID INTEGER PRIMARY KEY,
+    Name TEXT,
+    Points INTEGER,
+    Attr1Name TEXT,
+    Attr2Name TEXT,
+    Attr3Name TEXT,
+    Comments TEXT
+);
+CREATE TABLE  IF NOT EXISTS  CSVpoints (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Layer_FK INTEGER,
+    Point TEXT,
+    X REAL,
+    Y REAL,
+    Z REAL,
+    Attr1 REAL,
+    Attr2 REAL,
+    Attr3 REAL,
+    FOREIGN KEY (Layer_FK) REFERENCES CSVLayer(ID) ON DELETE CASCADE);
+CREATE VIEW IF NOT EXISTS PreplotSummaryAllFiles AS
+
+SELECT
+  'RLPreplot' AS TableName,
+
+  (SELECT COUNT(*) FROM RLPreplot) AS LinesCount,
+  (SELECT SUM(COALESCE(Points,0)) FROM RLPreplot) AS TotalPoints,
+  (SELECT ROUND(AVG(COALESCE(Points,0)),2) FROM RLPreplot) AS AvgPointsPerLine,
+  (SELECT ROUND(AVG(COALESCE(RealLineLength,0)),2) FROM RLPreplot) AS AvgRealLineLength,
+
+  (SELECT MIN(Line) FROM RLPreplot) AS MinLine,
+  (SELECT MAX(Line) FROM RLPreplot) AS MaxLine,
+
+  (SELECT COUNT(DISTINCT File_FK) FROM RLPreplot) AS FilesCount,
+
+  (SELECT GROUP_CONCAT(FileName, '; ')
+     FROM (
+       SELECT DISTINCT COALESCE(f.FileName, 'NULL') AS FileName
+       FROM RLPreplot r
+       LEFT JOIN Files f ON f.ID = r.File_FK
+       ORDER BY FileName
+     )
+  ) AS FileNames,
+
+  (SELECT Line FROM RLPreplot ORDER BY COALESCE(Points,0) DESC, ID ASC LIMIT 1) AS LongestPointsLine,
+  (SELECT COALESCE(Points,0) FROM RLPreplot ORDER BY COALESCE(Points,0) DESC, ID ASC LIMIT 1) AS LongestPoints,
+
+  (SELECT Line FROM RLPreplot
+     ORDER BY (COALESCE(Points,0)=0), COALESCE(Points,0) ASC, ID ASC
+     LIMIT 1
+  ) AS ShortestPointsLine,
+  (SELECT COALESCE(Points,0) FROM RLPreplot
+     ORDER BY (COALESCE(Points,0)=0), COALESCE(Points,0) ASC, ID ASC
+     LIMIT 1
+  ) AS ShortestPoints,
+
+  (SELECT Line FROM RLPreplot ORDER BY COALESCE(RealLineLength,0) DESC, ID ASC LIMIT 1) AS LongestLengthLine,
+  (SELECT COALESCE(RealLineLength,0) FROM RLPreplot ORDER BY COALESCE(RealLineLength,0) DESC, ID ASC LIMIT 1) AS LongestLength,
+
+  (SELECT Line FROM RLPreplot
+     ORDER BY (COALESCE(RealLineLength,0)=0), COALESCE(RealLineLength,0) ASC, ID ASC
+     LIMIT 1
+  ) AS ShortestLengthLine,
+  (SELECT COALESCE(RealLineLength,0) FROM RLPreplot
+     ORDER BY (COALESCE(RealLineLength,0)=0), COALESCE(RealLineLength,0) ASC, ID ASC
+     LIMIT 1
+  ) AS ShortestLength
+
+UNION ALL
+
+SELECT
+  'SLPreplot' AS TableName,
+
+  (SELECT COUNT(*) FROM SLPreplot) AS LinesCount,
+  (SELECT SUM(COALESCE(Points,0)) FROM SLPreplot) AS TotalPoints,
+  (SELECT ROUND(AVG(COALESCE(Points,0)),2) FROM SLPreplot) AS AvgPointsPerLine,
+  (SELECT ROUND(AVG(COALESCE(RealLineLength,0)),2) FROM SLPreplot) AS AvgRealLineLength,
+
+  (SELECT MIN(Line) FROM SLPreplot) AS MinLine,
+  (SELECT MAX(Line) FROM SLPreplot) AS MaxLine,
+
+  (SELECT COUNT(DISTINCT File_FK) FROM SLPreplot) AS FilesCount,
+
+  (SELECT GROUP_CONCAT(FileName, '; ')
+     FROM (
+       SELECT DISTINCT COALESCE(f.FileName, 'NULL') AS FileName
+       FROM SLPreplot s
+       LEFT JOIN Files f ON f.ID = s.File_FK
+       ORDER BY FileName
+     )
+  ) AS FileNames,
+
+  (SELECT Line FROM SLPreplot ORDER BY COALESCE(Points,0) DESC, ID ASC LIMIT 1) AS LongestPointsLine,
+  (SELECT COALESCE(Points,0) FROM SLPreplot ORDER BY COALESCE(Points,0) DESC, ID ASC LIMIT 1) AS LongestPoints,
+
+  (SELECT Line FROM SLPreplot
+     ORDER BY (COALESCE(Points,0)=0), COALESCE(Points,0) ASC, ID ASC
+     LIMIT 1
+  ) AS ShortestPointsLine,
+  (SELECT COALESCE(Points,0) FROM SLPreplot
+     ORDER BY (COALESCE(Points,0)=0), COALESCE(Points,0) ASC, ID ASC
+     LIMIT 1
+  ) AS ShortestPoints,
+
+  (SELECT Line FROM SLPreplot ORDER BY COALESCE(RealLineLength,0) DESC, ID ASC LIMIT 1) AS LongestLengthLine,
+  (SELECT COALESCE(RealLineLength,0) FROM SLPreplot ORDER BY COALESCE(RealLineLength,0) DESC, ID ASC LIMIT 1) AS LongestLength,
+
+  (SELECT Line FROM SLPreplot
+     ORDER BY (COALESCE(RealLineLength,0)=0), COALESCE(RealLineLength,0) ASC, ID ASC
+     LIMIT 1
+  ) AS ShortestLengthLine,
+  (SELECT COALESCE(RealLineLength,0) FROM SLPreplot
+     ORDER BY (COALESCE(RealLineLength,0)=0), COALESCE(RealLineLength,0) ASC, ID ASC
+     LIMIT 1
+  ) AS ShortestLength;
+
+

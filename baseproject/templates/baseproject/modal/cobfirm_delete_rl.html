@@ -1,0 +1,30 @@
+<div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">Delete selected lines</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <div id="deleteSummary" class="small text-muted mb-2"></div>
+        Are you sure you want to delete selected lines?
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button id="btnConfirmDelete" type="button" class="btn btn-danger">
+          Yes, delete
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+<script>
+  window.RL_DELETE_URL = "{% url 'delete_selected_receiver_lines' %}";
+  window.SL_DELETE_URL = "{% url 'delete_selected_source_lines' %}";
+</script>

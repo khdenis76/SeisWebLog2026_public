@@ -1,0 +1,86 @@
+{% load static %}
+<div class="container-fluid">
+    <div class="card shadow">
+        <div class="card-header bg-primary text-white clearfix">
+            <span><i class="fas fa-gears me-2"></i> Main project settings</span>
+             <span class="clearfix">
+                          <button type="button"
+                                   class="btn btn-sm float-end"
+                                   data-bs-toggle="collapse"
+                                   data-bs-target="#rightpreplotColumn"
+                                   aria-expanded="true"
+                                   onclick="$('#leftpreplotColumn').toggleClass('col-12 col-4');
+                                            $('#leftexpandIcon').toggleClass('fa-compress fa-expand');
+                                             $('#rightpreplotColumn').toggle();
+                          ">
+                                <i class="fas fa-expand" id="leftexpandIcon"></i>
+                          </button>
+                          <button id="show-loader-button" class="btn btn-sm float-end" type="button" role="button"
+                                   data-bs-toggle="collapse"
+                                   data-bs-target="#preplotBody"
+                                   aria-expanded="true"
+                                  onclick="$('#toggle-icon').toggleClass('fa-window-maximize fa-window-minimize');
+                                           $('#preplotBody').toggle();// Toggle icon class
+                                          ">
+                          <i class="fas fa-window-minimize" id="toggle-icon"></i>
+                          </button>
+
+
+             </span>
+
+        </div>
+         <div class="collapse show card-body" id ="preplotBody">
+              <div class="tab-content" id="nav-tabContent">
+                <nav>
+                    <div class="nav nav-tabs" id="nav-tab" role="tablist">
+                      <button class="nav-link active" id="rec-prep-tab" data-bs-toggle="tab"
+                        data-bs-target="#rec-prep-page" type="button"
+                        role="tab" aria-controls="rec-prep-page" aria-selected="true"
+                      data-bs-placement="top" data-bs-custom-class="custom-tooltip" title="PREPLOT RECEIVER LINES">
+                         <i class="fas fa-ship"></i> REC
+                      </button>
+                      <button class="nav-link text-red" id="sou-prep-tab" data-bs-toggle="tab"
+                              data-bs-target="#sou-prep-page" type="button" role="tab"
+                              aria-controls="sou-prep-page" aria-selected="false"
+                      data-bs-placement="top" data-bs-custom-class="custom-tooltip" title="PREPLOT SOURCE LINES">
+                          <i class="fas fa-bomb"></i> SOU
+                      </button>
+                      <button class="nav-link" id="template-tab" data-bs-toggle="tab"
+                              data-bs-target="#template-page" type="button" role="tab"
+                              aria-controls="template-page" aria-selected="false">
+                          <i class="fas fa-gun"></i>TEMP
+                      </button>
+                      <button class="nav-link" id="layers-tab" data-bs-toggle="tab"
+                              data-bs-target="#layers-page" type="button" role="tab"
+                              aria-controls="layers-page" aria-selected="false">
+                          <i class="fas fa-layer-group"></i>LAYERS
+                      </button>
+
+                      <button class="nav-link" id="tools-tab" data-bs-toggle="tab"
+                              data-bs-target="#tools-page" type="button" role="tab"
+                              aria-controls="tools-page" aria-selected="false">
+                          <i class="fas fa-tools"></i> TOOLS</button>
+                    </div>
+                </nav>
+              </div>
+              <div class="tab-content" id="nav-tabContent">
+        <div class="tab-pane fade show active" id="rec-prep-page" role="tabpanel" aria-labelledby="rec-prep-tab" tabindex="0">
+            {% include "baseproject/partials/rlpreplot_table.html"%}
+        </div>
+        <div class="tab-pane fade" id="sou-prep-page" role="tabpanel" aria-labelledby="sou-prep-tab" tabindex="0">
+            {% include "baseproject/partials/slpreplot_table.html"%}
+        </div>
+        <div class="tab-pane fade" id="template-page" role="tabpanel" aria-labelledby="template-tab" tabindex="0">...</div>
+        <div class="tab-pane fade" id="layers-page" role="tabpanel" aria-labelledby="layers-tab" tabindex="0">
+           {% include "baseproject/partials/layers_table.html"%}
+        </div><!--End of layers-page-->
+        <div class="tab-pane fade" id="tools-page" role="tabpanel" aria-labelledby="tools-tab" tabindex="0">
+            {% include "baseproject/partials/tools_buttons.html"%}
+
+        </div>
+    </div>
+         </div><!--End of card-body-->
+   </div><!--End of card-->
+   {% include "baseproject/partials/preplot_summary.html" %}
+
+</div>

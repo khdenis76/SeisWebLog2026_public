@@ -1,0 +1,52 @@
+<div class="card shadow w-100">
+    <div class="card-body">
+         <div class="table-scroll" style="--table-height: 30vh">
+    <table class="table table-hover table-sm" id="shp-in-db-table" data-save-url="{% url 'project_shapes_update' %}">
+        <thead>
+              <th>#</th>
+              <th>
+                  <div class="form-check form-switch">
+                     <input type="checkbox" role="switch" class="form-check-input" id='MainCheckbox' onclick="$('#shapes_in_db_table tbody .form-check-input').prop('checked',this.checked)">
+                  </div>
+              </th>
+
+              <th>File Name</th>
+              <th>Fill shape</th>
+              <th>Fill Color</th>
+              <th>Line Color</th>
+              <th>Line Width</th>
+        </thead>
+        <tbody id="prj-shp-body">
+            {% for s in prj_shapes %}
+                <tr data-fullname="{{ s.full_name }}">
+                <td>{{ forloop.counter }}</td>
+                <td>
+                    <div class="form-check form-switch">
+                         <input role="switch" class="form-check-input" type="checkbox" autocomplete="off" value="{{ s.full_name }}">
+                    </div>
+                </td>
+                <td>{{ s.file_name }}</td>
+                {%  if s.is_filled == 1 %}
+                        <td><input type="checkbox"  class="is_shape_fill" autocomplete="off" value="1" checked></td>
+                {% else %}
+                        <td><input type="checkbox"  class="is_shape_fill" autocomplete="off" value="0"></td>
+                {% endif %}
+                <td><input type="color" class="form-control form-control-color fill_color" autocomplete="off" value="{{s.fill_color}}" title="Choose your color"></td>
+                <td><input type="color" class="form-control form-control-color line_color" autocomplete="off" value="{{s.line_color}}" title="Choose your color"></td>
+                <td><input type="number" min="1" max="10" step="1"  value="{{s.line_width}}" autocomplete="off" class="form-control line_width"></td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+    </div>
+    <div class="card-footer clearfix">
+        <button type="button"
+                class="btn btn-sm btn-danger float-end"
+                id="btnDeleteShapes"
+                data-post-url="{% url 'project_shapes_delete' %}">
+            <i class="fas fa-trash-can me-2"></i> DELETE
+        </button>
+    </div>
+</div>
+

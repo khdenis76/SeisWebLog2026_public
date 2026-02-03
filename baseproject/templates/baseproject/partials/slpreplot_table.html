@@ -1,13 +1,13 @@
 <div class="container-fluid clearfix m-1">
-    <button type="button" id="btnDeleteRL" class="btn btn-sm btn-danger float-end me-2" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Delete selected lines">
+    <button type="button" id="btnDeleteSL" class="btn btn-sm btn-danger float-end me-2" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="Delete selected source lines">
         <i class="fas fa-recycle"></i>
     </button>
 </div>
 <div class="table-scroll border rounded">
-  <table class="table table-hover table-sm table-striped mb-0" id="rlpreplotTable">
+  <table class="table table-hover table-sm table-striped mb-0" id="slpreplotTable">
     <thead class="table-light">
       <tr>
-       <th><input type="checkbox" id="MainRLPreplotCheckbox" data-bs-toggle="tooltip" data-bs-title="Click to select/unselect all lines"></th>
+       <th><input type="checkbox" id="MainSLPreplotCheckbox"></th>
         <th>Line</th>
         <th>Points</th>
         <th>SOL</th>
@@ -16,10 +16,10 @@
         <th>Tier</th>
       </tr>
     </thead>
-    <tbody id="rlBody">
-      {% for r in rl_rows %}
+    <tbody id="slBody">
+      {% for r in sl_rows %}
         <tr>
-          <td><input type="checkbox" class="rl-preplot-checkbox" data-line-id="{{ r.ID }}" data-tier-line ="{{ r.TierLine }}"></td>
+          <td><input type="checkbox" class="sl-preplot-checkbox" data-line-id="{{ r.ID }}" data-tier-line ="{{ r.TierLine }}"></td>
           <td>{{ r.Line }}</td>
           <td>{{ r.Points }}</td>
           <td>{{ r.FirstPoint }}</td>

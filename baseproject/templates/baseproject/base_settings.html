@@ -19,33 +19,38 @@
       <button type="button"
               class="btn btn-sm btn-primary"
               data-bs-toggle="modal"
+              data-bs-target="#csvuploadModal"
+              title="Upload csv layer" >
+          <i class="fas fa-file-csv"></i>
+
+      </button>
+      <button type="button"
+              class="btn btn-sm btn-primary"
+              data-bs-toggle="modal"
               data-bs-target="#uploadModal"
-              title="Upload files">
+              title="Upload files"
+      >
         <i class="fa-solid fa-upload"></i>
       </button>
     </div>
   </div>
 
 {% include "baseproject/modal_load_file.html" %}
+{% include "baseproject/modal/csv_upload_modal.html" %}
+{% include "baseproject/modal/cobfirm_delete_rl.html" %}
+
 <div class="row">
-    <div class="col-4">
-        <div class="clearfix">
-         <button type="button"
-                     class="btn btn-sm float-end"
-                     onclick="resize_left_collumn()">
-                 <i class="fas fa-maximize"></i>
-             </button>
-        </div>
-        {% include "baseproject/partials/rlpreplot_table.html"%}
+    <div class="col-4 show collapse" id="leftpreplotColumn">
+
+        {% include "baseproject/preplot_left_panel.html" %}
+
     </div><!--End of left column-->
-    <div class="col-8">
-        <div class="clearfix">
-           <button type="button"
-                     class="btn btn-sm float-end"
-                     onclick="resize_left_collumn()">
-                 <i class="fas fa-maximize"></i>
-             </button>
-        </div>
+    <div class="col-8 show collapse" id="rightpreplotColumn">
+        {% include "baseproject/preplot_right_panel.html" %}
+
+
+
+
     </div><!-- end of right collumn-->
 </div>
 </div><!-- End of container fluid-->

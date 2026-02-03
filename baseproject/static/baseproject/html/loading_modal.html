@@ -1,13 +1,31 @@
+{% load static %}
+
 <div class="modal fade" id="loadingModal" tabindex="-1"
      data-bs-backdrop="static" data-bs-keyboard="false"
      aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-body text-center py-4">
-        <div class="spinner-border" role="status" aria-hidden="true"></div>
+
+        <div id="loading" style="width:200px;margin:auto"></div>
         <div class="mt-3 fw-semibold">Uploading…</div>
         <div class="text-muted small">Please wait</div>
+
       </div>
     </div>
   </div>
 </div>
+
+
+<script>
+const loadingAnim = lottie.loadAnimation({
+  container: document.getElementById('loading'),
+  renderer: 'svg',
+  loop: true,
+  autoplay: true,
+  path: "{% static 'baseproject/lottie/waiting.json' %}"
+});
+
+// чуть замедлим — выглядит как «ожидание»
+loadingAnim.setSpeed(0.8);
+</script>

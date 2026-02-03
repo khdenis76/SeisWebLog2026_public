@@ -1,6 +1,8 @@
 # core/views.py
 from __future__ import annotations
 
+from pathlib import Path
+
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import logout, login as auth_login
 from django.contrib.auth.forms import UserCreationForm
@@ -16,7 +18,7 @@ from .projectdb import (
     MainSettings,
     GeometrySettings,
     NodeQCSettings,
-    GunQCSettings,
+    GunQCSettings, FolderSettings,
 )
 
 
@@ -255,6 +257,7 @@ def project_settings_view(request):
         raise PermissionDenied
 
     pdb = ProjectDB(project.db_path)
+
     pdb.init_db()
     pdb.run_sql_file("core/newproject.sql")
 
@@ -271,6 +274,12 @@ def project_settings_view(request):
             return int(v)
         except ValueError:
             return int(default)
+    def f_str(name:str, default: str="NA"):
+        v=request.POST.get(name, default).strip()
+        try:
+            return Path(v)
+        except ValueError:
+            return str(default)
 
     if request.method == "POST":
         # ---- MAIN ----
@@ -327,11 +336,19 @@ def project_settings_view(request):
             max_xl_offset=f_float("gun_max_xl_offset", "0"),
             max_radial_offset=f_float("gun_max_radial_offset", "0"),
         )
+        folders_qc = FolderSettings(
+            shapes_folder=f_str("shapes_folder", ""),
+            image_folder=f_str("image_folder", ""),
+            bb_folder=f_str("bb_folder", ""),
+            local_prj_folder=f_str("local_prj_folder", ""),
+            segy_folder=f_str("segy_folder", ""),
 
+        )
         pdb.update_main(main)
         pdb.update_geometry(geom)
         pdb.update_node_qc(node_qc)
         pdb.update_gun_qc(gun_qc)
+        pdb.update_folders(folders_qc)
 
         return redirect("project_settings")
 
@@ -340,7 +357,7 @@ def project_settings_view(request):
     geom = pdb.get_geometry()
     node_qc = pdb.get_node_qc()
     gun_qc = pdb.get_gun_qc()
-
+    folders_qc=pdb.get_folders()
     return render(
         request,
         "projects/settings.html",  # ВАЖНО: templates/projects/settings.html
@@ -350,5 +367,6 @@ def project_settings_view(request):
             "geom": geom,
             "node_qc": node_qc,
             "gun_qc": gun_qc,
+            "folders":folders_qc
         },
     )

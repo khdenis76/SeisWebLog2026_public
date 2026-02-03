@@ -1,6 +1,6 @@
 /* Sticky table header */
 .table-scroll {
-  height: 70vh;
+  height: var(--table-height, 70vh);
   overflow: auto;
 }
 
