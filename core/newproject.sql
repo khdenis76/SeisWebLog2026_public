@@ -649,6 +649,9 @@ CREATE TABLE  IF NOT EXISTS  CSVLayers (
     Attr1Name TEXT,
     Attr2Name TEXT,
     Attr3Name TEXT,
+    PointStyle TEXT DEFAULT 'circle',
+    PointColor TEXT DEFAULT '#000000',
+    PointSize INTEGER DEFAULT 1,
     Comments TEXT
 );
 CREATE TABLE  IF NOT EXISTS  CSVpoints (
@@ -658,9 +661,9 @@ CREATE TABLE  IF NOT EXISTS  CSVpoints (
     X REAL,
     Y REAL,
     Z REAL,
-    Attr1 REAL,
-    Attr2 REAL,
-    Attr3 REAL,
+    Attr1 TEXT DEFAULT '',
+    Attr2 INTEGER DEFAULT 0,
+    Attr3 REAL DEFAULT 0,
     FOREIGN KEY (Layer_FK) REFERENCES CSVLayers(ID) ON DELETE CASCADE);
 CREATE TABLE "project_shapes" (
                                 "id" INTEGER,
