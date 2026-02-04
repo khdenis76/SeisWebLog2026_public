@@ -3,7 +3,7 @@ import { initPreplotUpload } from "./upload.js";
 import { initRLCheckboxes,initSLCheckboxes} from "./rlpreplotTable.js";
 import {initDeleteRL,initDeletePreplot} from "./deletepreplot.js"
 import { updatePreplotTable } from "./updaterltable.js";
-import {initShapes,initMainShapeCheckBox, initAddShapeButton} from "./shapes.js"
+import {initMainShapeCheckBox, initAddShapeButton} from "./shapes.js"
 import { initProjectShapesAutoSave } from "./shapes.js"
 import {initDeleteShapesButton, forceInputsFromHtmlDefaults} from "./delete_shapes.js"
 import {initShapeFolderSearchButton} from "./shapes_search.js"
@@ -16,7 +16,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initRLCheckboxes();
   initSLCheckboxes();
   initPreplotUpload();
-  initShapes();
+  //initShapes();
   initMainShapeCheckBox();
   initAddShapeButton();
   initProjectShapesAutoSave();

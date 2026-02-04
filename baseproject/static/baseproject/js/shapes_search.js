@@ -30,13 +30,14 @@ export function initShapeFolderSearchButton() {
 
       const data = await resp.json();
 
+
       if (!resp.ok) {
         alert(data.error || "Failed to load shapes");
         return;
       }
+      console.log("List of Shapes updated")
+      tbody.innerHTML=data.shapes_in_folder
 
-      // 🔥 Обновляем только tbody
-      tbody.innerHTML = data.html;
 
     } catch (err) {
       console.error(err);

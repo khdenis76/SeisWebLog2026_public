@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 import pandas as pd
+from bokeh.layouts import column, row
+from bokeh.models import Button, CustomJS
 from django.shortcuts import render
 
 # Create your views here.
@@ -109,7 +111,41 @@ def base_project_settings_view(request):
     summary = pdb.get_preplot_summary_allfiles()
     preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
     preplot_map = pgr.add_project_shapes_layers(preplot_map,default_src_epsg=pdb.get_main().epsg)
-    pp_map_script,pp_map_div = components(preplot_map)
+    toggle_legend_btn = Button(
+        label="Hide legend",
+        button_type="primary",
+        width=120,
+    )
+
+    toggle_legend_btn.js_on_click(
+        CustomJS(
+            args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
+            code="""
+            legend.visible = !legend.visible;
+            btn.label = legend.visible ? "Hide legend" : "Show legend";
+            """
+        )
+    )
+    cycle_legend_pos_btn = Button(
+        label="Legend position",
+        button_type="default",
+        width=150,
+    )
+
+    cycle_legend_pos_btn.js_on_click(
+        CustomJS(
+            args=dict(legend=preplot_map.legend[0]),
+            code="""
+            const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
+            const current = legend.location;
+            const idx = positions.indexOf(current);
+            legend.location = positions[(idx + 1) % positions.length];
+            """
+        )
+    )
+    controls = row(toggle_legend_btn, cycle_legend_pos_btn)
+    layout = column(controls,preplot_map,sizing_mode="stretch_both")
+    pp_map_script,pp_map_div = components(layout)
     return render(
         request,
         "baseproject/base_settings.html",
@@ -538,9 +574,22 @@ def add_shape_to_db(request):
             )
             pdb.upsert_shape(shape)  # the UPSERT you created earlier
             upserted += 1
+        shp_list = get_shape_list(pdb.get_folders().shapes_folder)
+        prj_shapes = pdb.get_shapes()
+        prj_full_names = {s.full_name for s in prj_shapes}
+        for shp in shp_list:
+            shp.is_indb = 1 if shp.full_name in prj_full_names else 0
 
-        return JsonResponse({"ok": True, "upserted": upserted})
-
+        html = render_to_string(
+            "baseproject/partials/shape_folder_rows.html",
+            {"shp_list": shp_list},
+            request=request,
+        )
+        shp_html = render_to_string("baseproject/partials/prj_shp_body.html",{"prj_shapes":prj_shapes})
+        return JsonResponse({"ok": True,
+                             "shapes_in_folder": html,
+                             "prj_shp_body": shp_html,
+                             "upserted": upserted})
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
@@ -559,7 +608,8 @@ def project_shapes_update(request):
         fill_color = data.get("fill_color", "#000000")
         line_color = data.get("line_color", "#000000")
         line_width = int(data.get("line_width", 1))
-
+        hatch_pattern = data.get("hatch_pattern","")
+        line_dashed = data.get("line_dashed","")
         # active project -> your way
         user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
         project = user_settings.active_project
@@ -574,6 +624,8 @@ def project_shapes_update(request):
             fill_color=fill_color,
             line_color=line_color,
             line_width=line_width,
+            line_style=line_dashed,
+            hatch_pattern=hatch_pattern
             # line_style=data.get("line_style", "solid"),
         )
 
@@ -610,8 +662,24 @@ def project_shapes_delete(request):
 
         pdb = ProjectDB(project.db_path)
         deleted = pdb.delete_shapes(full_names)
+        shp_list = get_shape_list(pdb.get_folders().shapes_folder)
+        prj_shapes = pdb.get_shapes()
+        prj_full_names = {s.full_name for s in prj_shapes}
+        for shp in shp_list:
+            shp.is_indb = 1 if shp.full_name in prj_full_names else 0
 
-        return JsonResponse({"ok": True, "deleted": deleted})
+        html = render_to_string(
+            "baseproject/partials/shape_folder_rows.html",
+            {"shp_list": shp_list,},
+            request=request,
+        )
+        shp_html = render_to_string("baseproject/partials/prj_shp_body.html", {"prj_shapes": prj_shapes})
+
+        return JsonResponse({"ok": True,
+                             "deleted": deleted,
+                             "shapes_in_folder": html,
+                             "prj_shp_body": shp_html,
+                             })
 
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
@@ -634,18 +702,19 @@ def update_shape_folder_view(request):
 
         # 👉 твоя логика чтения shp файлов
         shp_list = get_shape_list(folder)
+        pdb.update_shapes_folder(folder)
         prj_shapes = pdb.get_shapes()
         prj_full_names = {s.full_name for s in prj_shapes}
         for shp in shp_list:
             shp.is_indb = 1 if shp.full_name in prj_full_names else 0
 
         html = render_to_string(
-            "partials/shape_folder_rows.html",
+            "baseproject/partials/shape_folder_rows.html",
             {"shp_list": shp_list},
             request=request,
         )
 
-        return JsonResponse({"ok": True, "html": html})
+        return JsonResponse({"ok": True, "shapes_in_folder": html})
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)

@@ -3,15 +3,18 @@ import sqlite3
 import pandas as pd
 import geopandas as gpd
 from pyproj import Transformer
-
+from core.projectdb import ProjectDB
 from bokeh.plotting import figure
 from bokeh.models import ColumnDataSource, HoverTool
+from bokeh.models import Button, CustomJS
+from bokeh.layouts import column
 import xyzservices.providers as xyz
 
 
 class PreplotGraphics:
     def __init__(self, db_path):
         self.db_path = Path(db_path)
+        self.pdb = ProjectDB(db_path)
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
@@ -39,7 +42,8 @@ class PreplotGraphics:
                         RealEndX,
                         RealEndY,
                         Points,
-                        RealLineLength
+                        RealLineLength,
+                        MinPoint, MaxPoint 
                     FROM {table_name}
                     WHERE RealStartX IS NOT NULL
                       AND RealStartY IS NOT NULL
@@ -58,7 +62,11 @@ class PreplotGraphics:
             })
 
         rl_df = _load_segments(rl_table)
+        number_of_rl = len(rl_df)
+        number_of_rp = rl_df["Points"].sum()
         sl_df = _load_segments(sl_table)
+        number_of_sl = len(sl_df)
+        number_of_sp = sl_df["Points"].sum()
 
         if rl_df.empty and sl_df.empty:
             raise ValueError("No RLPreplot or SLPreplot data to plot")
@@ -82,7 +90,7 @@ class PreplotGraphics:
             height=height,
             tools="pan,wheel_zoom,box_zoom,reset,save",
             active_scroll="wheel_zoom",
-            title="Preplot Map – RL + SL",
+            title=f"PREPLOT MAP FOR {self.pdb.get_main().name} – RL + SL EPSG:{src_epsg}",
         )
 
         if show_tiles:
@@ -96,7 +104,7 @@ class PreplotGraphics:
                 source=rl_src,
                 line_width=rl_line_width,
                 alpha=0.9,
-                legend_label="Receiver Lines",
+                legend_label=f"Receiver Lines {number_of_rl}/{number_of_rp}",
             )
             p.add_tools(HoverTool(
                 renderers=[rl_r],
@@ -104,6 +112,10 @@ class PreplotGraphics:
                     ("Layer", "RL"),
                     ("Line", "@Line"),
                     ("TierLine", "@TierLine"),
+                    ("Length", "@RealLineLength"),
+                    ("Num of Points", "@Points"),
+                    ("FRP", "@MinPoint"),
+                    ("LRP", "@MaxPoint"),
                 ]
             ))
 
@@ -117,7 +129,7 @@ class PreplotGraphics:
 
                 alpha=0.9,
                 color='red',
-                legend_label="Source Lines",
+                legend_label=f"Source Lines {number_of_sl}/{number_of_sp}",
             )
             p.add_tools(HoverTool(
                 renderers=[sl_r],
@@ -126,7 +138,10 @@ class PreplotGraphics:
                     ("Line", "@Line"),
                     ("TierLine", "@TierLine"),
                     ('Total Nodes','@Points'),
-                    ('Length','@RealLineLength')
+                    ('Length','@RealLineLength'),
+                    ("Num of Points", "@Points"),
+                    ("FRP", "@MinPoint"),
+                    ("LRP", "@MaxPoint"),
                 ]
             ))
 
@@ -143,6 +158,7 @@ class PreplotGraphics:
 
         p.legend.location = "top_left"
         p.legend.click_policy = "hide"
+
 
         return p
 
@@ -241,7 +257,8 @@ class PreplotGraphics:
                     COALESCE(FillColor, '#000000') AS FillColor,
                     COALESCE(LineColor, '#000000') AS LineColor,
                     COALESCE(LineWidth, 1) AS LineWidth,
-                    COALESCE(LineStyle, '') AS LineStyle
+                    COALESCE(LineStyle, '') AS LineStyle,
+                    COALESCE(HatchPattern, '') AS HatchPattern
                 FROM {shapes_table}
                 ORDER BY FileName, FullName
             """).fetchall()
@@ -259,6 +276,7 @@ class PreplotGraphics:
             line_color = r["LineColor"] or "#000000"
             line_width = int(r["LineWidth"] or 1)
             line_dash = _bokeh_dash(r["LineStyle"])
+            hatch_pattern = r["HatchPattern"]
 
             if not shp_path or not Path(shp_path).exists():
                 # skip missing files
@@ -299,6 +317,7 @@ class PreplotGraphics:
                     line_color=line_color,
                     alpha=line_alpha,
                     legend_label=layer_name,
+                    level="glyph",
                 )
 
             # ---- Lines / MultiLines ----
@@ -324,6 +343,7 @@ class PreplotGraphics:
                         line_dash=line_dash,
                         line_alpha=line_alpha,
                         legend_label=layer_name,
+                        level="glyph",
                     )
 
             # ---- Polygons / MultiPolygons (exterior only) ----
@@ -342,16 +362,20 @@ class PreplotGraphics:
 
                 if xs:
                     src = ColumnDataSource({"xs": xs, "ys": ys})
+                    hatch = None if hatch_pattern == "" else hatch_pattern
                     p.patches(
                         xs="xs", ys="ys",
                         source=src,
                         fill_color=(fill_color if is_filled else None),
                         fill_alpha=(fill_alpha if is_filled else 0.0),
+                        hatch_pattern=hatch,
+                        hatch_color=line_color,
                         line_color=line_color,
                         line_width=line_width,
                         line_dash=line_dash,
                         line_alpha=line_alpha,
                         legend_label=layer_name,
+                        level="glyph",
                     )
 
         # click legend to hide/show layers

@@ -661,7 +661,17 @@ CREATE TABLE  IF NOT EXISTS  CSVpoints (
     Attr1 REAL,
     Attr2 REAL,
     Attr3 REAL,
-    FOREIGN KEY (Layer_FK) REFERENCES CSVLayer(ID) ON DELETE CASCADE);
+    FOREIGN KEY (Layer_FK) REFERENCES CSVLayers(ID) ON DELETE CASCADE);
+CREATE TABLE "project_shapes" (
+                                "id" INTEGER,
+                                "FullName" TEXT UNIQUE NOT NULL,
+                                "FileName" TEXT,
+                                "isFilled" INTEGER DEFAULT 0,
+                                "FillColor" TEXT DEFAULT '#000000',
+                                "LineColor" TEXT DEFAULT '#000000',
+                                "LineWidth" INTEGER DEFAULT 1,
+                                "LineStyle" TEXT DEFAULT '', HatchPattern TEXT DEFAULT '', FileCheck INT DEFAULT 1,
+	                            PRIMARY KEY(id,FullName));
 CREATE VIEW IF NOT EXISTS PreplotSummaryAllFiles AS
 
 SELECT

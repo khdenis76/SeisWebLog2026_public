@@ -346,6 +346,7 @@ class ProjectDB:
                     full_name=row["FullName"],
                     is_filled=row["IsFilled"],
                     fill_color=row["FillColor"],
+                    hatch_pattern=row["HatchPattern"],
                     line_color=row["LineColor"],
                     line_width=row["LineWidth"],
                     line_style=row["LineStyle"],
@@ -434,6 +435,14 @@ class ProjectDB:
                 ),
             )
             conn.commit()
+
+    def update_shapes_folder(self, shapes_folder: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE project_folders SET shapes_folder = ? WHERE id = 1;",
+                (shapes_folder,),
+            )
+            conn.commit()
     def update_folders(self, data: FolderSettings) -> None:
         with self._connect() as conn:
             cur = conn.cursor()
@@ -461,16 +470,18 @@ class ProjectDB:
                     FillColor,
                     LineColor,
                     LineWidth,
-                    LineStyle
+                    LineStyle,
+                    HatchPattern
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?,?)
                 ON CONFLICT(FullName) DO UPDATE SET
                     isFilled   = excluded.isFilled,
                     FillColor = excluded.FillColor,
                     LineColor = excluded.LineColor,
                     LineWidth = excluded.LineWidth,
                     LineStyle = excluded.LineStyle,
-                    FileName  = excluded.FileName
+                    FileName  = excluded.FileName,
+                    HatchPattern = excluded.HatchPattern
                 ;
                 """,
                 (
@@ -482,6 +493,7 @@ class ProjectDB:
                     shape.line_color,
                     shape.line_width,
                     shape.line_style,
+                    shape.hatch_pattern,
                 ),
             )
 

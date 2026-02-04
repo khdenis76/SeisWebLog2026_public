@@ -2,6 +2,8 @@ import { getCSRFToken } from "./csrf.js";
 
 export function initDeleteShapesButton() {
   const btn = document.getElementById("btnDeleteShapes");
+  const tbody = document.getElementById("shape-folder-body");
+  const prj_shapes_body = document.getElementById("prj-shp-body")
   if (!btn) return;
 
   btn.addEventListener("click", async () => {
@@ -44,7 +46,8 @@ export function initDeleteShapesButton() {
         alert(data.error || "Failed to delete shapes.");
         return;
       }
-
+      tbody.innerHTML=data.shapes_in_folder
+      prj_shapes_body.innerHTML=data.prj_shp_body
       // Remove rows from DOM
       checked.forEach(cb => cb.closest("tr")?.remove());
 

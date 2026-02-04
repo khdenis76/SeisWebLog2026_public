@@ -1,44 +1,4 @@
 import {getCSRFToken} from "./csrf.js"
-export function initShapes(){
-    const btnShapeSearch =document.getElementById("shape-folder-search-button")
-    const ShapeDirectory = document.getElementById("shape-folder-input")
-    const url =  SHP_SEARCH_URL
-    btnShapeSearch.addEventListener("click", async () => {
-        const shapes_path = ShapeDirectory.value;
-        if (!shapes_path) {
-                              alert("Input is empty");
-                              return;
-        }
-        try{
-              const resp = await fetch(url, {
-              method: "POST",
-              headers: {
-                         "Content-Type": "application/json",
-                         "X-CSRFToken": getCSRFToken(),
-                          "X-Requested-With": "XMLHttpRequest",
-                       },
-              body: JSON.stringify({
-                                     input_value: shapes_path,
-                                  }),
-              });
-              //=========================Receive data from view ===========================================
-               if (!resp.ok) {
-                                const text = await resp.text();
-                                throw new Error(text || `HTTP ${resp.status}`);
-               }
-
-
-        }catch (err) {
-            console.error(err);
-        }finally {
-
-        }
-
-    });
-
-
-}
-
 export function initMainShapeCheckBox() {
   const main = document.getElementById("mainshapefileCheckbox");
   const tbody = document.getElementById("shape-folder-body");
@@ -61,6 +21,8 @@ export function initMainShapeCheckBox() {
 }
 export function initAddShapeButton() {
   const btn = document.getElementById("btnAddShapes");
+  const tbody = document.getElementById("shape-folder-body");
+  const prj_shapes_body = document.getElementById("prj-shp-body")
   if (!btn) return;
 
   btn.addEventListener("click", async () => {
@@ -97,11 +59,11 @@ export function initAddShapeButton() {
         alert(data.error || "Failed to add shapes.");
         return;
       }
-
+      tbody.innerHTML=data.shapes_in_folder
+      prj_shapes_body.innerHTML=data.prj_shp_body
       // Optional: uncheck added rows
       checked.forEach(cb => (cb.checked = false));
 
-      alert(`Added/updated: ${data.upserted} shape(s)`);
 
     } catch (err) {
       console.error(err);
@@ -156,6 +118,8 @@ export function initProjectShapesAutoSave() {
     const fillColor = tr.querySelector(".fill_color")?.value || "#000000";
     const lineColor = tr.querySelector(".line_color")?.value || "#000000";
     const lineWidthRaw = tr.querySelector(".line_width")?.value ?? "1";
+    const hatchpattern = tr.querySelector(".hatch-pattern")?.value || "";
+    const linedashed = tr.querySelector(".line-dashed")?.value || "";
 
     let lineWidth = parseInt(lineWidthRaw, 10);
     if (Number.isNaN(lineWidth)) lineWidth = 1;
@@ -168,6 +132,8 @@ export function initProjectShapesAutoSave() {
       fill_color: fillColor,
       line_color: lineColor,
       line_width: lineWidth,
+      hatch_pattern:hatchpattern,
+      line_dashed:linedashed,
       // optional: add line_style later if you have it in UI
       // line_style: "solid",
     };
@@ -210,7 +176,9 @@ export function initProjectShapesAutoSave() {
       target.classList.contains("is_shape_fill") ||
       target.classList.contains("fill_color") ||
       target.classList.contains("line_color") ||
-      target.classList.contains("line_width")
+      target.classList.contains("line_width") ||
+      target.classList.contains("hatch-pattern") ||
+      target.classList.contains("line-dashed")
     ) {
       const tr = target.closest("tr");
       if (tr) scheduleRowSave(tr);

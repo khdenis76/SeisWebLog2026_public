@@ -13,8 +13,10 @@
               <th>File Name</th>
               <th>Fill shape</th>
               <th>Fill Color</th>
+              <th>Hatch pattern</th>
               <th>Line Color</th>
               <th>Line Width</th>
+              <th>Line Style</th>
         </thead>
         <tbody id="prj-shp-body">
             {% for s in prj_shapes %}
@@ -25,15 +27,86 @@
                          <input role="switch" class="form-check-input" type="checkbox" autocomplete="off" value="{{ s.full_name }}">
                     </div>
                 </td>
-                <td>{{ s.file_name }}</td>
+                {% if s.file_check == 1  %}
+                       <td>{{ s.file_name }}</td>
+                {% else %}
+                       <td class="text-danger fw-bold">{{ s.file_name }}</td>
+                {% endif %}
                 {%  if s.is_filled == 1 %}
                         <td><input type="checkbox"  class="is_shape_fill" autocomplete="off" value="1" checked></td>
                 {% else %}
                         <td><input type="checkbox"  class="is_shape_fill" autocomplete="off" value="0"></td>
                 {% endif %}
                 <td><input type="color" class="form-control form-control-color fill_color" autocomplete="off" value="{{s.fill_color}}" title="Choose your color"></td>
+                <td>
+                    <select id="hatchPatternSelect"
+                            class="form-select form-select-sm hatch-pattern"
+                            autocomplete="off"
+                    >
+                        <option value=""
+                                {% if not s.hatch_pattern %}selected{% endif %}>None
+                        </option>
+                        <option value="/"
+                               {% if s.hatch_pattern == "/" %}selected{% endif %}>/ (diagonal)
+                        </option>
+                        <option value="\\"
+                                {% if s.hatch_pattern == "\\" %}selected{% endif %}>\ (back diagonal)
+                        </option>
+                        <option value="|"
+                                {% if s.hatch_pattern == "|" %}selected{% endif %}>| (vertical)
+                        </option>
+                        <option value="-"
+                                 {% if s.hatch_pattern == "-" %}selected{% endif %}>- (horizontal)
+                        </option>
+                        <option value="+"
+                               {% if s.hatch_pattern == "+" %}selected{% endif %}>+ (cross)
+                        </option>
+                        <option value="x"
+                               {% if s.hatch_pattern == "x" %}selected{% endif %}>x (cross diagonal)
+                        </option>
+                        <option value="."
+                              {% if s.hatch_pattern == "." %}selected{% endif %}>. (dots)
+                        </option>
+                        <option value="o"
+                                 {% if s.hatch_pattern == "o" %}selected{% endif %}>o (circles)
+                        </option>
+                        <option value="*"
+                                {% if s.hatch_pattern == "*" %}selected{% endif %}>* (stars)
+                        </option>
+                    </select>
+                </td>
                 <td><input type="color" class="form-control form-control-color line_color" autocomplete="off" value="{{s.line_color}}" title="Choose your color"></td>
                 <td><input type="number" min="1" max="10" step="1"  value="{{s.line_width}}" autocomplete="off" class="form-control line_width"></td>
+                <td>
+                    <select id="lineDashSelect"
+                            class="form-select form-select-sm line-dashed"
+                    >
+                          <option value=""
+                            {% if not s.line_style %}selected{% endif %}>
+                             Solid
+                          </option>
+
+                          <option value="-"
+                             {% if s.line_style == "-" %}selected{% endif %}>
+                             Solid (—)
+                          </option>
+
+                          <option value="--"
+                             {% if s.line_style == "--" %}selected{% endif %}>
+                             Dashed (--)
+                          </option>
+
+                          <option value=":"
+                            {% if s.line_style == ":" %}selected{% endif %}>
+                            Dotted (···)
+                          </option>
+
+                          <option value="-."
+                              {% if s.line_style == "-." %}selected{% endif %}>
+                               Dash-dot (-.)
+                          </option>
+                    </select>
+                </td>
                 </tr>
             {% endfor %}
         </tbody>
