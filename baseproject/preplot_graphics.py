@@ -5,7 +5,8 @@ import geopandas as gpd
 from pyproj import Transformer
 from core.projectdb import ProjectDB
 from bokeh.plotting import figure
-from bokeh.models import ColumnDataSource, HoverTool
+from bokeh.models import ColumnDataSource, HoverTool, LabelSet
+from bokeh.core.properties import value
 from bokeh.models import Button, CustomJS
 from bokeh.layouts import column
 import xyzservices.providers as xyz
@@ -383,4 +384,137 @@ class PreplotGraphics:
             p.legend.click_policy = "hide"
 
         return p
+
+    def add_csv_layers_to_map(
+            self,
+            p,  # bokeh figure
+            csv_epsg: int | None = None,
+            show_tiles: bool = True,
+            max_labels: int = 2000,  # safety: labels can be heavy
+    ):
+        """
+        Add CSVLayers/CSVpoints on top of existing figure `p`.
+
+        Legend label: CSVLayers.Name
+        Marker style/size/color: CSVLayers.PointStyle/PointSize/PointColor
+        Point text label: CSVpoints.Point (LabelSet)
+        """
+
+        def _bokeh_marker(marker: str | None) -> str:
+            m = (marker or "").strip().lower()
+            allowed = {
+                "circle", "square", "triangle", "diamond",
+                "inverted_triangle", "asterisk",
+                "cross", "x", "star", "hex",
+            }
+            return m if m in allowed else "circle"
+
+        # ---- load layers + points ----
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT
+                    ID, Name, PointStyle, PointColor, PointSize
+                FROM CSVLayers
+                ORDER BY ID DESC
+            """)
+            layers = [dict(r) for r in cur.fetchall()]
+
+            if not layers:
+                return p
+
+            # Prepare transformer if needed (to WebMercator for tiles)
+            transformer = None
+            if show_tiles and csv_epsg:
+                transformer = Transformer.from_crs(f"EPSG:{csv_epsg}", "EPSG:3857", always_xy=True)
+
+
+
+            for layer in layers:
+                layer_id = layer["ID"]
+                layer_name = layer.get("Name") or f"Layer {layer_id}"
+                marker = _bokeh_marker(layer.get("PointStyle"))
+                color = layer.get("PointColor") or "#000000"
+                size = int(layer.get("PointSize") or 4)
+
+                cur.execute("""
+                    SELECT Point, X, Y, Z, Attr1, Attr2, Attr3
+                    FROM CSVpoints
+                    WHERE Layer_FK = ?
+                """, (layer_id,))
+                pts = [dict(r) for r in cur.fetchall()]
+                if not pts:
+                    continue
+
+                # Build columns
+                xs = [row.get("X") for row in pts]
+                ys = [row.get("Y") for row in pts]
+                names = [str(row.get("Point") or "") for row in pts]
+
+                # Convert CRS if needed
+                if transformer:
+                    xs, ys = transformer.transform(xs, ys)
+
+                src = ColumnDataSource(data=dict(
+                    x=xs,
+                    y=ys,
+                    Point=names,
+                    Z=[row.get("Z") for row in pts],
+                    Attr1=[row.get("Attr1") for row in pts],
+                    Attr2=[row.get("Attr2") for row in pts],
+                    Attr3=[row.get("Attr3") for row in pts],
+                ))
+
+                # Draw points (scatter)
+                r = p.scatter(
+                    "x", "y",
+                    source=src,
+                    marker=marker,
+                    size=size,
+                    fill_color=value(color),  # constant color
+                    line_color=None,
+                    fill_alpha=0.9,
+                    legend_label=layer_name,
+                )
+
+                # Hover for this layer
+                p.add_tools(HoverTool(
+                    renderers=[r],
+                    tooltips=[
+                        ("Layer", layer_name),
+                        ("Point", "@Point"),
+                        ("X", "@x{0,0.00}"),
+                        ("Y", "@y{0,0.00}"),
+                        ("Z", "@Z"),
+                        ("Attr1", "@Attr1"),
+                        ("Attr2", "@Attr2"),
+                        ("Attr3", "@Attr3"),
+                    ]
+                ))
+
+                # Text labels near symbols (LabelSet)
+                # NOTE: labels can be heavy; limit for performance
+                if max_labels and len(xs) > max_labels:
+                    # label only first max_labels points
+                    label_src = ColumnDataSource(data=dict(
+                        x=xs[:max_labels],
+                        y=ys[:max_labels],
+                        Point=names[:max_labels],
+                    ))
+                else:
+                    label_src = src
+
+                labels = LabelSet(
+                    x="x", y="y", text="Point",
+                    source=label_src,
+                    x_offset=6, y_offset=6,
+                    text_font_size="9pt",
+                    text_alpha=0.9,
+                )
+                p.add_layout(labels)
+
+        return p
+
 

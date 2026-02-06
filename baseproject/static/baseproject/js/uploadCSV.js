@@ -1,5 +1,5 @@
 import {getCSRFToken} from "./csrf.js";
-
+import { renderBokehInto } from "./renderBokeh.js"
 export function initCsvLayerUpload() {
   const form = document.getElementById("csv-load-form");
   const btn = document.getElementById("btnSaveCsv");
@@ -42,8 +42,12 @@ export function initCsvLayerUpload() {
         showErr(data.error || "Upload failed.");
         return;
       }
-
+      if (data.preplot_map) {
+           console.log("update preplot")
+          renderBokehInto("preplot-map-div", data.preplot_map);
+      }
       // ✅ update table body HTML (no page reboot)
+      console.log("update layersTbody")
       tbody.innerHTML = data.layers_body;
 
       // close modal (your button already has data-bs-dismiss, but this is safer)

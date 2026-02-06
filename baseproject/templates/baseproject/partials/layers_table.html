@@ -1,17 +1,20 @@
 <div class="clearfix">
-    <button class="btn btn-danger btn-sm me-2 float-end" id="deleteLayersBtn">
+    <button class="btn btn-danger btn-sm me-2 float-end"
+            id="deleteLayersBtn"
+            data-delete-url="{% url 'project_layers_delete' %}">
             <i class="fas fa-trash-can me-2"></i> DELETE
     </button>
 </div>
-<table class="table table-hover" id="layers-table">
+<table class="table table-hover"
+       id="layers-table"
+       data-save-url="{% url 'project_layers_update' %}">
     <thead>
           <th> <input type ="checkbox" id="mainLayersCheckbox"> </th>
           <th>Name</th>
-          <th>Total points</th>
-          <th>Attribute1</th>
-          <th>Attribute2</th>
-          <th>Attribute3</th>
-          <th>Description</th>
+          <th title="Total number of points per layer">Points</th>
+          <th>Color</th>
+          <th>Symbol</th>
+          <th>Size</th>
     </thead>
     <tbody id="layersTbody">
         {{ layers_body|safe }}

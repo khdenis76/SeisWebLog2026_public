@@ -1,4 +1,5 @@
 import {getCSRFToken} from "./csrf.js"
+import { renderBokehInto } from "./renderBokeh.js"
 export function initMainShapeCheckBox() {
   const main = document.getElementById("mainshapefileCheckbox");
   const tbody = document.getElementById("shape-folder-body");
@@ -58,6 +59,9 @@ export function initAddShapeButton() {
       if (!resp.ok) {
         alert(data.error || "Failed to add shapes.");
         return;
+      }
+      if (data.preplot_map) {
+          renderBokehInto("preplot-map-div", data.preplot_map);
       }
       tbody.innerHTML=data.shapes_in_folder
       prj_shapes_body.innerHTML=data.prj_shp_body
@@ -159,7 +163,9 @@ export function initProjectShapesAutoSave() {
       console.error(data);
       return;
     }
-
+    if (data.preplot_map) {
+          renderBokehInto("preplot-map-div", data.preplot_map);
+      }
     // Optional UI: mark row "saved"
     tr.classList.remove("table-danger");
     tr.classList.add("table-success");

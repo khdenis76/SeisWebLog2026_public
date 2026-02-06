@@ -15,11 +15,14 @@ from pathlib import Path
 import sqlite3
 from typing import Optional
 
+from django.template.loader import render_to_string
 from shapely import Point, LineString
 from shapely.geometry import mapping
 
 from .models import SPSRevision
 from typing import Literal
+
+from .projectlayers import ProjectLayer
 from .projectshp import ProjectShape
 from typing import Sequence
 from .project_dataclasses import  *
@@ -497,6 +500,34 @@ class ProjectDB:
                 ),
             )
 
+            conn.commit()
+    def upsert_layer(self, layer: ProjectLayer) -> None:
+        with self._connect() as conn:
+            cur = conn.cursor()
+
+            cur.execute(
+                """
+                INSERT INTO CSVLayers (
+                    ID,
+                    PointStyle,
+                    PointSize,
+                    PointColor
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(ID) DO UPDATE SET
+                    ID   = excluded.ID,
+                    PointStyle   = excluded.PointStyle,
+                    PointSize = excluded.PointSize,
+                    PointColor = excluded.PointColor
+                ;
+                """,
+                (
+                    layer.layer_id,
+                    layer.point_style,
+                    layer.point_size,
+                    layer.fill_color,
+                ),
+            )
             conn.commit()
     def ensure_rlpreplot_lines(self, sps_points: list, file_fk: int | None = None) -> dict[int, int]:
         """
@@ -2826,27 +2857,32 @@ class ProjectDB:
         Fetch CSVLayers table as list of dicts.
         Safe for JsonResponse and Django templates.
         """
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
 
-        cur.execute("""
-                    SELECT ID,
-                           Name,
-                           Points,
-                           Attr1Name,
-                           Attr2Name,
-                           Attr3Name,
-                           Comments
-                    FROM CSVLayers
-                    ORDER BY ID DESC
-                    """)
+            cur.execute("""
+                SELECT ID,
+                       Name,
+                       Points,
+                       Attr1Name,
+                       Attr2Name,
+                       Attr3Name,
+                       PointStyle,
+                       PointColor,
+                       PointSize,
+                       Comments
+                FROM CSVLayers
+                ORDER BY ID DESC
+            """)
 
-        rows = [dict(row) for row in cur.fetchall()]
-        conn.close()
+            return [dict(row) for row in cur.fetchall()]
 
-        return rows
-
+    def get_layers_table(self):
+        layers = self.get_csv_layers()
+        html = render_to_string("baseproject/partials/layers_body.html",
+                         {'layers_list':layers})
+        return html
     def load_csv_layer_from_upload(
             self,
             uploaded_file,
@@ -2855,7 +2891,7 @@ class ProjectDB:
             pointfield: str,
             xfield: str,
             yfield: str,
-            zfield: str,
+            zfield: str | None = None,  # optional
             attr1_name: str = "",
             attr2_name: str = "",
             attr3_name: str = "",
@@ -2864,21 +2900,28 @@ class ProjectDB:
             attr3_field: str | None = None,
     ) -> dict:
         """
+        Required columns: pointfield, xfield, yfield
+        Optional: zfield (if missing -> Z = 0.0)
         Returns: {"layer_id": int, "points_inserted": int}
         """
 
-        # bytes -> text (important for pandas sep=None)
+        # bytes -> text
         text_stream = io.TextIOWrapper(uploaded_file.file, encoding="utf-8-sig", newline="")
 
-        df = pd.read_csv(text_stream, sep=None, engine="python")
+        # Try auto-detect separator, fallback to comma
+        try:
+            df = pd.read_csv(text_stream, sep=None, engine="python")
+        except Exception:
+            text_stream.seek(0)
+            df = pd.read_csv(text_stream, sep=",", engine="python")
 
-        # required columns
-        required = [pointfield, xfield, yfield, zfield]
+        # ---- required columns: Point, X, Y only ----
+        required = [pointfield, xfield, yfield]
         missing = [c for c in required if c not in df.columns]
         if missing:
-            raise ValueError(f"Missing required columns: {missing}")
+            raise ValueError(f"Missing required columns: {missing}. Available: {list(df.columns)}")
 
-        # optional attr columns
+        # ---- optional attribute columns validation ----
         opt_fields = []
         if attr1_field:
             opt_fields.append(attr1_field)
@@ -2889,11 +2932,15 @@ class ProjectDB:
 
         opt_missing = [c for c in opt_fields if c not in df.columns]
         if opt_missing:
-            raise ValueError(f"Missing attribute columns: {opt_missing}")
+            raise ValueError(f"Missing attribute columns: {opt_missing}. Available: {list(df.columns)}")
 
-        # build normalized frame
-        cols = [pointfield, xfield, yfield, zfield]
-        rename = {pointfield: "Point", xfield: "X", yfield: "Y", zfield: "Z"}
+        # ---- build normalized frame ----
+        cols = [pointfield, xfield, yfield]
+        rename = {pointfield: "Point", xfield: "X", yfield: "Y"}
+
+        if zfield and zfield in df.columns:
+            cols.append(zfield)
+            rename[zfield] = "Z"
 
         if attr1_field:
             cols.append(attr1_field)
@@ -2907,10 +2954,14 @@ class ProjectDB:
 
         data = df[cols].copy().rename(columns=rename)
 
-        # numeric conversions
+        # Ensure Z exists
+        if "Z" not in data.columns:
+            data["Z"] = 0.0
+
+        # ---- numeric conversions ----
         data["X"] = pd.to_numeric(data["X"], errors="coerce")
         data["Y"] = pd.to_numeric(data["Y"], errors="coerce")
-        data["Z"] = pd.to_numeric(data["Z"], errors="coerce")
+        data["Z"] = pd.to_numeric(data["Z"], errors="coerce").fillna(0.0)
 
         if "Attr1" in data.columns:
             data["Attr1"] = pd.to_numeric(data["Attr1"], errors="coerce")
@@ -2919,18 +2970,21 @@ class ProjectDB:
         if "Attr3" in data.columns:
             data["Attr3"] = pd.to_numeric(data["Attr3"], errors="coerce")
 
-        # drop bad coordinate rows
-        data.dropna(subset=["X", "Y", "Z"], inplace=True)
+        # Drop bad coordinate rows (X/Y only)
+        data.dropna(subset=["X", "Y"], inplace=True)
 
         points_count = int(len(data))
         if points_count == 0:
-            raise ValueError("No valid rows (X/Y/Z) found after conversion.")
+            raise ValueError("No valid rows found after conversion (X/Y required).")
 
-        conn = sqlite3.connect(self.db_path)
+        # ---- DB insert ----
+        conn = sqlite3.connect(str(self.db_path))
         cur = conn.cursor()
 
         try:
-            # 1) insert layer
+            conn.execute("BEGIN IMMEDIATE")
+
+            # Insert layer
             cur.execute(
                 """
                 INSERT INTO CSVLayers (Name, Points, Attr1Name, Attr2Name, Attr3Name, Comments)
@@ -2947,17 +3001,14 @@ class ProjectDB:
             )
             layer_id = cur.lastrowid
 
-            # 2) bulk insert points
+            # Bulk insert points
             has_a1 = "Attr1" in data.columns
             has_a2 = "Attr2" in data.columns
             has_a3 = "Attr3" in data.columns
 
             rows = []
-            for r in data.itertuples(index=False):
-                # r has attributes by column order
-                d = r._asdict() if hasattr(r, "_asdict") else {
-                    "Point": r[0], "X": r[1], "Y": r[2], "Z": r[3]
-                }
+            for r in data.itertuples(index=False, name=None):
+                d = dict(zip(data.columns, r))
 
                 rows.append((
                     layer_id,
@@ -3120,6 +3171,25 @@ class ProjectDB:
         out.setdefault("RLPreplot", {})
         out.setdefault("SLPreplot", {})
         return out
+
+    # projectdb.py
+    def delete_csv_layers(self, layer_ids: list[int]) -> int:
+        if not layer_ids:
+            return 0
+
+        placeholders = ",".join("?" for _ in layer_ids)
+
+        with self._connect() as conn:
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("BEGIN IMMEDIATE")
+
+            cur = conn.cursor()
+            cur.execute(
+                f"DELETE FROM CSVLayers WHERE ID IN ({placeholders})",
+                layer_ids,
+            )
+            conn.commit()
+            return cur.rowcount  # number of deleted layers
 
 
 

@@ -1,15 +1,41 @@
 {% if layers_list %}
     {% for l in layers_list %}
-         <tr>
-         <td><input class="form-control layers-checkbox"></td>
+         <tr data-id="{{ l.ID }}">
+         <td><input type="checkbox" class="form-check-input layers-checkbox" data-layerid="{{ l.ID }}"></td>
          <td>{{ l.Name }}</td>
          <td>{{ l.Points }}</td>
-         <td>{{ l.Attr1Name }}</td>
-         <td>{{ l.Attr2Name }}</td>
-         <td>{{ l.Attr3Name }}</td>
-         <td>{{ l.Comments }}</td>
+         <td>
+             <input type="color"
+                    class="form-control form-control-color fill_color"
+                    autocomplete="off"
+                    value="{{ l.PointColor }}"
+                    title="Choose your color"
+                    data-layerid="{{ l.ID }}">
+         </td>
+         <td>
+            <select class="form-select form-select-sm point-style-select">
+                    <option value="circle" {% if not l.PointStyle or l.PointStyle == "circle" %}selected{% endif %}>Circle</option>
+                    <option value="square" {% if l.PointStyle == "square" %}selected{% endif %}>Square</option>
+                    <option value="triangle" {% if l.PointStyle == "triangle" %}selected{% endif %}>Triangle</option>
+                    <option value="diamond" {% if l.PointStyle == "diamond" %}selected{% endif %}>Diamond</option>
+                    <option value="inverted_triangle" {% if l.PointStyle == "inverted_triangle" %}selected{% endif %}>Inverted triangle</option>
+                    <option value="star" {% if l.PointStyle == "star" %}selected{% endif %}>Star</option>
+                    <option value="cross" {% if l.PointStyle == "cross" %}selected{% endif %}>Cross</option>
+                    <option value="x" {% if l.PointStyle == "x" %}selected{% endif %}>X</option>
+                    <option value="asterisk" {% if l.PointStyle == "asterisk" %}selected{% endif %}>Asterisk</option>
+            </select>
+         </td>
+         <td><input type="number"
+                    min="1" max="1000"
+                    step="1"
+                    value="{{l.PointSize}}"
+                    autocomplete="off"
+                    class="form-control point_size"
+         ></td>
          </tr>
     {% endfor %}
 {% else %}
-    <td colspan="6"> No data </td>
+    <tr class="table-warning">
+        <td colspan="6"> No data </td>
+    </tr>
 {% endif %}

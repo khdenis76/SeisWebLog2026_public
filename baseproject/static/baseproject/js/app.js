@@ -11,6 +11,8 @@ import {initPointTypeSwitch} from "./tools.js"
 import {initExportSolEolBtn} from "./export_SOL_EOL.js";
 import {initCsvHeaderFetch} from "./csvHeader.js"
 import {initCsvLayerUpload} from "./uploadCSV.js";
+import {initProjectLayersAutoSave} from "./autoSaveLayers.js";
+import {initDeleteLayersBtn} from "./deleteCSVLayer.js";
 document.addEventListener("DOMContentLoaded", () => {
 
   initRLCheckboxes();
@@ -27,7 +29,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initExportSolEolBtn()
   initCsvHeaderFetch()
   initCsvLayerUpload()
-  //initDeleteRL();
+  initProjectLayersAutoSave()
+  initDeleteLayersBtn()
   console.log("Init Delete Buttons")
   initDeletePreplot([
     {

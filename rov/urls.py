@@ -4,7 +4,6 @@ from django.urls import path
 from .views import *
 urlpatterns = [
     path("", base_project_settings_view, name="base_project_settings"),
-    path("upload/preplots/", upload_preplots, name="upload_preplots"),
     path("upload/source-sps/", upload_source_sps, name="upload_source_sps"),
     path("upload/receiver-sps/", upload_receiver_sps, name="upload_receiver_sps"),
     path("upload/header-sps/", upload_header_sps, name="upload_header_sps"),
@@ -26,5 +25,9 @@ urlpatterns = [
     path('export/sps1',export_to_sps,name="export_to_sps"),
     path ('detect/headers',csv_headers,name="csv_headers"),
     path('upload/csv',upload_csv_layer_ajax,name="upload_csv_layer_ajax"),
-    path("layers/delete/", delete_csv_layers, name="project_layers_delete"),
+    path("layers/delete", delete_csv_layers, name="project_layers_delete"),
+    path("rlines/select",rl_line_click,name="rl_line_click"),
+    path("slines/select",sl_line_click,name="sl_line_click"),
+    path("rlines/point_delete/",rp_points_delete,name="rp_points_delete"),
+    path("slines/point_delete/",sp_points_delete,name="sp_points_delete"),
 ]

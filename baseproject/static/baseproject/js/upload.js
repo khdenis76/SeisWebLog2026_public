@@ -2,26 +2,9 @@ import { ensureLoadingModal,cleanupModalArtifacts} from "./modalLoader.js";
 import { getCSRFToken } from "./csrf.js";
 import { showUploadToast } from "./toast.js";
 import { updatePreplotTable } from "./updaterltable.js";
+import { renderBokehInto } from "./renderBokeh.js"
 
 
-function renderBokehInto(divId, jsonItem) {
-  if (!jsonItem) return;
-
-  const div = document.getElementById(divId);
-  if (!div) {
-    console.warn("Bokeh target div not found:", divId);
-    return;
-  }
-
-  // Clear previous plot
-  div.innerHTML = "";
-
-  // Inject target id
-  jsonItem.target_id = divId;
-
-  // Render
-  Bokeh.embed.embed_item(jsonItem);
-}
 
 export function initPreplotUpload() {
   const form = document.getElementById("preplot-load-form");

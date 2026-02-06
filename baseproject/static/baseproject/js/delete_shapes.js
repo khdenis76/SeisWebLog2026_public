@@ -1,5 +1,5 @@
 import { getCSRFToken } from "./csrf.js";
-
+import { renderBokehInto } from "./renderBokeh.js"
 export function initDeleteShapesButton() {
   const btn = document.getElementById("btnDeleteShapes");
   const tbody = document.getElementById("shape-folder-body");
@@ -45,6 +45,9 @@ export function initDeleteShapesButton() {
       if (!resp.ok) {
         alert(data.error || "Failed to delete shapes.");
         return;
+      }
+      if (data.preplot_map) {
+          renderBokehInto("preplot-map-div", data.preplot_map);
       }
       tbody.innerHTML=data.shapes_in_folder
       prj_shapes_body.innerHTML=data.prj_shp_body
