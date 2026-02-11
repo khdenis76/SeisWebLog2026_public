@@ -1,15 +1,15 @@
-export function initRPPointCheckboxes(containerId = null) {
+export function initSPPointCheckboxes(containerId = null) {
   const scope = containerId
     ? document.getElementById(containerId)
     : document;
 
   if (!scope) return;
 
-  const main = scope.querySelector("#mainRPCheckBox");
+  const main = scope.querySelector("#mainSPCheckBox");
   if (!main) return;
 
   const getBoxes = () =>
-    Array.from(scope.querySelectorAll(".rp_checkbox"));
+    Array.from(scope.querySelectorAll(".sp_checkbox"));
 
   // 1️⃣ Main checkbox → toggle all
   main.addEventListener("change", () => {

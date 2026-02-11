@@ -8,5 +8,34 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  background: var(--bs-body-bg);
+  background: #6f6d6d;
+  font-weight: 600;
 }
+/* make header sticky too (optional) */
+#dsr-line-table-head th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #6f6d6d;
+}
+
+/* sticky columns */
+.sticky-col {
+  position: sticky;
+  background: var(--bs-body-bg);
+  z-index: 4;
+  box-shadow: 1px 0 0 rgba(0,0,0,.08);
+}
+
+/* first sticky column: checkbox */
+.sticky-col-1 { left: 0; width: 42px; min-width: 42px; }
+
+/* second sticky column: Line (offset = width of col1) */
+.sticky-col-2 { left: 42px; min-width: 70px; }
+
+/* sticky header cells for first two columns */
+#dsr-line-table-head th.sticky-col-1,
+#dsr-line-table-head th.sticky-col-2 {
+  z-index: 6;
+}
+

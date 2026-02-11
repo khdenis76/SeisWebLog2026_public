@@ -1,10 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="w-100 table-scroll" style="height: 30vh">
+    <table class="table table-hover">
+        <tbody>
+          {% for l in bb_field_list %}
+          <tr>
+              <td>{{ l }}</td>
+              <td><SELECT class="bbox-config-selector" data-fieldname="{{ l }}">
+
+                  </SELECT>
+              </td>
+          </tr>
+         {% endfor %}
+        </tbody>
+    </table>
+</div>

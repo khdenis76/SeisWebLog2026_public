@@ -4,7 +4,10 @@
     </button>
 </div>
 <div class="table-scroll border rounded">
-  <table class="table table-hover table-sm table-striped mb-0" id="slpreplotTable">
+  <table class="table table-hover table-sm table-striped mb-0"
+         id="slpreplotTable"
+         data-line-click-url="{% url 'sl_line_click' %}"
+  >
     <thead class="table-light">
       <tr>
        <th><input type="checkbox" id="MainSLPreplotCheckbox"></th>
@@ -18,7 +21,7 @@
     </thead>
     <tbody id="slBody">
       {% for r in sl_rows %}
-        <tr>
+        <tr data-line-id="{{ r.ID }}">
           <td><input type="checkbox" class="sl-preplot-checkbox" data-line-id="{{ r.ID }}" data-tier-line ="{{ r.TierLine }}"></td>
           <td>{{ r.Line }}</td>
           <td>{{ r.Points }}</td>

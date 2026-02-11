@@ -1,10 +1,67 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="table-scroll" style="height: 50vh" id="dsr-line-table-div">
+    <table class="table table table-hover" id="dsr-line-table" data-click-url="{% url 'rov_dsr_line_click' %}">
+        <thead id="dsr-line-table-head">
+                 <th class="sticky-col sticky-col-1"><input type="checkbox" id="mainDSRLInesCheckBox"></th>
+                 <th class="sticky-col sticky-col-2" title="Line number">Line</th>
+                 <th title="Planned points from RLPreplot">P</th>
+                 <th title="Total DSR records for this line">DSR</th>
+                 <th title="Number of unique stations">Stn</th>
+                 <th title="Number of unique nodes">Nodes</th>
+                 <th title="Minimum station number">Stn Min</th>
+                 <th title="Maximum station number">Stn Max</th>
+                 <th title="ROV deployed points (TimeStamp present)">Dep</th>
+                 <th title="ROV retrieved points (TimeStamp1 present)">Rec</th>
+                 <th title="SM deployed count (Deployed = YES)">SM(D)</th>
+                 <th title="SM retrieved count (PickedUp = YES)">SM(R)</th>
+                 <th title="Processed points (REC_ID present)">Proc</th>
+                 <th title="Deployment progress (%) vs planned points">Dep %</th>
+                 <th title="Retrieval progress (%) vs planned points">Rec %</th>
+                 <th title="Processing progress (%) vs planned points">Proc %</th>
+
+                 <th title="First deployment time">Dep Start</th>
+                 <th title="Last deployment time">Dep End</th>
+                 <th title="Deployment duration in hours">Dep h</th>
+
+                 <th title="First retrieval time">Rec Start</th>
+                 <th title="Last retrieval time">Rec End</th>
+                 <th title="Retrieval duration in hours">Rec h</th>
+
+                 <th title="Total operation time (deploy → retrieve), hours">Total h</th>
+
+                 <th title="Average ΔE primary → secondary">ΔE avg</th>
+                 <th title="Minimum ΔE primary → secondary">ΔE min</th>
+                 <th title="Maximum ΔE primary → secondary">ΔE max</th>
+
+                 <th title="Average ΔN primary → secondary">ΔN avg</th>
+                 <th title="Minimum ΔN primary → secondary">ΔN min</th>
+                 <th title="Maximum ΔN primary → secondary">ΔN max</th>
+
+                <th title="Average ΔE (retrieval)">ΔE1 avg</th>
+                <th title="Minimum ΔE (retrieval)">ΔE1 min</th>
+                <th title="Maximum ΔE (retrieval)">ΔE1 max</th>
+
+                <th title="Average ΔN (retrieval)">ΔN1 avg</th>
+                <th title="Minimum ΔN (retrieval)">ΔN1 min</th>
+                <th title="Maximum ΔN (retrieval)">ΔN1 max</th>
+
+                <th title="Average sigma">σ avg</th>
+                <th title="Minimum sigma">σ min</th>
+                <th title="Maximum sigma">σ max</th>
+
+                <th title="Average sigma1">σ1 avg</th>
+                <th title="Minimum sigma1">σ1 min</th>
+                <th title="Maximum sigma1">σ1 max</th>
+
+                <th title="Average sigma2">σ2 avg</th>
+                <th title="Minimum sigma2">σ2 min</th>
+                <th title="Maximum sigma2">σ2 max</th>
+
+                <th title="Average sigma3">σ3 avg</th>
+                <th title="Minimum sigma3">σ3 min</th>
+                <th title="Maximum sigma3">σ3 max</th>
+        </thead>
+        <tbody id="dsr-line-table-body">
+                {{ dsr_lines_body|safe }}
+        </tbody>
+    </table>
+</div>

@@ -1,10 +1,57 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="modal fade" id="dsrFilterModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="fas fa-filter me-2"></i> Filter DSR Lines
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Day -->
+        <div class="mb-3">
+          <label class="form-label">Day</label>
+          <input type="date" class="form-control" id="dsrFilterDay">
+          <div class="form-text">Matches FirstDeployTime date (YYYY-MM-DD)</div>
+        </div>
+
+        <!-- Time range -->
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label">Time from</label>
+            <input type="time" class="form-control" id="dsrFilterTimeFrom">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Time to</label>
+            <input type="time" class="form-control" id="dsrFilterTimeTo">
+          </div>
+          <div class="form-text">Filters by FirstDeployTime time-of-day.</div>
+        </div>
+
+        <!-- Line range -->
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">Line min</label>
+            <input type="number" class="form-control" id="dsrFilterLineMin" placeholder="e.g. 100">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Line max</label>
+            <input type="number" class="form-control" id="dsrFilterLineMax" placeholder="e.g. 250">
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" type="button" id="dsrFilterResetBtn">
+          Reset
+        </button>
+        <button class="btn btn-primary" type="button" id="dsrFilterApplyBtn">
+          Apply
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>

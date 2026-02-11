@@ -1,9 +1,9 @@
 import { getCSRFToken } from "./csrf.js";
-import {initRPPointCheckboxes} from "./initMainRPCheckbox.js";
-
-export function initRLLineClick() {
-  const table = document.getElementById("rlpreplotTable");
-  const rldiv = document.getElementById("rl-points-div")
+import {initSPPointCheckboxes} from "./initMainSPCheckbox.js";
+import {activateTab} from "./initTabActivator.js";
+export function initSLLineClick() {
+  const table = document.getElementById("slpreplotTable");
+  const rldiv = document.getElementById("sl-points-div")
   if (!table) return;
 
   const url = table.dataset.lineClickUrl;
@@ -38,7 +38,8 @@ export function initRLLineClick() {
         return;
       }
       rldiv.innerHTML = data.point_table
-      initRPPointCheckboxes();
+      initSPPointCheckboxes();
+      activateTab("sl-points-tab")
       // ✅ Use returned JSON
       console.log("Line data:", data);
 

@@ -17,7 +17,9 @@ CREATE TABLE  IF NOT EXISTS  project_vessels (
                            IMONum TEXT NOT NULL UNIQUE
                        );
 CREATE TABLE  IF NOT EXISTS  ROVS_CONFIG
-                ("rov1_name" TEXT DEFAULT 'ROV1',
+
+                (
+                 "rov1_name" TEXT DEFAULT 'ROV1',
                  "rov2_name" TEXT DEFAULT 'ROV2',
                  "gnss1_name" TEXT DEFAULT 'GNSS1',
                  "gnss2_name" TEXT DEFAULT 'GNSS2'
@@ -82,7 +84,7 @@ CREATE TABLE  IF NOT EXISTS  RPPreplot (
                               Line INTEGER,
                               TierLine INTEGER,
                               Point INTEGER,
-                              PointCode TEXT DEFAULT "",
+                              PointCode TEXT DEFAULT '',
                               PointIndex INTEGER DEFAULT 1,
                               LinePoint INTEGER DEFAULT 0,
                               TLinePoint REAL,
@@ -163,7 +165,7 @@ CREATE TABLE  IF NOT EXISTS  SPPreplot (
                               Line INTEGER,
                               TierLine INTEGER,
                               Point INTEGER,
-                              PointCode TEXT DEFAULT "",
+                              PointCode TEXT DEFAULT '',
                               PointIndex INTEGER DEFAULT 1,
                               LinePoint INTEGER DEFAULT 0,
                               TLinePoint REAL,
@@ -190,211 +192,323 @@ CREATE INDEX IF NOT EXISTS ix_rppreplot_linefk ON RPPreplot(Line_FK);
 -- for fast ORDER BY Point and fast MIN/MAX by Point
 CREATE INDEX IF NOT EXISTS ix_sppreplot_linefk_point ON SPPreplot(Line_FK, Point);
 CREATE INDEX IF NOT EXISTS ix_rppreplot_linefk_point ON RPPreplot(Line_FK, Point);
-
+CREATE TABLE IF NOT EXISTS "DSRSolution" (
+    "ID" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "NAME" TEXT NOT NULL DEFAULT 'Normal'
+);
+INSERT OR IGNORE INTO "DSRSolution"(ID, NAME)
+VALUES (1, 'Normal');
+INSERT OR IGNORE INTO "DSRSolution"(ID, NAME)
+VALUES (2, 'Co-deployed');
+INSERT OR IGNORE INTO "DSRSolution"(ID, NAME)
+VALUES (3, 'Losted');
+INSERT OR IGNORE INTO "DSRSolution"(ID, NAME)
+VALUES (4, 'Missplaced');
+INSERT OR IGNORE INTO "DSRSolution"(ID, NAME)
+VALUES (5, 'Wrong ID');
+INSERT OR IGNORE INTO "DSRSolution"(ID, NAME)
+VALUES (6, 'Overlap');
 --Create DSR table
-CREATE TABLE  IF NOT EXISTS  "DSR" (
-                    "ID" INTEGER PRIMARY KEY AUTOINCREMENT,
-                    "LinePointIdx" INTEGER UNIQUE,
-                    "Line" INTEGER,
-                    "Station" INTEGER,
-                    "Node" TEXT,
-                    "PreplotEasting" REAL,
-                    "PreplotNorthing" REAL,
-                    "ROV" TEXT,
-                    "TimeStamp" TEXT,
-                    "PrimaryEasting" REAL,
-                    "Sigma" REAL,
-                    "PrimaryNorthing" REAL,
-                    "Sigma1" REAL,
-                    "SecondaryEasting" REAL,
-                    "Sigma2" REAL,
-                    "SecondaryNorthing" REAL,
-                    "Sigma3" REAL,
-                    "DeltaEprimarytosecondary" REAL,
-                    "DeltaNprimarytosecondary" REAL,
-                    "Rangeprimarytosecondary" REAL,
-                    "RangetoPrePlot" REAL,
-                    "BrgtoPrePlot" REAL,
-                    "PrimaryElevation" REAL,
-                    "Sigma4" REAL,
-                    "SecondaryElevation" REAL,
-                    "Sigma5" REAL,
-                    "Quality" TEXT,
-                    "ROV1" TEXT,
-                    "TimeStamp1" TEXT,
-                    "PrimaryEasting1" REAL,
-                    "Sigma6" REAL,
-                    "PrimaryNorthing1" REAL,
-                    "Sigma7" REAL,
-                    "SecondaryEasting1" REAL,
-                    "Sigma8" REAL,
-                    "SecondaryNorthing1" REAL,
-                    "Sigma9" REAL,
-                    "DeltaEprimarytosecondary1" REAL,
-                    "DeltaNprimarytosecondary1" REAL,
-                    "Rangeprimarytosecondary1" REAL,
-                    "RangetoPrePlot1" REAL,
-                    "BrgtoPrePlot1" REAL,
-                    "PrimaryElevation1" REAL,
-                    "Sigma10" REAL,
-                    "SecondaryElevation1" REAL,
-                    "Sigma11" REAL,
-                    "Quality1" TEXT,
-                    "DeployedtoRetrievedEasting" REAL,
-                    "DeployedtoRetrievedNorthing" REAL,
-                    "DeployedtoRecoveredElevation" REAL,
-                    "DeployedtoRetrievedRange" REAL,
-                    "DeployedtoRetrievedBrg" REAL,
-                    "Comments" TEXT,
-                    "LinePoint" INTEGER,
-                    "RecIdx" INTEGER DEFAULT 1,
-                    "Date" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    "Year" INTEGER,
-                    "Month" INTEGER,
-                    "Week" INTEGER,
-                    "Day" TEXT,
-                    "JDay" INTEGER DEFAULT 0,
-                    "Date1" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    "Year1" INTEGER,
-                    "Month1" INTEGER,
-                    "Week1" INTEGER,
-                    "Day1" TEXT,
-                    "JDay1" INTEGER DEFAULT 0,
-                    "DepTime" INTEGER,
-                    "RecTime" INTEGER,
-                    "PointComment" TEXT,
-                    "REC_ID" INTEGER,
-                    "NODE_ID" INTEGER,
-                    "DEPLOY" INTEGER,
-                    "RPI" INTEGER,
-                    "PART_NO" INTEGER,
-                    "RPRE_X" REAL,
-                    "RPRE_Y" REAL,
-                    "RFIELD_X" REAL,
-                    "RFIELD_Y" REAL,
-                    "RFIELD_Z" REAL,
-                    "REC_X" REAL,
-                    "REC_Y" REAL,
-                    "REC_Z" REAL,
-                    "TIMECORR" REAL,
-                    "BULKSHFT" REAL,
-                    "QDRIFT" REAL,
-                    "LDRIFT" REAL,
-                    "TRIMPTCH" REAL,
-                    "TRIMROLL" REAL,
-                    "TRIMYAW" REAL,
-                    "PITCHFIN" REAL,
-                    "ROLLFIN" REAL,
-                    "YAWFIN" REAL,
-                    "TOTDAYS" REAL,
-                    "RECCOUNT" INTEGER,
-                    "CLKFLAG" INTEGER,
-                    "EC1_RUS0" REAL DEFAULT 0,
-                    "EC1_RUS1" REAL DEFAULT 0,
-                    "EC1_EDT0" REAL DEFAULT 0,
-                    "EC1_EDT1" REAL DEFAULT 0,
-                    "EC1_EPT0" REAL DEFAULT 0,
-                    "EC1_EPT1" REAL DEFAULT 0,
-                    "NODSTART" INTEGER DEFAULT 0,
-                    "DEPLOYTM" INTEGER DEFAULT 0,
-                    "PICKUPTM" INTEGER DEFAULT 0,
-                    "RUNTIME" INTEGER DEFAULT 0,
-                    "EC2_CD1" INTEGER DEFAULT 0,
-                    "TOTSHOTS" INTEGER DEFAULT 0,
-                    "TOTPROD" INTEGER DEFAULT 0,
-                    "SPSK" INTEGER DEFAULT 0,
-                    "TIER" INTEGER DEFAULT 1,
-                    "isExported" INTEGER DEFAULT 0,
-                    "isRecExported" INTEGER DEFAULT 0,
-                    "Area" TEXT,
-                    "RemoteUnit" TEXT,
-                     "AUQRCode" TEXT,
-                     "AURFID" TEXT,
-                     "CUSerialNumber" TEXT,
-                     "Status" TEXT,
-                     "DeploymentType" TEXT,
-                     "StartTimeEpoch" INTEGER,
-                     "StartTimeUTC" TEXT,
-                     "DeployTimeEpoch" INTEGER,
-                     "DeployTimeUTC" TEXT,
-                     "PickupTimeEpoch" INTEGER,
-                     "PickupTimeUTC" TEXT,
-                     "StopTimeEpoch" INTEGER,
-                     "StopTimeUTC" TEXT,
-                     "SPSX" REAL,
-                     "SPSY" REAL,
-                     "SPSZ" REAL,
-                     "ActualX" REAL,
-                     "ActualY" REAL,
-                     "ActualZ" REAL,
-                     "Deployed" TEXT,
-                     "PickedUp" TEXT,
-                     "Archived" TEXT,
-                     "DeviceID" INTEGER,
-                     "BinID" INTEGER,
-                     "ExpectedTraces" INTEGER,
-                     "CollectedTraces" INTEGER,
-                     "DownloadedDatainMB" INTEGER,
-                     "ExpectedDatainMB" INTEGER,
-                     "DownloadError" INTEGER
-              );
+CREATE TABLE IF NOT EXISTS "DSR" (
+    "ID" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "Solution_FK" INTEGER NOT NULL DEFAULT 1,
+    "RLPreplot_FK" INTEGER,
+    "LinePointIdx" INTEGER,
+    "Line" INTEGER,
+    "Station" INTEGER,
+    "Node" TEXT NOT NULL DEFAULT 'NA',
+
+    "PreplotEasting" REAL,
+    "PreplotNorthing" REAL,
+    "ROV" TEXT,
+    "TimeStamp" TEXT,
+    "PrimaryEasting" REAL,
+    "Sigma" REAL,
+    "PrimaryNorthing" REAL,
+    "Sigma1" REAL,
+    "SecondaryEasting" REAL,
+    "Sigma2" REAL,
+    "SecondaryNorthing" REAL,
+    "Sigma3" REAL,
+    "DeltaEprimarytosecondary" REAL,
+    "DeltaNprimarytosecondary" REAL,
+    "Rangeprimarytosecondary" REAL,
+    "RangetoPrePlot" REAL,
+    "BrgtoPrePlot" REAL,
+    "PrimaryElevation" REAL,
+    "Sigma4" REAL,
+    "SecondaryElevation" REAL,
+    "Sigma5" REAL,
+    "Quality" TEXT,
+    "ROV1" TEXT,
+    "TimeStamp1" TEXT,
+    "PrimaryEasting1" REAL,
+    "Sigma6" REAL,
+    "PrimaryNorthing1" REAL,
+    "Sigma7" REAL,
+    "SecondaryEasting1" REAL,
+    "Sigma8" REAL,
+    "SecondaryNorthing1" REAL,
+    "Sigma9" REAL,
+    "DeltaEprimarytosecondary1" REAL,
+    "DeltaNprimarytosecondary1" REAL,
+    "Rangeprimarytosecondary1" REAL,
+    "RangetoPrePlot1" REAL,
+    "BrgtoPrePlot1" REAL,
+    "PrimaryElevation1" REAL,
+    "Sigma10" REAL,
+    "SecondaryElevation1" REAL,
+    "Sigma11" REAL,
+    "Quality1" TEXT,
+    "DeployedtoRetrievedEasting" REAL,
+    "DeployedtoRetrievedNorthing" REAL,
+    "DeployedtoRecoveredElevation" REAL,
+    "DeployedtoRetrievedRange" REAL,
+    "DeployedtoRetrievedBrg" REAL,
+    "Comments" TEXT,
+    "LinePoint" INTEGER,
+    "RecIdx" INTEGER DEFAULT 1,
+    "Date" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    "Year" INTEGER,
+    "Month" INTEGER,
+    "Week" INTEGER,
+    "Day" TEXT,
+    "JDay" INTEGER DEFAULT 0,
+    "Date1" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    "Year1" INTEGER,
+    "Month1" INTEGER,
+    "Week1" INTEGER,
+    "Day1" TEXT,
+    "JDay1" INTEGER DEFAULT 0,
+    "DepTime" INTEGER,
+    "RecTime" INTEGER,
+    "PointComment" TEXT,
+    "REC_ID" INTEGER,
+    "NODE_ID" INTEGER,
+    "DEPLOY" INTEGER,
+    "RPI" INTEGER,
+    "PART_NO" INTEGER,
+    "RPRE_X" REAL,
+    "RPRE_Y" REAL,
+    "RFIELD_X" REAL,
+    "RFIELD_Y" REAL,
+    "RFIELD_Z" REAL,
+    "REC_X" REAL,
+    "REC_Y" REAL,
+    "REC_Z" REAL,
+    "TIMECORR" REAL,
+    "BULKSHFT" REAL,
+    "QDRIFT" REAL,
+    "LDRIFT" REAL,
+    "TRIMPTCH" REAL,
+    "TRIMROLL" REAL,
+    "TRIMYAW" REAL,
+    "PITCHFIN" REAL,
+    "ROLLFIN" REAL,
+    "YAWFIN" REAL,
+    "TOTDAYS" REAL,
+    "RECCOUNT" INTEGER,
+    "CLKFLAG" INTEGER,
+    "EC1_RUS0" REAL DEFAULT 0,
+    "EC1_RUS1" REAL DEFAULT 0,
+    "EC1_EDT0" REAL DEFAULT 0,
+    "EC1_EDT1" REAL DEFAULT 0,
+    "EC1_EPT0" REAL DEFAULT 0,
+    "EC1_EPT1" REAL DEFAULT 0,
+    "NODSTART" INTEGER DEFAULT 0,
+    "DEPLOYTM" INTEGER DEFAULT 0,
+    "PICKUPTM" INTEGER DEFAULT 0,
+    "RUNTIME" INTEGER DEFAULT 0,
+    "EC2_CD1" INTEGER DEFAULT 0,
+    "TOTSHOTS" INTEGER DEFAULT 0,
+    "TOTPROD" INTEGER DEFAULT 0,
+    "SPSK" INTEGER DEFAULT 0,
+    "TIER" INTEGER DEFAULT 1,
+    "isExported" INTEGER DEFAULT 0,
+    "isRecExported" INTEGER DEFAULT 0,
+    "Area" TEXT,
+    "RemoteUnit" TEXT,
+    "AUQRCode" TEXT,
+    "AURFID" TEXT,
+    "CUSerialNumber" TEXT,
+    "Status" TEXT,
+    "DeploymentType" TEXT,
+    "StartTimeEpoch" INTEGER,
+    "StartTimeUTC" TEXT,
+    "DeployTimeEpoch" INTEGER,
+    "DeployTimeUTC" TEXT,
+    "PickupTimeEpoch" INTEGER,
+    "PickupTimeUTC" TEXT,
+    "StopTimeEpoch" INTEGER,
+    "StopTimeUTC" TEXT,
+    "SPSX" REAL,
+    "SPSY" REAL,
+    "SPSZ" REAL,
+    "ActualX" REAL,
+    "ActualY" REAL,
+    "ActualZ" REAL,
+    "Deployed" TEXT,
+    "PickedUp" TEXT,
+    "Archived" TEXT,
+    "DeviceID" INTEGER,
+    "BinID" INTEGER,
+    "ExpectedTraces" INTEGER,
+    "CollectedTraces" INTEGER,
+    "DownloadedDatainMB" INTEGER,
+    "ExpectedDatainMB" INTEGER,
+    "DownloadError" INTEGER,
+    FOREIGN KEY ("Solution_FK") REFERENCES "DSRSolution"("ID") ON UPDATE CASCADE ON DELETE RESTRICT,
+    FOREIGN KEY ("RLPreplot_FK") REFERENCES "RLPreplot"("ID") ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT "ux_dsr_line_station_node" UNIQUE ("Line","Station","Node")
+);
+
+CREATE INDEX IF NOT EXISTS "ix_dsr_line_station"
+    ON "DSR"("Line","Station");
+
+CREATE INDEX IF NOT EXISTS "ix_dsr_node"
+    ON "DSR"("Node");
+
+CREATE INDEX IF NOT EXISTS "ix_dsr_recidx"
+    ON "DSR"("RecIdx");
+
+CREATE INDEX IF NOT EXISTS "ix_dsr_tier"
+    ON "DSR"("TIER");
+
+CREATE INDEX IF NOT EXISTS "ix_dsr_timestamp"
+    ON "DSR"("TimeStamp");
+
+CREATE INDEX IF NOT EXISTS "ix_dsr_timestamp1"
+    ON "DSR"("TimeStamp1");
+CREATE INDEX IF NOT EXISTS ix_dsr_rlpreplot_fk
+ON DSR(RLPreplot_FK);
+
 --create black box table (rov_box)
-CREATE TABLE  IF NOT EXISTS  rov_box (
-               "ID" INTEGER PRIMARY KEY,
-               "TimeStamp" TEXT,
-               VesselEasting REAL,
-               VesselNorthing REAL ,
-               VesselElevation REAL,
-               VesselHDG REAL,
-               VesselSOG REAL,
-               VesselCOG REAL,
-               ROV1_INS_Easting REAL,
-               ROV1_INS_Northing REAL,
-               ROV1_USBL_Easting REAL,
-               ROV1_USBL_Northing REAL,
-               ROV1Depth REAL,
-               ROV1HDG REAL,
-               ROV1SOG REAL,
-               ROV1COG REAL,
-               ROV1_TMS_Easting REAL,
-               ROV1_TMS_Northing REAL,
-               ROV1_TMS_Depth REAL,
-               ROV2_INS_Easting REAL,
-               ROV2_INS_Northing REAL,
-               ROV2_USBL_Easting REAL,
-               ROV2_USBL_Northing REAL,
-               ROV2Depth REAL,
-               ROV2HDG REAL,
-               ROV2SOG REAL,
-               ROV2COG REAL,
-               ROV2_TMS_Easting REAL,
-               ROV2_TMS_Northing REAL,
-               ROV2_TMS_Depth REAL,
-               Crane_Easting REAL,
-               Crane_Northing REAL,
-               Crane_Depth REAL,
-               GNSS1_NOS INTEGER,
-               GNSS1_DiffAge REAL,
-               GNSS1_FixQuality INTEGER,
-               GNSS1_HDOP REAL,
-               GNSS1_PDOP REAL,
-               GNSS1_VDOP REAL,
-               GNSS2_NOS INTEGER,
-               GNSS2_DiffAge REAL,
-               GNSS2_FixQuality INTEGER,
-               GNSS2_HDOP REAL,
-               GNSS2_PDOP REAL,
-               GNSS2_VDOP REAL,
-               ROV1_PITCH REAL,
-               ROV1_ROLL REAL,
-               ROV2_PITCH REAL,
-               ROV2_ROLL REAL,
-               "Vessel" TEXT,
-               "ROV1" TEXT,
-               "ROV2" TEXT,
-               "GNSS1" TEXT,
-               "GNSS2" TEXT,
-               "FileName" Text);
+CREATE TABLE IF NOT EXISTS BBox_Configs_List (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name TEXT NOT NULL,
+    IsDefault INTEGER DEFAULT 0,
+    rov1_name TEXT,
+    rov2_name TEXT,
+    gnss1_name TEXT,
+    gnss2_name Text,
+    CONSTRAINT ux_bbox_configs_name UNIQUE (Name)
+);
+CREATE TRIGGER IF NOT EXISTS trg_bbox_default_singleton
+AFTER UPDATE OF IsDefault ON BBox_Configs_List
+WHEN NEW.IsDefault = 1
+BEGIN
+    UPDATE BBox_Configs_List
+    SET IsDefault = 0
+    WHERE ID != NEW.ID;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_bbox_default_singleton_ins
+AFTER INSERT ON BBox_Configs_List
+WHEN NEW.IsDefault = 1
+BEGIN
+    UPDATE BBox_Configs_List
+    SET IsDefault = 0
+    WHERE ID != NEW.ID;
+END;
+CREATE TABLE IF NOT EXISTS BBox_Config (
+    ID INTEGER PRIMARY KEY,
+    FieldName TEXT NOT NULL,
+    FileColumn TEXT,
+    inUse INTEGER DEFAULT 0,
+    CONFIG_FK INTEGER NOT NULL,
+    FOREIGN KEY (CONFIG_FK) REFERENCES BBox_Configs_List(ID)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT ux_bbox_config_cfg_field UNIQUE (CONFIG_FK, FieldName)
+);
+CREATE TABLE IF NOT EXISTS BlackBox_Files (
+            ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            FileName TEXT NOT NULL,
+            Config_FK INTEGER,
+            UploadedAt TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (Config_FK) REFERENCES BBox_Configs_List(ID) ON DELETE CASCADE,
+            UNIQUE(FileName, Config_FK)
+        );
+CREATE TABLE IF NOT EXISTS BlackBox (
+            ID INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            TimeStamp TEXT,
+
+            VesselEasting REAL,
+            VesselNorthing REAL,
+            VesselElevation REAL,
+            VesselHDG REAL,
+            VesselSOG REAL,
+            VesselCOG REAL,
+
+            GNSS1_Easting REAL,
+            GNSS1_Northing REAL,
+            GNSS1_Elevation REAL,
+            GNSS2_Easting REAL,
+            GNSS2_Northing REAL,
+            GNSS2_Elevation REAL,
+
+            ROV1_INS_Easting REAL,
+            ROV1_INS_Northing REAL,
+            ROV1_USBL_Easting REAL,
+            ROV1_USBL_Northing REAL,
+            ROV1_Depth REAL,
+            ROV1_HDG REAL,
+            ROV1_SOG REAL,
+            ROV1_COG REAL,
+            ROV1_TMS_Easting REAL,
+            ROV1_TMS_Northing REAL,
+            ROV1_TMS_Depth REAL,
+
+            ROV2_INS_Easting REAL,
+            ROV2_INS_Northing REAL,
+            ROV2_USBL_Easting REAL,
+            ROV2_USBL_Northing REAL,
+            ROV2_Depth REAL,
+            ROV2_HDG REAL,
+            ROV2_SOG REAL,
+            ROV2_COG REAL,
+            ROV2_TMS_Easting REAL,
+            ROV2_TMS_Northing REAL,
+            ROV2_TMS_Depth REAL,
+
+            Crane_Easting REAL,
+            Crane_Northing REAL,
+            Crane_Depth REAL,
+
+            GNSS1_RefStation TEXT,
+            GNSS1_NOS INTEGER,
+            GNSS1_DiffAge REAL,
+            GNSS1_FixQuality INTEGER,
+            GNSS1_HDOP REAL,
+            GNSS1_PDOP REAL,
+            GNSS1_VDOP REAL,
+
+            GNSS2_RefStation TEXT,
+            GNSS2_NOS INTEGER,
+            GNSS2_DiffAge REAL,
+            GNSS2_FixQuality INTEGER,
+            GNSS2_HDOP REAL,
+            GNSS2_PDOP REAL,
+            GNSS2_VDOP REAL,
+
+            ROV1_PITCH REAL,
+            ROV1_ROLL REAL,
+            ROV2_PITCH REAL,
+            ROV2_ROLL REAL,
+
+            ROV1_Depth1 REAL,
+            ROV1_Depth2 REAL,
+            ROV2_Depth1 REAL,
+            ROV2_Depth2 REAL,
+
+            Barometer REAL,
+
+            File_FK INTEGER,
+            FOREIGN KEY (File_FK) REFERENCES BlackBox_Files(ID) ON DELETE CASCADE
+        );
+CREATE INDEX IF NOT EXISTS idx_blackbox_ts ON BlackBox(TimeStamp);
+CREATE INDEX IF NOT EXISTS idx_blackbox_file ON BlackBox(File_FK);
+
 --Create Source Solution
 CREATE TABLE  IF NOT EXISTS  SLSolution (
         ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -770,5 +884,146 @@ SELECT
      ORDER BY (COALESCE(RealLineLength,0)=0), COALESCE(RealLineLength,0) ASC, ID ASC
      LIMIT 1
   ) AS ShortestLength;
+CREATE VIEW IF NOT EXISTS V_DSR_LineSummary AS
+SELECT
+    d.Line                                   AS Line,
+
+    -- Planned points
+    rl.Points                                AS PlannedPoints,
+
+    -- RL line flags
+    MAX(rl.isLineClicked)                    AS isLineClicked,
+    MAX(rl.isLineDeployed)                   AS isLineDeployed,
+    MAX(rl.isValidated)                      AS isValidated,
+
+    -- Basic counts
+    COUNT(*)                                 AS DSRRows,
+    COUNT(DISTINCT d.Station)                AS Stations,
+    COUNT(DISTINCT d.Node)                   AS Nodes,
+
+    MIN(d.Station)                           AS MinStation,
+    MAX(d.Station)                           AS MaxStation,
+
+    -- ROV Deployment / Retrieval counts
+    SUM(CASE
+        WHEN d.TimeStamp IS NOT NULL AND TRIM(d.TimeStamp) <> ''
+        THEN 1 ELSE 0
+    END)                                    AS DeployedCount,
+
+    SUM(CASE
+        WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> ''
+        THEN 1 ELSE 0
+    END)                                    AS RetrievedCount,
+
+    -- SM flags
+    SUM(CASE
+        WHEN UPPER(TRIM(d.Deployed)) = 'YES'
+        THEN 1 ELSE 0
+    END)                                    AS SMCount,
+
+    SUM(CASE
+        WHEN UPPER(TRIM(d.PickedUp)) = 'YES'
+        THEN 1 ELSE 0
+    END)                                    AS SMRCount,
+
+    -- Processed points
+    SUM(CASE
+        WHEN d.REC_ID IS NOT NULL
+        THEN 1 ELSE 0
+    END)                                    AS ProcessedCount,
+
+    -- Timing (deployment)
+    MIN(d.TimeStamp)                         AS FirstDeployTime,
+    MAX(d.TimeStamp)                         AS LastDeployTime,
+    ROUND(
+        (julianday(MAX(d.TimeStamp)) - julianday(MIN(d.TimeStamp))) * 24,
+        2
+    )                                        AS DeploymentHours,
+
+    -- Timing (retrieval)
+    MIN(d.TimeStamp1)                        AS FirstRetrieveTime,
+    MAX(d.TimeStamp1)                        AS LastRetrieveTime,
+    ROUND(
+        (julianday(MAX(d.TimeStamp1)) - julianday(MIN(d.TimeStamp1))) * 24,
+        2
+    )                                        AS RetrievalHours,
+
+    -- Total operation time
+    ROUND(
+        (julianday(MAX(d.TimeStamp1)) - julianday(MIN(d.TimeStamp))) * 24,
+        2
+    )                                        AS TotalOperationHours,
+
+    -- Percentages vs planned
+    ROUND(
+        100.0 * SUM(CASE
+            WHEN d.TimeStamp IS NOT NULL AND TRIM(d.TimeStamp) <> ''
+            THEN 1 ELSE 0 END)
+        / NULLIF(rl.Points, 0),
+        1
+    )                                        AS DeployedPct,
+
+    ROUND(
+        100.0 * SUM(CASE
+            WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> ''
+            THEN 1 ELSE 0 END)
+        / NULLIF(rl.Points, 0),
+        1
+    )                                        AS RetrievedPct,
+
+    ROUND(
+        100.0 * SUM(CASE
+            WHEN d.REC_ID IS NOT NULL
+            THEN 1 ELSE 0 END)
+        / NULLIF(rl.Points, 0),
+        1
+    )                                        AS ProcessedPct,
+
+    -- Solution counts
+    SUM(CASE WHEN d.Solution_FK = 1 THEN 1 ELSE 0 END) AS Normal,
+    SUM(CASE WHEN d.Solution_FK = 2 THEN 1 ELSE 0 END) AS CoDeployed,
+    SUM(CASE WHEN d.Solution_FK = 3 THEN 1 ELSE 0 END) AS Losted,
+    SUM(CASE WHEN d.Solution_FK = 4 THEN 1 ELSE 0 END) AS Missplaced,
+    SUM(CASE WHEN d.Solution_FK = 5 THEN 1 ELSE 0 END) AS WrongID,
+    SUM(CASE WHEN d.Solution_FK = 6 THEN 1 ELSE 0 END) AS Overlap,
+
+    -- Delta statistics
+    AVG(d.DeltaEprimarytosecondary)          AS AvgDeltaE,
+    MIN(d.DeltaEprimarytosecondary)          AS MinDeltaE,
+    MAX(d.DeltaEprimarytosecondary)          AS MaxDeltaE,
+
+    AVG(d.DeltaNprimarytosecondary)          AS AvgDeltaN,
+    MIN(d.DeltaNprimarytosecondary)          AS MinDeltaN,
+    MAX(d.DeltaNprimarytosecondary)          AS MaxDeltaN,
+
+    AVG(d.DeltaEprimarytosecondary1)         AS AvgDeltaE1,
+    MIN(d.DeltaEprimarytosecondary1)         AS MinDeltaE1,
+    MAX(d.DeltaEprimarytosecondary1)         AS MaxDeltaE1,
+
+    AVG(d.DeltaNprimarytosecondary1)         AS AvgDeltaN1,
+    MIN(d.DeltaNprimarytosecondary1)         AS MinDeltaN1,
+    MAX(d.DeltaNprimarytosecondary1)         AS MaxDeltaN1,
+
+    -- Sigma statistics (ONLY Sigma..Sigma3)
+    AVG(d.Sigma)   AS AvgSigma,
+    MIN(d.Sigma)   AS MinSigma,
+    MAX(d.Sigma)   AS MaxSigma,
+
+    AVG(d.Sigma1)  AS AvgSigma1,
+    MIN(d.Sigma1)  AS MinSigma1,
+    MAX(d.Sigma1)  AS MaxSigma1,
+
+    AVG(d.Sigma2)  AS AvgSigma2,
+    MIN(d.Sigma2)  AS MinSigma2,
+    MAX(d.Sigma2)  AS MaxSigma2,
+
+    AVG(d.Sigma3)  AS AvgSigma3,
+    MIN(d.Sigma3)  AS MinSigma3,
+    MAX(d.Sigma3)  AS MaxSigma3
+
+FROM DSR d
+LEFT JOIN RLPreplot rl ON rl.Line = d.Line
+GROUP BY d.Line, rl.Points
+ORDER BY d.Line;
 
 

@@ -1,0 +1,16 @@
+<tbody id="bbox-list-tbody"
+       data-plot-url="{% url 'bbox_file_selected' %}">
+{% if bbox_file_list %}
+{% for f in bbox_file_list %}
+    <tr data-file-id ="{{ f.ID}}"
+    data-file-name="{{ f.FileName }}">
+       <td>{{ forloop.counter }}<input type="checkbox" class="ms-2 bbox-file-checkbox" value="{{ f.ID }}"></td>
+       <td>{{ f.FileName }}</td>
+    </tr>
+{% endfor %}
+{% else %}
+    <tr class="bg-warning">
+         <td colspan="2" class="bg-warning text-danger">No data</td>
+    </tr>
+{% endif %}
+</tbody>

@@ -8,16 +8,16 @@
 
   <!-- HEADER CARD -->
   <div class="card shadow-sm mb-3">
-    <div class="card-header d-flex align-items-center justify-content-between">
-      <h5 class="mb-0">
+    <div class="card-header clearfix">
+      <h4 class="mb-0 float-start">
         <i class="fa-solid fa-database me-2"></i>
         Base project settings
         <small class="text-muted">/ {{ project.name }}</small>
-      </h5>
+      </h4>
 
       <!-- ICON BUTTON: OPEN MODAL -->
       <button type="button"
-              class="btn btn-sm btn-primary"
+              class="btn  btn-success float-end me-2"
               data-bs-toggle="modal"
               data-bs-target="#csvuploadModal"
               title="Upload csv layer" >
@@ -25,7 +25,7 @@
 
       </button>
       <button type="button"
-              class="btn btn-sm btn-primary"
+              class="btn  btn-primary float-end me-2"
               data-bs-toggle="modal"
               data-bs-target="#uploadModal"
               title="Upload files"

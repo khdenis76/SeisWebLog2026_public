@@ -1,4 +1,3 @@
-{% load static %}
 
      <!-- MODAL: UPLOAD FORM -->
   <div class="modal fade" id="uploadModal" tabindex="-1" aria-labelledby="uploadModalLabel" aria-hidden="true">
@@ -17,7 +16,6 @@
                 id="preplot-load-form"
                 name="preplot-load-form"
                 enctype="multipart/form-data"
-                action="{% url 'upload_preplots' %}"
                 class="row g-3">
             {% csrf_token %}
 

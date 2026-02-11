@@ -1,8 +1,12 @@
 Django>=5.1,<6.0
-numpy>=2.3.5
-pandas>=3.0.0
+numpy~=2.0.0
+pandas~=2.3.3
 python-dotenv>=1.0
 fiona>=1.10.1
 shapely>=2.1.2
 bokeh >=3.8.2
 geopandas >=1.1.2
+pytest~=9.0.2
+Pygments~=2.19.2
+xyzservices~=2025.11.0
+pyproj~=3.7.2

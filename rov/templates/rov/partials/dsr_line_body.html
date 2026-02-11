@@ -1,10 +1,74 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+
+{% for r in lines %}
+<tr data-line="{{ r.Line }}
+    data-day="{{ r.FirstDeployTime|default_if_none:''|slice:":10" }}"
+    data-depstart="{{ r.FirstDeployTime|default_if_none:'' }}"
+    data-depend="{{ r.LastDeployTime|default_if_none:'' }}">
+  <td class="text-center sticky-col sticky-col-1">
+    <input type="checkbox" class="dsr-line-checkbox" value="{{ r.Line }}">
+  </td>
+
+  <td class="sticky-col sticky-col-2">{{ r.Line }}</td>
+
+  <td>{{ r.PlannedPoints|default_if_none:"" }}</td>
+  <td>{{ r.DSRRows }}</td>
+  <td>{{ r.Stations }}</td>
+  <td>{{ r.Nodes }}</td>
+  <td>{{ r.MinStation }}</td>
+  <td>{{ r.MaxStation }}</td>
+  <td>{{ r.DeployedCount }}</td>
+  <td>{{ r.RetrievedCount }}</td>
+  <td>{{ r.SMCount }}</td>
+  <td>{{ r.SMRCount }}</td>
+  <td>{{ r.ProcessedCount }}</td>
+
+  {# Dep % conditional #}
+  <td class="
+      {% if r.DeployedPct is not None and r.DeployedPct < 90 %}
+        bg-danger text-white
+      {% endif %}
+    ">
+    {{ r.DeployedPct|floatformat:1 }}
+  </td>
+
+  <td>{{ r.RetrievedPct|floatformat:1 }}</td>
+  <td>{{ r.ProcessedPct|floatformat:1 }}</td>
+
+  <td>{{ r.FirstDeployTime|default_if_none:"" }}</td>
+  <td>{{ r.LastDeployTime|default_if_none:"" }}</td>
+  <td>{{ r.DeploymentHours|floatformat:2 }}</td>
+  <td>{{ r.FirstRetrieveTime|default_if_none:"" }}</td>
+  <td>{{ r.LastRetrieveTime|default_if_none:"" }}</td>
+  <td>{{ r.RetrievalHours|floatformat:2 }}</td>
+  <td>{{ r.TotalOperationHours|floatformat:2 }}</td>
+
+  <td>{{ r.AvgDeltaE|floatformat:2 }}</td>
+  <td>{{ r.MinDeltaE|floatformat:2 }}</td>
+  <td>{{ r.MaxDeltaE|floatformat:2 }}</td>
+  <td>{{ r.AvgDeltaN|floatformat:2 }}</td>
+  <td>{{ r.MinDeltaN|floatformat:2 }}</td>
+  <td>{{ r.MaxDeltaN|floatformat:2 }}</td>
+  <td>{{ r.AvgDeltaE1|floatformat:2 }}</td>
+  <td>{{ r.MinDeltaE1|floatformat:2 }}</td>
+  <td>{{ r.MaxDeltaE1|floatformat:2 }}</td>
+  <td>{{ r.AvgDeltaN1|floatformat:2 }}</td>
+  <td>{{ r.MinDeltaN1|floatformat:2 }}</td>
+  <td>{{ r.MaxDeltaN1|floatformat:2 }}</td>
+
+  <td>{{ r.AvgSigma|floatformat:3 }}</td>
+  <td>{{ r.MinSigma|floatformat:3 }}</td>
+  <td>{{ r.MaxSigma|floatformat:3 }}</td>
+  <td>{{ r.AvgSigma1|floatformat:3 }}</td>
+  <td>{{ r.MinSigma1|floatformat:3 }}</td>
+  <td>{{ r.MaxSigma1|floatformat:3 }}</td>
+  <td>{{ r.AvgSigma2|floatformat:3 }}</td>
+  <td>{{ r.MinSigma2|floatformat:3 }}</td>
+  <td>{{ r.MaxSigma2|floatformat:3 }}</td>
+  <td>{{ r.AvgSigma3|floatformat:3 }}</td>
+  <td>{{ r.MinSigma3|floatformat:3 }}</td>
+  <td>{{ r.MaxSigma3|floatformat:3 }}</td>
+</tr>
+{% empty %}
+<tr><td colspan="100%" class="text-center text-muted">No data</td></tr>
+{% endfor %}
+

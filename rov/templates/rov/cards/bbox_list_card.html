@@ -15,7 +15,24 @@
             </button>
         </div>
         <div class="card-body collapse show" id="bbox-log-card-body">
+           <div class="table-scroll w-100" style="height: 50vh">
+               <table class="table table-hover" id="bbox-file-table">
+                   <thead>
+                         <th><input type="checkbox" id="mainBboxFileCheckBox"></th>
+                         <th>File Name</th>
+                   </thead>
+                   {{ bbox_file_tbody }}
+               </table>
+           </div>
 
+        </div><!--End of card-body-->
+        <div class="card-footer clearfix">
+            <button type="button"
+                    class="btn btn-danger float-end me-2"
+                    id="deleteBboxFileBtn"
+                    data-delete-url="{% url 'delete_bbox_files' %}">
+                <i class="fas fa-trash-can me-2"></i> DELETE
+            </button>
         </div>
     </div>
 </div>

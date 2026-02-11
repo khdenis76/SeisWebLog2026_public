@@ -32,7 +32,7 @@ urlpatterns = [
     path('projects/<int:pk>/set-active/', project_set_active_view, name='project_set_active'),
     path('login/', auth_views.LoginView.as_view(template_name='registration/login.html'), name='login'),
     path("project/base/", include("baseproject.urls")),
-
+    path("project/rov/",include("rov.urls")),
 
     path('', include('core.urls')),
 ]

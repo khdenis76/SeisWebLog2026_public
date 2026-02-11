@@ -4,7 +4,10 @@
     </button>
 </div>
 <div class="table-scroll border rounded">
-  <table class="table table-hover table-sm table-striped mb-0" id="rlpreplotTable">
+  <table class="table table-hover table-sm table-striped mb-0"
+         id="rlpreplotTable"
+         data-line-click-url="{% url 'rl_line_click' %}"
+  >
     <thead class="table-light">
       <tr>
        <th><input type="checkbox" id="MainRLPreplotCheckbox" data-bs-toggle="tooltip" data-bs-title="Click to select/unselect all lines"></th>
@@ -18,14 +21,14 @@
     </thead>
     <tbody id="rlBody">
       {% for r in rl_rows %}
-        <tr>
+        <tr data-line-id="{{ r.ID }}">
           <td><input type="checkbox" class="rl-preplot-checkbox" data-line-id="{{ r.ID }}" data-tier-line ="{{ r.TierLine }}"></td>
-          <td>{{ r.Line }}</td>
-          <td>{{ r.Points }}</td>
-          <td>{{ r.FirstPoint }}</td>
-          <td>{{ r.LastPoint }}</td>
-          <td>{{ r.LineLength|floatformat:0 }}</td>
-          <td>{{ r.Tier }}</td>
+          <td class="rline-td">{{ r.Line }}</td>
+          <td class="rline-td">{{ r.Points }}</td>
+          <td class="rline-td">{{ r.FirstPoint }}</td>
+          <td class="rline-td">{{ r.LastPoint }}</td>
+          <td class="rline-td">{{ r.LineLength|floatformat:0 }}</td>
+          <td class="rline-td">{{ r.Tier }}</td>
         </tr>
       {% empty %}
         <tr>

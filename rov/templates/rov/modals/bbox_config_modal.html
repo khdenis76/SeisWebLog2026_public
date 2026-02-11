@@ -1,12 +1,12 @@
 <div class="modal fade" id="bbox-config-modal" tabindex="-1" aria-hidden="true">
-             <div class="modal-dialog modal-dialog-centered">
+             <div class="modal-dialog modal-dialog-centered  modal-lg">
                          <div class="modal-content">
                                   <div class="modal-header">
                                       <h5><i class="fas fa-sliders me-2"></i> NEW BLACK BOX LOG CONFIG  </h5>
                                   </div>
                                   <div class="modal-body">
-                                           <form id="bbox-config-form" method="post" action="{% url 'upload_csv_layer_ajax' %}">
-                                      <input id="bboxFileInput"
+                                           <form id="bbox-config-form" method="post" action="{% url 'save_bbox_config' %}">
+                                      <input id="bbox-file-input"
                                              class="form-control"
                                              type="file"
                                              accept=".csv"
@@ -16,61 +16,65 @@
                                           <label for="layer-name" class="form-label">Config Name</label>
                                           <input id="layer-name" name="layer_name" class="form-control">
                                        </div>
-                                       <div class="mb-2">
-                                           <label for="selPointName" class="form-label">Point name</label>
-                                           <select id="selPointName" name="pointfield" class="form-select form-control"></select>
+                                       <div class="mt-2 mb-2 w-100">
+                                             <table class="table table-hover">
+                                                    <tbody>
+                                                        <tr><td colspan="2">
+                                                            <div class="input-group mb-3">
+                                                                     <span class="input-group-text" id="basic-addon1">VESSEL NAME</span>
+                                                                     <input type="text"
+                                                                            class="form-control"
+                                                                            placeholder="Vessel name"
+                                                                            aria-label="Vessel name"
+                                                                            name="vessel_name"
+                                                                            id="vessel-name"
+                                                                            aria-describedby="basic-addon1">
+                                                            </div>
+                                                        </td> </tr>
+                                                        <tr>
+                                                            <td>
+                                                                <div class="input-group mb-3">
+                                                                     <span class="input-group-text" id="basic-addon1">ROV 1</span>
+                                                                     <input type="text" id="rov1-name" name="rov1_name">
+                                                                </div>
+                                                            </td>
+                                                            <td>
+                                                                <div class="input-group mb-3">
+                                                                     <span class="input-group-text" id="basic-addon1">ROV 2</span>
+                                                                     <input type="text" id="rov2-name" name="rov2_name">
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                           <tr>
+                                                              <td>
+                                                                <div class="input-group mb-3">
+                                                                     <span class="input-group-text" id="basic-addon1">GNSS 1</span>
+                                                                     <input type="text" id="gnss1-name" name="gnss1_name">
+                                                                </div>
+                                                            </td>
+                                                            <td>
+                                                                <div class="input-group mb-3">
+                                                                     <span class="input-group-text" id="basic-addon1">GNSS 2</span>
+                                                                     <input type="text" id="gnss2-name" name="gnss2_name">
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    </tbody>
+                                             </table>
                                        </div>
-                                      <div class="mb-2">
-                                          <label for="selX" class="form-label">X-Coordinate(Easting)</label>
-                                           <select id="selX" name="xfield" class="form-select"></select>
-                                      </div>
-                                      <div class="mb-2">
-                                           <label for="selY" class="form-label">Y-coordinate(Northing)</label>
-                                           <select id="selY" name="yfield" class="form-select"></select>
-                                      </div>
-                                      <div class="mb-2">
+                                       {{ bbox_fields_selectors|safe }}
 
-
-                                            <label for="selZ" class="form-label">Z-coordinate(Elevation)</label>
-                                            <select id="selZ" name="zfield" class="form-select"></select>
-                                      </div>
-                                      <div class="mt-2 mb-2">
-                                            <label for="attr1-name" class="form-label">Name for Attr. I</label>
-                                            <input id="attr1-name" name="attr1_name" value="Attribute One" class="form-control">
-
-                                            <label for="attr1" class="form-label">Attribute column</label>
-                                            <select id="attr1" name="attr1"  class="form-select"></select>
-                                      </div>
-                                       <div class="mb-2">
-                                            <label for="attr2-name" class="form-label">Name for Attr. II</label>
-                                            <input id="attr2-name" name="attr2_name" value="Attribute Two" class="form-control">
-
-                                            <label for="attr2" class="form-label">Attribute column</label>
-                                            <select id="attr2" name="attr2"  class="form-select"></select>
-                                      </div>
-                                       <div class="mb-2">
-                                            <label for="attr3-name" class="form-label">Name for Attr. III</label>
-                                            <input id="attr3-name" name="attr3_name" value="Attribute Three" class="form-control">
-
-                                            <label for="attr3" class="form-label">Attribute column</label>
-                                            <select id="attr3" name="attr3" class="form-select"></select>
-                                      </div>
-                                      <div class="mb-2">
-                                          <label for="attr3-name" class="form-label">Description</label>
-                                          <input id="comments" name="comments" value="N/A" class="form-control">
-                                      </div>
                                    </form>
-<div id="csvErr" class="alert alert-danger d-none mt-2"></div>
+                                  <div id="csvErr" class="alert alert-danger d-none mt-2"></div>
                                   </div>
                                   <div class="modal-footer">
                                       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                                             Cancel
                                       </button>
-                                      <button id="btnSaveCsv"
+                                      <button id="btnSaveBBoxCfg"
                                               type="button"
-                                              class="btn btn-danger"
-                                              data-bs-dismiss="modal">
-                                              Save
+                                              class="btn btn-danger">
+                                          <i class="fas fa-floppy-disk me-2"></i>Save
                                       </button>
                                   </div>
                          </div>

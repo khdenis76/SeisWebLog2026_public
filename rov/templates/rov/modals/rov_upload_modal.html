@@ -1,27 +1,27 @@
-<!-- ROV Upload Modal -->
 <div class="modal fade" id="rovUploadModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
 
       <div class="modal-header">
-        <h5 class="modal-title fw-semibold">
-          Upload ROV Files
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <h5 class="modal-title fw-semibold">Upload ROV Files</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
 
-      <form id="rov-upload-form"
-            method="post"
-            enctype="multipart/form-data"
-            action="{% url 'rov_upload_file' %}">
+      <form id="rov-upload-form" method="post" enctype="multipart/form-data" action="">
         {% csrf_token %}
 
         <div class="modal-body">
 
-          <!-- File type -->
           <div class="mb-3">
-            <label for="rov-file-type" class="form-label fw-semibold">File type</label>
-            <select class="form-select" name="file_type" id="rov-file-type" required>
+            <label class="form-label fw-semibold">File type</label>
+            <select class="form-select"
+                    id="rov-file-type"
+                    name="file_type"
+                    required
+                    data-url-dsr="{% url 'rov_upload_dsr' %}"
+                    data-url-survey-manager="{% url 'rov_upload_survey_manager' %}"
+                    data-url-black-box="{% url 'rov_upload_black_box' %}"
+                    data-url-rec-db="{% url 'rov_upload_rec_db' %}">
               <option value="" selected disabled>Select file type</option>
               <option value="DSR">DSR</option>
               <option value="SURVEY_MANAGER">Survey Manager</option>
@@ -29,35 +29,50 @@
               <option value="REC_DB">REC_DB</option>
             </select>
           </div>
+          <label for="bblog-config-select" class="form-label">BBLog configuration:</label>
+          <div class="mb-3 input-group">
+               <select id="bblog-config-select" class="form-control">
 
-          <!-- File -->
+                  {%  for c in bbox_config_list%}
+                      {% if c.is_default == true %}
+                         <option selected value="{{ c.id }}">
+                             {{ c.name }}
+                         </option>
+                      {% else %}
+                         <option value="{{ c.id }}">
+                             {{ c.name }}
+                         </option>
+                      {% endif %}
+                      {% endfor %}
+
+              </select>
+                <button class="btn btn-outline-secondary"
+                        type="button"
+                        id="set-default-bbox"
+                        data-post-url="{% url 'set_default_bbox_config' %}">
+                    <i class="fas fa-thumbtack me-2"></i> Set Default
+                </button>
+          </div>
           <div class="mb-3">
-            <label for="rov-file-input" class="form-label fw-semibold">Select file</label>
+            <label class="form-label fw-semibold">Select files</label>
             <input type="file"
                    class="form-control"
-                   name="file"
                    id="rov-file-input"
+                   name="files"
+                   multiple
                    disabled
                    required>
             <div class="form-text" id="rov-file-help">Select file type first</div>
+            <div class="small text-muted mt-1" id="rov-files-count"></div>
           </div>
 
-          <!-- Optional: status text -->
           <div class="small text-muted" id="rov-upload-status"></div>
 
         </div>
 
         <div class="modal-footer">
-          <button type="button"
-                  class="btn btn-secondary"
-                  data-bs-dismiss="modal">
-            Cancel
-          </button>
-
-          <button type="submit"
-                  class="btn btn-primary fw-semibold"
-                  id="rov-upload-btn"
-                  disabled>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary fw-semibold" id="rov-upload-btn" disabled>
             Upload
           </button>
         </div>

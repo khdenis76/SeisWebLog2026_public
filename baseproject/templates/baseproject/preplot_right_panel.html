@@ -17,23 +17,34 @@
                <ul class="nav nav-pills mb-1" id="pills-tab" role="tablist">
   <li class="nav-item" role="presentation">
     <button class="nav-link active" id="pills-map-tab" data-bs-toggle="pill" data-bs-target="#pills-map-page" type="button" role="tab" aria-controls="pills-map-page" aria-selected="true">
-        <i class="fas fa-map pe-2"> </i> PROJECT MAP
+        <i class="fas fa-map pe-2 text-success"> </i> PROJECT MAP
     </button>
   </li>
   <li class="nav-item" role="presentation">
     <button class="nav-link" id="pills-header-tab" data-bs-toggle="pill" data-bs-target="#pills-header-page" type="button" role="tab" aria-controls="pills-header-page" aria-selected="false">
-        <i class="fas fa-header me-2"></i> SPS Headers
+        <i class="fas fa-header me-2 text-success"></i> SPS Headers
     </button>
   </li>
   <li class="nav-item" role="presentation">
     <button class="nav-link" id="pills-shapes-tab" data-bs-toggle="pill" data-bs-target="#pills-shapes-page" type="button" role="tab" aria-controls="pills-shapes-page" aria-selected="false">
-        <i class="fas fa-shapes"></i> Shapes</button>
+        <i class="fas fa-shapes text-success"></i> Shapes</button>
   </li>
   <li class="nav-item" role="presentation">
     <button class="nav-link" id="pills-vessels-tab" data-bs-toggle="pill" data-bs-target="#pills-vessels-page" type="button" role="tab" aria-controls="pills-vessels-page" aria-selected="false">
-        <i class="fas fa-ship me-2"></i> Vessels
+        <i class="fas fa-ship me-2 text-success"></i> Vessels
     </button>
   </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="rl-points-tab" data-bs-toggle="pill" data-bs-target="#rl-points-page" type="button" role="tab" aria-controls="rl-points-page" aria-selected="false">
+        <i class="fas fa-map-location me-2"></i>RL
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="sl-points-tab" data-bs-toggle="pill" data-bs-target="#sl-points-page" type="button" role="tab" aria-controls="sl-points-page" aria-selected="false">
+        <i class="fas fa-bomb text-danger me-2"></i>SL
+    </button>
+  </li>
+
 </ul>
             </div>
             <div class="card-body tab-content mb-0" id="pills-tabContent">
@@ -57,6 +68,32 @@
                          {% include "baseproject/partials/shapes.html" %}
                      </div>
                      <div class="tab-pane fade" id="pills-vessels-page" role="tabpanel" aria-labelledby="pills-vessels-tab" tabindex="0">...</div>
+                     <div class="tab-pane fade" id="rl-points-page" role="tabpanel" aria-labelledby="rl-points-tab" tabindex="0">
+                         <div class="clearfix">
+                             <button class="btn btn-danger float-end me-2"
+                                     id="rpDeleteBtn"
+                                     data-delete-url="{% url 'rp_points_delete' %}">
+                             >
+                                 <i class="fas fa-trash me-2"></i> DELETE SELECTED
+                             </button>
+                         </div>
+                         <div class="w-100 table-scroll" id="rl-points-div" style="height:50vh">
+
+                         </div>
+                     </div>
+                     <div class="tab-pane fade" id="sl-points-page" role="tabpanel" aria-labelledby="sl-points-tab" tabindex="0">
+                         <div class="clearfix">
+                             <button class="btn btn-danger float-end me-2"
+                                     id="spDeleteBtn"
+                                     data-delete-url="{% url 'sp_points_delete' %}">
+                             >
+                                 <i class="fas fa-trash me-2"></i> DELETE SELECTED
+                             </button>
+                         </div>
+                         <div class="w-100 table-scroll" id="sl-points-div" style="height:50vh">
+
+                         </div>
+                     </div>
 
             </div>
         </div><!--End of right card-->

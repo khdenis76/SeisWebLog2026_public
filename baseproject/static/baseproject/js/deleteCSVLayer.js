@@ -1,4 +1,5 @@
 import { getCSRFToken } from "./csrf.js";
+import {renderBokehInto} from "./renderBokeh.js";
 
 export function initDeleteLayersBtn() {
   const btn = document.getElementById("deleteLayersBtn");
@@ -35,6 +36,10 @@ export function initDeleteLayersBtn() {
       if (!resp.ok || !data.ok) {
         alert(data.error || "Delete failed");
         return;
+      }
+      // ✅ redraw preplot map
+      if (data.preplot_map) {
+          renderBokehInto("preplot-map-div", data.preplot_map);
       }
 
       // ✅ remove rows from table

@@ -1,10 +1,72 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="card shadow" id="production-card">
+    <div class="card-header bg-primary clearfix p-0">
+        <h6 class="float-start text-white ms-2 mt-1">
+            <i class="fas fa-person-digging me-2"></i>Production
+        </h6>
+        <button type="button"
+        class="btn btn-sm float-end"
+        id="prod-card-toggle-btn"
+        aria-controls="prod-card-body"
+        aria-expanded="true">
+  <i id="prod-toggle-icon" class="fas fa-window-minimize text-white"></i>
+</button>
+    </div><!--End of card-header -->
+    <div class="card-body" id="prod-card-body">
+        <ul class="nav nav-pills mb-1 d-flex align-center" id="pills-tab" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="pills-dsr-tab" data-bs-toggle="pill" data-bs-target="#pills-dsr" type="button" role="tab" aria-controls="pills-dsr" aria-selected="true">DSR</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="pills-bbox-tab" data-bs-toggle="pill" data-bs-target="#pills-bbox" type="button" role="tab" aria-controls="pills-bbox" aria-selected="false">BLACK BOX</button>
+            </li>
+        </ul>
+        <div class="tab-content mt-0" id="pills-tabContent">
+               <div class="tab-pane fade show active" id="pills-dsr" role="tabpanel" aria-labelledby="pills-dsr-tab" tabindex="0">
+                     <div class="clearfix mb-1">
+                               <button type="button" class="btn btn-outline-primary btn-sm float-end" id="btnOpenDsrFilter" title="Filter">
+                                <i class="fas fa-filter me-1"></i>
+                                </button>
+                           </div>
+                     {% include "rov/partials/dsr_line_table.html" %}
+                      <div class="clearfix mt-2">
+                       <div class="btn-group float-end" role="group">
+                             <button type="button"
+                                     class="btn btn-danger dropdown-toggle"
+                                     data-bs-toggle="dropdown"
+                                     id="dsr-delete-btn"
+                                     aria-expanded="false"
+                                     data-url ="{% url 'delete_selected_dsr_lines' %}">
+                                     <i class="fas fa-trash-can me-2"></i> DELETE
+                             </button>
+                             <ul class="dropdown-menu">
+                                 <li><a class="dropdown-item"  data-delete-mode="all" href="#">All</a></li>
+                                 <li><a class="dropdown-item" data-delete-mode="sm" href="#">SM</a></li>
+                                 <li><a class="dropdown-item" data-delete-mode="recdb" href="#">Rec DB</a></li>
+                             </ul>
+                       </div>
+                   </div>
+
+               </div>
+               <div class="tab-pane fade" id="pills-bbox" role="tabpanel" aria-labelledby="pills-bbox-tab" tabindex="0">
+                    <div class="table-scroll w-100" style="height: 50vh">
+                           <table class="table table-hover" id="bbox-file-table">
+                                <thead>
+                                      <th><input type="checkbox" id="mainBboxFileCheckBox"></th>
+                                      <th>File Name</th>
+                                </thead>
+                                {{ bbox_file_tbody }}
+                           </table>
+                    </div>
+                    <div class="clearfix mt-2">
+                           <button type="button"
+                                   class="btn btn-danger float-end me-2"
+                                   id="deleteBboxFileBtn"
+                                   data-delete-url="{% url 'delete_bbox_files' %}">
+                                      <i class="fas fa-trash-can me-2"></i> DELETE
+                           </button>
+                    </div>
+               </div>
+        </div>
+    </div><!--End of card-body -->
+
+</div><!-- end of card-->

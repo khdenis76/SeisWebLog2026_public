@@ -1,5 +1,6 @@
 import {getCSRFToken} from "./csrf.js";
 import {updatePreplotTable, updateRLPreplotTable} from "./updaterltable.js"
+import {renderBokehInto} from "./renderBokeh.js";
 export function initDeleteRL() {
   const btnDelete = document.getElementById("btnDeleteRL");
   const modalEl = document.getElementById("confirmDeleteModal");

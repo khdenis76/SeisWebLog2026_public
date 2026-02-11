@@ -3191,6 +3191,204 @@ class ProjectDB:
             conn.commit()
             return cur.rowcount  # number of deleted layers
 
+    def get_preplot_points_by_line(
+            self,
+            table: str,
+            line_fk: int,
+    ) -> list[dict]:
+        """
+        Fetch all preplot points from RPPreplot or SPPreplot by Line_FK.
+
+        table: "RPPreplot" or "SPPreplot"
+        line_fk: Line_FK value
+
+        Returns: list of dicts
+        """
+
+        if table not in ("RPPreplot", "SPPreplot"):
+            raise ValueError("table must be 'RPPreplot' or 'SPPreplot'")
+
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            cur.execute(
+                f"""
+                SELECT *
+                FROM {table}
+                WHERE Line_FK = ?
+                ORDER BY PointIndex
+                """,
+                (line_fk,)
+            )
+
+            return [dict(row) for row in cur.fetchall()]
+
+    def delete_preplot_points(self, point_ids: list[int],table_name:str="RPPreplot") -> int:
+        if not point_ids:
+            return 0
+
+        placeholders = ",".join("?" for _ in point_ids)
+
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute(
+                f"DELETE FROM {table_name} WHERE ID IN ({placeholders})",
+                point_ids
+            )
+            conn.commit()
+            return cur.rowcount
+
+    def recalc_preplot_line_after_points_delete(self, *, point_table: str, line_fk: int) -> dict:
+        """
+        Recalculate RLPreplot or SLPreplot record for ONE selected line (by ID=line_fk)
+        after deleting points from RPPreplot or SPPreplot.
+
+        point_table: "RPPreplot" or "SPPreplot"
+        line_fk: RLPreplot.ID or SLPreplot.ID (the value stored in RP/SP Line_FK)
+
+        Returns dict with updated summary.
+        """
+
+        mapping = {
+            "RPPreplot": "RLPreplot",
+            "SPPreplot": "SLPreplot",
+        }
+        if point_table not in mapping:
+            raise ValueError("point_table must be 'RPPreplot' or 'SPPreplot'")
+
+        line_table = mapping[point_table]
+
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+
+            # 1) aggregate remaining points
+            cur.execute(
+                f"""
+                SELECT
+                    COUNT(*)            AS n,
+                    MIN(PointIndex)     AS min_i,
+                    MAX(PointIndex)     AS max_i,
+                    MIN(Point)          AS min_p,
+                    MAX(Point)          AS max_p
+                FROM {point_table}
+                WHERE Line_FK = ?
+                """,
+                (line_fk,)
+            )
+            agg = dict(cur.fetchone() or {})
+            n = int(agg.get("n") or 0)
+
+            # If no points remain -> clear line geometry
+            if n == 0:
+                cur.execute(
+                    f"""
+                    UPDATE {line_table}
+                    SET
+                        Points = 0,
+                        MinPoint = NULL,
+                        MaxPoint = NULL,
+                        RealStartX = NULL,
+                        RealStartY = NULL,
+                        RealEndX   = NULL,
+                        RealEndY   = NULL,
+                        RealLineLength = NULL
+                    WHERE ID = ?
+                    """,
+                    (line_fk,)
+                )
+                conn.commit()
+                return {
+                    "line_table": line_table,
+                    "line_fk": line_fk,
+                    "points": 0,
+                    "min_point": None,
+                    "max_point": None,
+                    "real_start": None,
+                    "real_end": None,
+                    "real_length": None,
+                }
+
+            # 2) get first/last point by PointIndex (for start/end geometry)
+            cur.execute(
+                f"""
+                SELECT Point, PointIndex, X, Y
+                FROM {point_table}
+                WHERE Line_FK = ?
+                ORDER BY PointIndex ASC
+                LIMIT 1
+                """,
+                (line_fk,)
+            )
+            start = dict(cur.fetchone())
+
+            cur.execute(
+                f"""
+                SELECT Point, PointIndex, X, Y
+                FROM {point_table}
+                WHERE Line_FK = ?
+                ORDER BY PointIndex DESC
+                LIMIT 1
+                """,
+                (line_fk,)
+            )
+            end = dict(cur.fetchone())
+
+            x0, y0 = float(start["X"]), float(start["Y"])
+            x1, y1 = float(end["X"]), float(end["Y"])
+
+            # straight-line length
+            dx = x1 - x0
+            dy = y1 - y0
+            real_len = (dx * dx + dy * dy) ** 0.5
+
+            # 3) choose MinPoint/MaxPoint
+            # If Point is numeric-like in DB, MIN/MAX works.
+            # If Point is text, MIN/MAX becomes lexical. Safer fallback:
+            min_point = agg.get("min_p")
+            max_point = agg.get("max_p")
+
+            # fallback if min/max point are None/empty
+            if min_point is None or max_point is None:
+                min_point = start.get("PointIndex")
+                max_point = end.get("PointIndex")
+
+            # 4) update line table
+            cur.execute(
+                f"""
+                UPDATE {line_table}
+                SET
+                    Points = ?,
+                    MinPoint = ?,
+                    MaxPoint = ?,
+                    RealStartX = ?,
+                    RealStartY = ?,
+                    RealEndX   = ?,
+                    RealEndY   = ?,
+                    RealLineLength = ?
+                WHERE ID = ?
+                """,
+                (n, min_point, max_point, x0, y0, x1, y1, real_len, line_fk)
+            )
+
+            conn.commit()
+            return {
+                "line_table": line_table,
+                "line_fk": line_fk,
+                "points": n,
+                "min_point": min_point,
+                "max_point": max_point,
+                "real_start": (x0, y0),
+                "real_end": (x1, y1),
+                "real_length": real_len,
+            }
+
+
+
 
 
 

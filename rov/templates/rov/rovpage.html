@@ -1,10 +1,143 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}ROV page DSR BBOX ETC — {{ project.name }}{% endblock %}
+{% block content %}
+<div class="container-fluid">
+
+    <div class="card shadow-sm mb-3">
+         <div class="card-header clearfix">
+                  <h4 class="mb-0 float-start">
+                      <i class="fa-solid fa-database me-2"></i>
+                      ROV DATA
+                      <small class="text-muted">/ {{ project.name }}</small>
+                  </h4>
+        <!-- ICON BUTTON: OPEN MODAL -->
+                  <button type="button"
+                          class="btn  btn-warning float-end me-2"
+                          title="Upload csv layer"
+                          data-bs-toggle="modal"
+                          data-bs-target="#rovUploadModal"
+                  >
+                          <i class="fas fa-folder-open"></i>
+                  </button>
+                  <button type="button"
+                          class="btn  btn-warning float-end me-2"
+                          title="Upload csv layer"
+                          data-bs-toggle="modal"
+                          data-bs-target="#bbox-config-modal"
+                  >
+                          <i class="fas fa-gears"></i>
+                  </button>
+         </div>
+    </div>
+
+    <div class="row">
+        <div class="col-4 show collapse" id="left-rov-col">
+            <div class="d-flex align-items-center mb-2">
+                <!-- Left spacer -->
+                <div class="flex-grow-1"></div>
+                <div>
+                    <button class="btn btn-primary"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dsr-lines-card"
+                            aria-expanded="true"
+                            aria-controls="dsr-lines-card">
+                        DSR
+                    </button>
+                    <button class="btn btn-primary">Two</button>
+                    <button class="btn btn-primary">Three</button>
+                    <button class="btn btn-primary">For</button>
+                    <button class="btn btn-success" id="collapse-all-card"><i class="fas fa-eye me-2"></i> All</button>
+                </div>
+                <div class="flex-grow-1 text-end">
+                      <button type="button"
+                                   class="btn btn-sm float-end"
+                                   data-bs-toggle="collapse"
+                                   data-bs-target="#rightpreplotColumn"
+                                   aria-expanded="true"
+                                   onclick="$('#left-rov-col').toggleClass('col-12 col-4');
+                                            $('#left-col-icon').toggleClass('fa-compress fa-expand');
+                                             $('#right-rov-col').toggle();
+                          ">
+                                <i class="fas fa-expand" id="left-col-icon"></i>
+                      </button>
+                </div>
+            </div>
+            {% include 'rov/cards/productions_card.html' %}
+            {% include 'rov/cards/dsr_statistics.html' %}
+
+        </div><!--End of left col-->
+        <div class="col-8 show collapse" id="right-rov-col">
+            <div class="d-flex align-items-center mb-2">
+                <!-- Left spacer -->
+                <div class="flex-grow-1"></div>
+                <div>
+                    <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+                           <li class="nav-item" role="presentation">
+                                <button class="nav-link active"
+                                        id="pills-survey-tab"
+                                        data-bs-toggle="pill"
+                                        data-bs-target="#pills-survey"
+                                        type="button"
+                                        role="tab"
+                                        aria-controls="pills-survey"
+                                        aria-selected="true">
+                                    <i class="fas fa-diagram-project me-2"></i>SURVEY WIDE
+                                </button>
+                           </li>
+                           <li class="nav-item" role="presentation">
+                                <button class="nav-link"
+                                        id="pills-bbox-tab"
+                                        data-bs-toggle="pill"
+                                        data-bs-target="#pills-bbox"
+                                        type="button"
+                                        role="tab"
+                                        aria-controls="pills-bbox"
+                                        aria-selected="true">
+                                    <i class="fas fa-anchor me-2"></i>BLACK BOX LOG
+                                </button>
+                           </li>
+                           <li class="nav-item" role="presentation">
+                                <button class="nav-link"
+                                        id="pills-line-tab"
+                                        data-bs-toggle="pill"
+                                        data-bs-target="#pills-line"
+                                        type="button"
+                                        role="tab"
+                                        aria-controls="pills-line"
+                                        aria-selected="true">
+                                    <i class="fas fa-arrow-down-up-across-line me-2"></i>LINE:
+                                </button>
+                           </li>
+                    </ul>
+                </div>
+                <div class="flex-grow-1 text-end">
+                      <button type="button"
+                                   class="btn btn-sm float-end"
+                                   data-bs-toggle="collapse"
+                                   data-bs-target="#rightpreplotColumn"
+                                   aria-expanded="true"
+                                   onclick="$('#left-rov-col').toggleClass('col-12 col-4');
+                                            $('#left-col-icon').toggleClass('fa-compress fa-expand');
+                                             $('#right-rov-col').toggle();
+                          ">
+                                <i class="fas fa-expand" id="left-col-icon"></i>
+                      </button>
+                </div>
+            </div>
+            <div class="tab-content" id="pills-tabContent">
+                  <div class="tab-pane fade show active" id="pills-survey" role="tabpanel" aria-labelledby="pills-survey-tab">
+
+                  </div>
+                  <div class="tab-pane fade" id="pills-bbox" role="tabpanel" aria-labelledby="pills-bbox-tab">
+                      {% include "rov/cards/gnss_qc_card.html" %}
+                  </div>
+                  <div class="tab-pane fade" id="pills-line" role="tabpanel" aria-labelledby="pills-line-tab">...</div>
+            </div>
+        </div><!--End of right col-->
+    </div><!--End of row-->
+</div><!-- End of container fluid-->
+{% include "rov/modals/rov_upload_modal.html" %}
+{% include "rov/modals/dsr_line_filter_modal.html" %}
+{% include "rov/modals/bbox_config_modal.html" %}
+
+{% endblock %}

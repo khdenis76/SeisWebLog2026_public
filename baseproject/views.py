@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+
 from bokeh.layouts import column, row
 from bokeh.models import Button, CustomJS
 from django.shortcuts import render
@@ -15,7 +16,7 @@ from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import render, redirect
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 from dataclasses import dataclass, field
 
 from pygments.lexer import default
@@ -169,88 +170,8 @@ def base_project_settings_view(request):
             "pp_map_div":pp_map_div,
         },
     )
-
+#================================================= UPLOAD SPS FILES====================================================
 @login_required
-def upload_preplots(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST only"}, status=405)
-
-    start = time.perf_counter()
-
-    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
-    project = user_settings.active_project
-    if not project:
-        return JsonResponse({"error": "No active project"}, status=400)
-
-    dup_mode = request.POST.get("dup_mode", "add")
-
-    pdb = ProjectDB(project.db_path)
-
-    files = request.FILES.getlist("files")
-    if not files:
-        return JsonResponse({"error": "No files uploaded"}, status=400)
-    file_type = request.POST["file_type"]
-    if file_type == "SRC_SPS":
-       point_code ="S"
-    elif file_type == "REC_SPS":
-       point_code = "R"
-
-    # --- params ---
-    sps_revision = SPSRevision.objects.get(id=request.POST["sps_revision"])
-    tier = int(request.POST.get("tier", 1))
-    bearing = float(request.POST.get("bearing", 0))
-
-    total_points = 0
-    total_lines = 0
-    processed_files = []
-
-    for f in files:
-        # 🚀 ВАЖНО: используем FAST loader
-        result = pdb.load_sps_uploaded_file_fast(
-            uploaded_file=f,
-            sps_revision=sps_revision,
-            default=None,
-            tier=tier,
-            line_bearing=bearing,
-            point_type=point_code,
-            dup_mode=dup_mode,
-            batch_size=20000,   # можно 10k–50k
-        )
-
-        processed_files.append({
-            "name": f.name,
-            "points": result["points"],
-            "lines": result["lines"],
-            "skipped": result["skipped"],
-        })
-
-        total_points += result["points"]
-        total_lines += result["lines"]
-
-    # RLPreplot уже актуален — просто читаем
-    if point_code == "R":
-        rows = pdb.select_rlpreplot(point_code)
-        upload_type=1 # Uploaded receviers
-    elif point_code == "S":
-        rows = pdb.select_rlpreplot(point_code)
-        upload_type = 2  # Uploaded receviers
-    else:
-        rows = []
-        upload_type = 3  # Uploaded receviers
-
-
-
-    elapsed = round(time.perf_counter() - start, 2)
-
-    return JsonResponse({
-        "status": "ok",
-        "files": processed_files,
-        "total_points": total_points,
-        "total_lines": total_lines,
-        "elapsed_sec": elapsed,
-        "rows": rows,
-        "upload_type": upload_type,
-    })
 def upload_source_sps(request):
     """ view for upload source preplot from sps file"""
     if request.method != "POST":
@@ -266,6 +187,7 @@ def upload_source_sps(request):
     dup_mode = request.POST.get("dup_mode", "add")
 
     pdb = ProjectDB(project.db_path)
+    pgr=PreplotGraphics(project.db_path)
 
     files = request.FILES.getlist("files")
     if not files:
@@ -289,6 +211,43 @@ def upload_source_sps(request):
             batch_size=20000,   # можно 10k–50k
         )
         pdb.update_line_real_geometry_fast(point_type="S")
+        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
+        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
+        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
+        toggle_legend_btn = Button(
+            label="Hide legend",
+            button_type="primary",
+            width=120,
+        )
+
+        toggle_legend_btn.js_on_click(
+            CustomJS(
+                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
+                code="""
+                        legend.visible = !legend.visible;
+                        btn.label = legend.visible ? "Hide legend" : "Show legend";
+                        """
+            )
+        )
+        cycle_legend_pos_btn = Button(
+            label="Legend position",
+            button_type="default",
+            width=150,
+        )
+
+        cycle_legend_pos_btn.js_on_click(
+            CustomJS(
+                args=dict(legend=preplot_map.legend[0]),
+                code="""
+                        const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
+                        const current = legend.location;
+                        const idx = positions.indexOf(current);
+                        legend.location = positions[(idx + 1) % positions.length];
+                        """
+            )
+        )
+        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
+        layout = column(controls, preplot_map, sizing_mode="stretch_both")
         processed_files.append({
             "name": f.name,
             "points": result["points"],
@@ -309,10 +268,10 @@ def upload_source_sps(request):
             "elapsed_sec": elapsed,
             "rows": rows,
             "point_type": "S",
+            "preplot_map": json_item(layout),
             "upload_type": "SOU PREPLOT",
         })
-
-
+@login_required
 def upload_receiver_sps(request):
     """ view for upload receiver preplot from sps file"""
     if request.method != "POST":
@@ -419,7 +378,6 @@ def upload_receiver_sps(request):
             "preplot_map":json_item(layout),
             "prep_stat":prep_stat
         })
-
 @login_required
 @require_POST
 def upload_header_sps(request):
@@ -668,6 +626,7 @@ def add_shape_to_db(request):
             return JsonResponse({"error": "No active project"}, status=400)
 
         pdb = ProjectDB(project.db_path)
+        pgr =PreplotGraphics(project.db_path)
 
         upserted = 0
         for fn in full_names:
@@ -686,7 +645,43 @@ def add_shape_to_db(request):
         prj_full_names = {s.full_name for s in prj_shapes}
         for shp in shp_list:
             shp.is_indb = 1 if shp.full_name in prj_full_names else 0
+        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
+        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
+        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
+        toggle_legend_btn = Button(
+            label="Hide legend",
+            button_type="primary",
+            width=120,
+        )
 
+        toggle_legend_btn.js_on_click(
+            CustomJS(
+                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
+                code="""
+                            legend.visible = !legend.visible;
+                            btn.label = legend.visible ? "Hide legend" : "Show legend";
+                            """
+            )
+        )
+        cycle_legend_pos_btn = Button(
+            label="Legend position",
+            button_type="default",
+            width=150,
+        )
+
+        cycle_legend_pos_btn.js_on_click(
+            CustomJS(
+                args=dict(legend=preplot_map.legend[0]),
+                code="""
+                            const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
+                            const current = legend.location;
+                            const idx = positions.indexOf(current);
+                            legend.location = positions[(idx + 1) % positions.length];
+                            """
+            )
+        )
+        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
+        layout = column(controls, preplot_map, sizing_mode="stretch_both")
         html = render_to_string(
             "baseproject/partials/shape_folder_rows.html",
             {"shp_list": shp_list},
@@ -696,7 +691,8 @@ def add_shape_to_db(request):
         return JsonResponse({"ok": True,
                              "shapes_in_folder": html,
                              "prj_shp_body": shp_html,
-                             "upserted": upserted})
+                             "upserted": upserted,
+                             "preplot_map": json_item(layout),})
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
@@ -768,6 +764,44 @@ def project_layers_update(request):
             return JsonResponse({"error": "No active project"}, status=400)
 
         pdb = ProjectDB(project.db_path)
+        pgr =PreplotGraphics(project.db_path)
+        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
+        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
+        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
+        toggle_legend_btn = Button(
+            label="Hide legend",
+            button_type="primary",
+            width=120,
+        )
+
+        toggle_legend_btn.js_on_click(
+            CustomJS(
+                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
+                code="""
+                        legend.visible = !legend.visible;
+                        btn.label = legend.visible ? "Hide legend" : "Show legend";
+                        """
+            )
+        )
+        cycle_legend_pos_btn = Button(
+            label="Legend position",
+            button_type="default",
+            width=150,
+        )
+
+        cycle_legend_pos_btn.js_on_click(
+            CustomJS(
+                args=dict(legend=preplot_map.legend[0]),
+                code="""
+                        const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
+                        const current = legend.location;
+                        const idx = positions.indexOf(current);
+                        legend.location = positions[(idx + 1) % positions.length];
+                        """
+            )
+        )
+        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
+        layout = column(controls, preplot_map, sizing_mode="stretch_both")
         layer = ProjectLayer(
             layer_id=layer_id,
             fill_color=fill_color,
@@ -775,7 +809,7 @@ def project_layers_update(request):
             point_size=point_size,
         )
         pdb.upsert_layer(layer)
-        return JsonResponse({"ok": True})
+        return JsonResponse({"ok": True, "preplot_map": json_item(layout),})
 
     except (ValueError, TypeError):
         return JsonResponse({"error": "Invalid field types"}, status=400)
@@ -805,6 +839,7 @@ def project_shapes_delete(request):
             return JsonResponse({"error": "No valid FullName values"}, status=400)
 
         pdb = ProjectDB(project.db_path)
+        pgr = PreplotGraphics(project.db_path)
         deleted = pdb.delete_shapes(full_names)
         shp_list = get_shape_list(pdb.get_folders().shapes_folder)
         prj_shapes = pdb.get_shapes()
@@ -818,11 +853,48 @@ def project_shapes_delete(request):
             request=request,
         )
         shp_html = render_to_string("baseproject/partials/prj_shp_body.html", {"prj_shapes": prj_shapes})
+        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
+        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
+        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
+        toggle_legend_btn = Button(
+            label="Hide legend",
+            button_type="primary",
+            width=120,
+        )
 
+        toggle_legend_btn.js_on_click(
+            CustomJS(
+                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
+                code="""
+                                    legend.visible = !legend.visible;
+                                    btn.label = legend.visible ? "Hide legend" : "Show legend";
+                                    """
+            )
+        )
+        cycle_legend_pos_btn = Button(
+            label="Legend position",
+            button_type="default",
+            width=150,
+        )
+
+        cycle_legend_pos_btn.js_on_click(
+            CustomJS(
+                args=dict(legend=preplot_map.legend[0]),
+                code="""
+                                    const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
+                                    const current = legend.location;
+                                    const idx = positions.indexOf(current);
+                                    legend.location = positions[(idx + 1) % positions.length];
+                                    """
+            )
+        )
+        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
+        layout = column(controls, preplot_map, sizing_mode="stretch_both")
         return JsonResponse({"ok": True,
                              "deleted": deleted,
                              "shapes_in_folder": html,
                              "prj_shp_body": shp_html,
+                             "preplot_map": json_item(layout),
                              })
 
     except json.JSONDecodeError:
@@ -862,6 +934,7 @@ def update_shape_folder_view(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+#============================================================ EXPORTS=============================================
 @login_required
 @require_POST
 def export_sol_eol_to_csv(request):
@@ -913,7 +986,6 @@ def export_to_csv(request):
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-
 @login_required
 @require_POST
 def export_splited_csv(request):
@@ -940,6 +1012,7 @@ def export_splited_csv(request):
 @login_required
 @require_POST
 def export_gpkg(request):
+    """ This function does not work so far """
     try:
         data = json.loads(request.body.decode("utf-8"))
         point_type = data.get("point_type", "")
@@ -1017,6 +1090,8 @@ def export_to_sps(request):
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+#==========================================================================================================================
+#====================================LOAD CSV LAYERS=====================================================================
 @require_POST
 def csv_headers(request):
     f = request.FILES.get("csv_file")
@@ -1224,9 +1299,131 @@ def delete_csv_layers(request):
         )
         controls = row(toggle_legend_btn, cycle_legend_pos_btn)
         layout = column(controls, preplot_map, sizing_mode="stretch_both")
-        pp_map_script, pp_map_div = components(layout)
-        return JsonResponse({"ok": True, "deleted_ids": ids, "deleted": deleted})
+
+        return JsonResponse({"ok": True,
+                             "deleted_ids": ids,
+                             "deleted": deleted,
+                             "preplot_map": json_item(layout),})
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
+#==========================================================================================================================
+#===================================Line CLick ===========================================================================
+@login_required
+@require_POST
+def rl_line_click(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        line_id = payload.get("line_id")
+        tier_line = payload.get("tier_line")  # optional
 
+        if not line_id:
+            return JsonResponse({"ok": False, "error": "Missing line_id"}, status=400)
+
+        user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+        project = user_settings.active_project
+        if not project:
+            return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+        pdb = ProjectDB(project.db_path)
+
+        line_point_list = pdb.get_preplot_points_by_line("RPPreplot", line_fk=int(line_id))
+
+        point_table = render_to_string(
+            "baseproject/partials/rl_point_list.html",
+            {"point_list": line_point_list, "line_id": line_id, "tier_line": tier_line},
+            request=request,
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "line_id": int(line_id),
+            "tier_line": tier_line,
+            "point_table": point_table,
+            "count": len(line_point_list),
+        })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+@login_required
+@require_POST
+def sl_line_click(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        line_id = payload.get("line_id")
+        tier_line = payload.get("tier_line")  # optional
+
+        if not line_id:
+            return JsonResponse({"ok": False, "error": "Missing line_id"}, status=400)
+
+        user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+        project = user_settings.active_project
+        if not project:
+            return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+        pdb = ProjectDB(project.db_path)
+
+        line_point_list = pdb.get_preplot_points_by_line("SPPreplot", line_fk=int(line_id))
+
+        point_table = render_to_string(
+            "baseproject/partials/sl_point_list.html",
+            {"point_list": line_point_list, "line_id": line_id, "tier_line": tier_line},
+            request=request,
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "line_id": int(line_id),
+            "tier_line": tier_line,
+            "point_table": point_table,
+            "count": len(line_point_list),
+        })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+@login_required
+@require_POST
+def rp_points_delete(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        point_ids = payload.get("point_ids", [])
+
+        point_ids = [int(x) for x in point_ids if str(x).isdigit()]
+        if not point_ids:
+            return JsonResponse({"ok": False, "error": "No point_ids provided"}, status=400)
+
+        user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+        project = user_settings.active_project
+        if not project:
+            return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+        pdb = ProjectDB(project.db_path)
+        deleted = pdb.delete_preplot_points(point_ids,table_name="SPPreplot")
+
+        return JsonResponse({"ok": True, "deleted": deleted, "deleted_ids": point_ids})
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+@login_required
+@require_POST
+def sp_points_delete(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        point_ids = payload.get("point_ids", [])
+
+        point_ids = [int(x) for x in point_ids if str(x).isdigit()]
+        if not point_ids:
+            return JsonResponse({"ok": False, "error": "No point_ids provided"}, status=400)
+
+        user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+        project = user_settings.active_project
+        if not project:
+            return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+        pdb = ProjectDB(project.db_path)
+        deleted = pdb.delete_preplot_points(point_ids,table_name="SPPreplot")
+
+        return JsonResponse({"ok": True, "deleted": deleted, "deleted_ids": point_ids})
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
