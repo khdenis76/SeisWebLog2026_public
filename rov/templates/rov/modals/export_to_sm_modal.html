@@ -1,0 +1,118 @@
+<!-- Export DSR -> SM Modal -->
+<div class="modal fade" id="dsrExportSmModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="fas fa-file-export me-2"></i>Export DSR to SM (CSV)
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <!-- Mode -->
+        <div class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label">Export mode</label>
+            <select class="form-select" id="sm-export-mode">
+              <option value="day" selected>Day</option>
+              <option value="interval">Time interval</option>
+            </select>
+          </div>
+
+          <div class="col-md-4" id="sm-day-wrap">
+            <label class="form-label">Day</label>
+            <input type="date" class="form-control" id="sm-day">
+          </div>
+
+          <div class="col-md-4 d-none" id="sm-interval-wrap">
+            <label class="form-label">From (UTC)</label>
+            <input type="datetime-local" class="form-control" id="sm-from">
+            <div class="mt-2">
+              <label class="form-label">To (UTC)</label>
+              <input type="datetime-local" class="form-control" id="sm-to">
+            </div>
+          </div>
+        </div>
+
+        <hr class="my-3"/>
+
+        <!-- Deployed/Recovered -->
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Nodes</label>
+            <div class="d-flex gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="sm-status" id="sm-status-deployed" value="deployed" checked>
+                <label class="form-check-label" for="sm-status-deployed">Deployed</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="sm-status" id="sm-status-recovered" value="recovered">
+                <label class="form-check-label" for="sm-status-recovered">Recovered</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Depth sign</label>
+            <select class="form-select" id="sm-depth-mode">
+              <option value="neg" selected>Negative depth (Z = -abs(depth))</option>
+              <option value="abs">Absolute depth (Z = abs(depth))</option>
+            </select>
+          </div>
+        </div>
+
+        <hr class="my-3"/>
+
+        <!-- Format -->
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">SM output format</label>
+            <select class="form-select" id="sm-format">
+              <option value="z_nodes" selected>Z-nodes</option>
+              <option value="mass_nodes">Mass nodes</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">File name (optional)</label>
+            <input class="form-control" id="sm-filename" placeholder="auto-generated if empty">
+          </div>
+        </div>
+
+        <hr class="my-3"/>
+
+        <!-- ROV list -->
+        <div class="d-flex align-items-center justify-content-between">
+          <label class="form-label mb-0">ROVs (ROV + ROV1 combined)</label>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="sm-rov-select-all">
+            <label class="form-check-label" for="sm-rov-select-all">Select all</label>
+          </div>
+        </div>
+
+        <div class="border rounded p-2 mt-2" style="max-height: 220px; overflow:auto;">
+          <!-- JS will fill checkboxes here -->
+          <div id="sm-rov-list" class="row g-2"></div>
+        </div>
+
+        <div class="text-muted small mt-2" id="sm-export-help"></div>
+
+        <div class="alert alert-danger d-none mt-3" id="sm-export-error"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Close
+        </button>
+        <button type="button" class="btn btn-primary" id="sm-export-btn"
+                data-export-url="{% url 'dsr_export_sm' %}">
+          <i class="fas fa-download me-2"></i>Export CSV
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
