@@ -47,5 +47,19 @@ echo ================================
 echo To activate manually later use:
 echo   %WORKDIR%\myenv\Scripts\activate
 echo ================================
+REM --- Ensure initial SQLite database exists ---
+IF NOT EXIST "db.sqlite3" (
+    echo db.sqlite3 not found. Copying from dummy_db...
+    IF EXIST "dummy_db\db.sqlite3" (
+        copy "dummy_db\db.sqlite3" "db.sqlite3"
+        echo Database copied successfully.
+    ) ELSE (
+        echo ERROR: dummy_db\db.sqlite3 not found!
+        pause
+        exit /b 1
+    )
+) ELSE (
+    echo Database already exists. Skipping copy.
+)
 
 pause
