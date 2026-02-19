@@ -9,7 +9,9 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from core.projectdb import ProjectDB
+from .project_dataclasses import MainSettings, GeometrySettings, NodeQCSettings, GunQCSettings, FolderSettings
+
+
 
 
 def path_exists_or_raise(p: Path):
@@ -290,12 +292,211 @@ class SPSRevision(models.Model):
 # ---------------------- SIGNAL: CREATE FOLDERS & DB ----------------------
 
 
+
 @receiver(post_save, sender=Project)
 def create_project_folder(sender, instance: Project, created, **kwargs):
     """
     When a new Project is created, ensure that its folder structure and
     empty project SQLite DB exist.
     """
+
+    def init_db(connect) -> None:
+        """
+        Create tables if not exist and ensure one default row in each table.
+        """
+        with connect() as conn:
+            cur = conn.cursor()
+
+            # -------- project_main --------
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_main (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    name TEXT NOT NULL,
+                    location TEXT NOT NULL,
+                    area TEXT NOT NULL,
+                    client TEXT NOT NULL,
+                    contractor TEXT NOT NULL,
+                    project_client_id TEXT NOT NULL,
+                    project_contractor_id TEXT NOT NULL,
+                    epsg TEXT NOT NULL,
+                    line_code TEXT NOT NULL,
+                    start_project TEXT NOT NULL,
+                    project_duration INTEGER NOT NULL,
+                    color_scheme TEXT DEFAULT 'dark'
+                );
+                """
+            )
+            cur.execute("SELECT COUNT(*) AS cnt FROM project_main;")
+            if cur.fetchone()["cnt"] == 0:
+                m = MainSettings()
+                cur.execute(
+                    """
+                    INSERT INTO project_main
+                        (id, name, location, area, client, contractor,
+                         project_client_id, project_contractor_id,
+                         epsg, line_code, start_project, project_duration,color_scheme)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        m.name, m.location, m.area,
+                        m.client, m.contractor,
+                        m.project_client_id, m.project_contractor_id,
+                        m.epsg, m.line_code,
+                        m.start_project, m.project_duration, m.color_scheme
+                    ),
+                )
+
+            # -------- project_geometry --------
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_geometry (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    rpi REAL NOT NULL,
+                    rli REAL NOT NULL,
+                    spi REAL NOT NULL,
+                    sli REAL NOT NULL,
+                    rl_heading REAL NOT NULL,
+                    sl_heading REAL NOT NULL,
+                    production_code TEXT NOT NULL,
+                    non_production_code TEXT NOT NULL,
+                    rl_mask TEXT NOT NULL,
+                    sl_mask TEXT NOT NULL
+                );
+                """
+            )
+            cur.execute("SELECT COUNT(*) AS cnt FROM project_geometry;")
+            if cur.fetchone()["cnt"] == 0:
+                g = GeometrySettings()
+                cur.execute(
+                    """
+                    INSERT INTO project_geometry
+                        (id, rpi, rli, spi, sli,
+                         rl_heading, sl_heading,
+                         production_code, non_production_code,
+                         rl_mask, sl_mask)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        g.rpi, g.rli, g.spi, g.sli,
+                        g.rl_heading, g.sl_heading,
+                        g.production_code, g.non_production_code,
+                        g.rl_mask, g.sl_mask,
+                    ),
+                )
+
+            # -------- project_node_qc --------
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS "project_node_qc" (
+                         "id"	INTEGER CHECK("id" = 1),
+                         "max_il_offset"	REAL NOT NULL,
+                         "max_xl_offset"	REAL NOT NULL,
+                         "max_radial_offset"	REAL NOT NULL,
+                         "percent_of_depth"	REAL NOT NULL,
+                         "use_offset"	INTEGER NOT NULL,
+                         "battery_life"	INTEGER DEFAULT 0,
+                         "gnss_diffage_warning"	INTEGER DEFAULT 0,
+                         "gnss_diffage_error"	INTEGER DEFAULT 0,
+                         "gnss_fixed_quality"	INTEGER DEFAULT 0,
+                         PRIMARY KEY("id")
+                )
+                """
+            )
+            cur.execute("SELECT COUNT(*) AS cnt FROM project_node_qc;")
+            if cur.fetchone()["cnt"] == 0:
+                n = NodeQCSettings()
+                cur.execute(
+                    """
+                    INSERT INTO project_node_qc
+                        (id, max_il_offset, max_xl_offset, max_radial_offset,
+                         percent_of_depth, use_offset,battery_life,gnss_diffage_warning,gnss_diffage_error,gnss_fixed_quality)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        n.max_il_offset, n.max_xl_offset, n.max_radial_offset,
+                        n.percent_of_depth, n.use_offset, n.battery_life, n.gnss_diffage_warning, n.gnss_diffage_error,
+                        n.gnss_fixed_quality
+                    ),
+                )
+
+            # -------- project_gun_qc --------
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_gun_qc (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    num_of_arrays INTEGER NOT NULL,
+                    num_of_strings INTEGER NOT NULL,
+                    num_of_guns INTEGER NOT NULL,
+                    depth REAL NOT NULL,
+                    depth_tolerance REAL NOT NULL,
+                    time_warning REAL NOT NULL,
+                    time_error REAL NOT NULL,
+                    pressure REAL NOT NULL,
+                    pressure_drop REAL NOT NULL,
+                    volume REAL NOT NULL,
+                    max_il_offset REAL NOT NULL,
+                    max_xl_offset REAL NOT NULL,
+                    max_radial_offset REAL NOT NULL
+                );
+                """
+            )
+            cur.execute("SELECT COUNT(*) AS cnt FROM project_gun_qc;")
+            if cur.fetchone()["cnt"] == 0:
+                q = GunQCSettings()
+                cur.execute(
+                    """
+                    INSERT INTO project_gun_qc
+                        (id, num_of_arrays, num_of_strings, num_of_guns,
+                         depth, depth_tolerance,
+                         time_warning, time_error,
+                         pressure, pressure_drop, volume,
+                         max_il_offset, max_xl_offset, max_radial_offset)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        q.num_of_arrays, q.num_of_strings, q.num_of_guns,
+                        q.depth, q.depth_tolerance,
+                        q.time_warning, q.time_error,
+                        q.pressure, q.pressure_drop, q.volume,
+                        q.max_il_offset, q.max_xl_offset, q.max_radial_offset,
+                    ),
+                )
+            cur.execute(
+                """
+                  CREATE TABLE IF NOT EXISTS project_folders (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    shapes_folder TEXT,
+                    image_folder TEXT,
+                    local_prj_folder TEXT,
+                    bb_folder TEXT,                
+                    segy_folder TEXT);
+                """)
+            cur.execute("SELECT COUNT(*) AS cnt FROM project_folders;")
+            if cur.fetchone()["cnt"] == 0:
+                f = FolderSettings()
+                cur.execute(
+                    """
+                    INSERT INTO project_folders
+                        (id, shapes_folder,image_folder,local_prj_folder,bb_folder,segy_folder)
+                    VALUES (1, ?, ?, ?, ?, ?)
+                    """,
+                    (f.shapes_folder, f.image_folder, f.local_prj_folder, f.bb_folder, f.segy_folder),
+                )
+            sql = """
+                       CREATE TABLE IF NOT EXISTS "project_shapes" (
+                                    "id" INTEGER, 
+                                    "FullName" TEXT UNIQUE NOT NULL,
+                                    "FileName" TEXT,
+                                    "isFilled" INTEGER DEFAULT 0,
+                                    "FillColor" TEXT DEFAULT '#000000',
+                                    "LineColor" TEXT DEFAULT '#000000',
+                                    "LineWidth" INTEGER DEFAULT 1,
+                                    "LineStyle" TEXT DEFAULT '',
+    	                            PRIMARY KEY(id,FullName));
+                """
+            cur.execute(sql)
+            conn.commit()
     if not created:
         return
 
@@ -330,11 +531,17 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
 
     # SQLite DB file
     db_path = instance.db_path
-    if not db_path.exists():
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def connect():
         conn = sqlite3.connect(str(db_path))
-        conn.close()
-    pdb = ProjectDB(db_path)  # or ProjectDB(str(db_path)) depending on your class
-    pdb.init_db()  # creates project_main, etc.
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    if not db_path.exists() or db_path.stat().st_size == 0:
+        init_db(connect)
+
+
 
     # Optional: if you also have SQL scripts that must run:
     # pdb.run_sql_file(instance.some_sql_path)

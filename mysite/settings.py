@@ -1,5 +1,7 @@
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
+VERSION_FILE = BASE_DIR / "version.txt"
+APP_VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "dev"
 SECRET_KEY = 'dev-secret-key'
 DEBUG = True
 ALLOWED_HOSTS = []
@@ -28,6 +30,10 @@ TEMPLATES = [{
         'django.contrib.messages.context_processors.messages',
     ]},
 }]
+TEMPLATES[0]["OPTIONS"]["context_processors"] += [
+    "core.context_processors.app_version",
+]
+
 WSGI_APPLICATION = 'mysite.wsgi.application'
 DATABASES = {'default': {'ENGINE':'django.db.backends.sqlite3','NAME': BASE_DIR / 'db.sqlite3'}}
 AUTH_PASSWORD_VALIDATORS = [
