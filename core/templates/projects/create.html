@@ -5,15 +5,15 @@
   <div class="col-lg-8">
     <div class="card shadow-sm rounded-4">
       <div class="card-body">
-        <h2 class="h5 mb-3"><i class="fa-solid fa-plus me-2"></i>Новый проект</h2>
+        <h2 class="h5 mb-3"><i class="fa-solid fa-plus me-2"></i>New project</h2>
         <form method="post">
           {% csrf_token %}
-          <div class="mb-3"><label class="form-label">Название</label><input name="name" class="form-control" required></div>
-          <div class="mb-3"><label class="form-label">Корневой внешний путь</label><input name="root_path" class="form-control" required></div>
-          <div class="mb-3"><label class="form-label">Имя папки проекта</label><input name="folder_name" class="form-control" required></div>
-          <div class="mb-3"><label class="form-label">Примечание</label><textarea name="note" class="form-control" rows="3"></textarea></div>
-          <button class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-2"></i>Сохранить</button>
-          <a href="{% url 'projects' %}" class="btn btn-outline-secondary">Отмена</a>
+          <div class="mb-3"><label class="form-label">Project name</label><input name="name" class="form-control" required></div>
+          <div class="mb-3"><label class="form-label">Root path</label><input name="root_path" class="form-control" required></div>
+          <div class="mb-3"><label class="form-label">Project folder name</label><input name="folder_name" class="form-control" required></div>
+          <div class="mb-3"><label class="form-label">Comments</label><textarea name="note" class="form-control" rows="3"></textarea></div>
+          <button class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-2"></i>Create</button>
+          <a href="{% url 'projects' %}" class="btn btn-outline-secondary">Cancel</a>
         </form>
       </div>
     </div>

@@ -9,6 +9,8 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
+from core.projectdb import ProjectDB
+
 
 def path_exists_or_raise(p: Path):
     """
@@ -331,3 +333,8 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
     if not db_path.exists():
         conn = sqlite3.connect(str(db_path))
         conn.close()
+    pdb = ProjectDB(db_path)  # or ProjectDB(str(db_path)) depending on your class
+    pdb.init_db()  # creates project_main, etc.
+
+    # Optional: if you also have SQL scripts that must run:
+    # pdb.run_sql_file(instance.some_sql_path)
