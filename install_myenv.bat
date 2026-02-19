@@ -4,7 +4,7 @@ echo  SeisWebLog environment setup
 echo ================================
 
 REM --- Remember current directory ---
-set "WORKDIR=%CD%"
+set "WORKDIR=%~dp0"
 echo Working directory: %WORKDIR%
 
 REM --- Check Python ---
