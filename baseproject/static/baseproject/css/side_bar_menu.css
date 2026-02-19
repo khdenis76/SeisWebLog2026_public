@@ -1,0 +1,70 @@
+/* ===== Modern Sidebar ===== */
+
+#sidebarOffcanvas {
+  width: 280px;
+  border-right: 0;
+  backdrop-filter: blur(10px);
+}
+
+#sidebarOffcanvas .offcanvas-header {
+  background: linear-gradient(135deg, #0d6efd, #6610f2);
+  color: #fff;
+  border-bottom: 0;
+}
+
+#sidebarOffcanvas .offcanvas-title {
+  font-weight: 800;
+  letter-spacing: .5px;
+}
+
+#sidebarOffcanvas .btn-close {
+  filter: invert(1) grayscale(100%);
+}
+
+/* Section titles */
+#sidebarOffcanvas .sidebar-section-title {
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--bs-secondary-color);
+  margin-top: 1rem;
+}
+
+/* Links */
+#sidebarOffcanvas .nav-link {
+  border-radius: 12px;
+  padding: .55rem .75rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  transition: all .2s ease;
+}
+
+#sidebarOffcanvas .nav-link i {
+  width: 18px;
+  text-align: center;
+  opacity: .8;
+}
+
+/* Hover effect */
+#sidebarOffcanvas .nav-link:hover {
+  background: linear-gradient(135deg, rgba(13,110,253,.15), rgba(102,16,242,.15));
+  transform: translateX(4px);
+}
+
+/* Active link */
+#sidebarOffcanvas .nav-link.active {
+  background: linear-gradient(135deg, #0d6efd, #6610f2);
+  color: #fff !important;
+  box-shadow: 0 6px 16px rgba(13,110,253,.25);
+}
+
+#sidebarOffcanvas .nav-link.active i {
+  opacity: 1;
+}
+
+/* Divider spacing */
+#sidebarOffcanvas .nav {
+  margin-bottom: .75rem;
+}

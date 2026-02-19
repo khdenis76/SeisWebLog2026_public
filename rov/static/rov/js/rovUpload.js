@@ -10,13 +10,14 @@ export function initRovUploadModal() {
   const countEl    = document.getElementById("rov-files-count");
   const modalEl    = document.getElementById("rovUploadModal");
   const tbody =document.getElementById('bbox-list-tbody')
-
+  const dsrbody =document.getElementById('dsr-line-table-body')
+  const dsrstatbody = document.getElementById("rov-stat-card-body")
 
   // ✅ BlackBox config selector
   const cfgSelect  = document.getElementById("bblog-config-select");
   const cfgGroup   = cfgSelect ? cfgSelect.closest(".input-group") : null;
 
-  if (!form || !typeSelect || !fileInput || !uploadBtn || !modalEl || !tbody) return;
+  if (!form || !typeSelect || !fileInput || !uploadBtn || !modalEl || !tbody || !dsrbody) return;
 
   const rules = {
     DSR: { accept: ".txt,.csv", help: "DSR files (.txt / .csv)", url: "urlDsr" },
@@ -150,8 +151,16 @@ export function initRovUploadModal() {
       if (data.ok && data.bbox_file_tbody !== undefined) {
          if (tbody) tbody.innerHTML = data.bbox_file_tbody;
       }
-
-      const msg = data.message || "Upload completed";
+      if(data.dsr_lines_body){
+        dsrbody.innerHTML=data.dsr_lines_body
+      }
+      if(data.dsr_statistics_table){
+        dsrstatbody.innerHTML=data.dsr_statistics_table
+      }
+      const msg = data.message ||
+    `Upload completed: processed: ${data.total_processed} 
+     upserted: ${data.total_upserted} 
+     skipped: ${data.total_skipped}`;
 
       // close modal first, then show message after hidden
       modalEl.addEventListener(

@@ -111,43 +111,12 @@ def base_project_settings_view(request):
     header1_text = header1_path.read_text() if header1_path.exists() else ""
     header2_text = header2_path.read_text() if header2_path.exists() else ""
     summary = pdb.get_preplot_summary_allfiles()
-    preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_project_shapes_layers(preplot_map,default_src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-    toggle_legend_btn = Button(
-        label="Hide legend",
-        button_type="primary",
-        width=120,
+    layout = pgr.preplot_map(
+        src_epsg=pdb.get_main().epsg,
+        show_shapes=True,  # or False
+        show_layers=True,  # or False
+        show_scale_bar=True,  # or False
     )
-
-    toggle_legend_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-            code="""
-            legend.visible = !legend.visible;
-            btn.label = legend.visible ? "Hide legend" : "Show legend";
-            """
-        )
-    )
-    cycle_legend_pos_btn = Button(
-        label="Legend position",
-        button_type="default",
-        width=150,
-    )
-
-    cycle_legend_pos_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0]),
-            code="""
-            const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-            const current = legend.location;
-            const idx = positions.indexOf(current);
-            legend.location = positions[(idx + 1) % positions.length];
-            """
-        )
-    )
-    controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-    layout = column(controls,preplot_map,sizing_mode="stretch_both")
     pp_map_script,pp_map_div = components(layout)
     return render(
         request,
@@ -211,43 +180,12 @@ def upload_source_sps(request):
             batch_size=20000,   # можно 10k–50k
         )
         pdb.update_line_real_geometry_fast(point_type="S")
-        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-        toggle_legend_btn = Button(
-            label="Hide legend",
-            button_type="primary",
-            width=120,
+        layout = pgr.preplot_map(
+            src_epsg=pdb.get_main().epsg,
+            show_shapes=True,  # or False
+            show_layers=True,  # or False
+            show_scale_bar=True,  # or False
         )
-
-        toggle_legend_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-                code="""
-                        legend.visible = !legend.visible;
-                        btn.label = legend.visible ? "Hide legend" : "Show legend";
-                        """
-            )
-        )
-        cycle_legend_pos_btn = Button(
-            label="Legend position",
-            button_type="default",
-            width=150,
-        )
-
-        cycle_legend_pos_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0]),
-                code="""
-                        const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                        const current = legend.location;
-                        const idx = positions.indexOf(current);
-                        legend.location = positions[(idx + 1) % positions.length];
-                        """
-            )
-        )
-        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-        layout = column(controls, preplot_map, sizing_mode="stretch_both")
         processed_files.append({
             "name": f.name,
             "points": result["points"],
@@ -259,7 +197,11 @@ def upload_source_sps(request):
         total_lines += result["lines"]
         rows = pdb.select_rlpreplot("S")
         elapsed = round(time.perf_counter() - start, 2)
-
+        summary = pdb.get_preplot_summary_allfiles()
+        prep_stat = render_to_string("baseproject/partials/preplot_stat_body.html",
+                                    {"sou_preplot_summary": summary.get("SLPreplot") or {},
+                                     "rec_preplot_summary": summary.get("RLPreplot") or {},
+                                     })
     return JsonResponse({
             "status": "ok",
             "files": processed_files,
@@ -270,6 +212,7 @@ def upload_source_sps(request):
             "point_type": "S",
             "preplot_map": json_item(layout),
             "upload_type": "SOU PREPLOT",
+            "prep_stat": prep_stat,
         })
 @login_required
 def upload_receiver_sps(request):
@@ -327,43 +270,12 @@ def upload_receiver_sps(request):
                      {"sou_preplot_summary": summary.get("SLPreplot") or {},
                               "rec_preplot_summary": summary.get("RLPreplot") or {},
                      })
-    preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-    toggle_legend_btn = Button(
-        label="Hide legend",
-        button_type="primary",
-        width=120,
+    layout = pgr.preplot_map(
+        src_epsg=pdb.get_main().epsg,
+        show_shapes=True,  # or False
+        show_layers=True,  # or False
+        show_scale_bar=True,  # or False
     )
-
-    toggle_legend_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-            code="""
-                legend.visible = !legend.visible;
-                btn.label = legend.visible ? "Hide legend" : "Show legend";
-                """
-        )
-    )
-    cycle_legend_pos_btn = Button(
-        label="Legend position",
-        button_type="default",
-        width=150,
-    )
-
-    cycle_legend_pos_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0]),
-            code="""
-                const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                const current = legend.location;
-                const idx = positions.indexOf(current);
-                legend.location = positions[(idx + 1) % positions.length];
-                """
-        )
-    )
-    controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-    layout = column(controls, preplot_map, sizing_mode="stretch_both")
 
 
     return JsonResponse({
@@ -410,8 +322,8 @@ def upload_header_sps(request):
         text = raw_bytes.decode("latin-1", errors="replace")
 
     # 4) choose output file
-    out_name = project.hdr_dir / "header1.txt" if sps_revision == 1 else project.hdr_dir / "header2.txt"
-    out_name.write_text(text)
+    out_name = project.hdr_dir / "header2.txt" if sps_revision == 1 else project.hdr_dir / "header1.txt"
+    out_name.write_text(text,newline="\n")
     # 9) read both headers to return
     header1_path = project.hdr_dir / "header1.txt"
     header2_path = project.hdr_dir / "header2.txt"
@@ -457,43 +369,12 @@ def delete_selected_receiver_lines(request):
                                  {"sou_preplot_summary": summary.get("SLPreplot") or {},
                                   "rec_preplot_summary": summary.get("RLPreplot") or {},
                                   })
-    preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-    toggle_legend_btn = Button(
-        label="Hide legend",
-        button_type="primary",
-        width=120,
+    layout = pgr.preplot_map(
+        src_epsg=pdb.get_main().epsg,
+        show_shapes=True,  # or False
+        show_layers=True,  # or False
+        show_scale_bar=True,  # or False
     )
-
-    toggle_legend_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-            code="""
-                legend.visible = !legend.visible;
-                btn.label = legend.visible ? "Hide legend" : "Show legend";
-                """
-        )
-    )
-    cycle_legend_pos_btn = Button(
-        label="Legend position",
-        button_type="default",
-        width=150,
-    )
-
-    cycle_legend_pos_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0]),
-            code="""
-                const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                const current = legend.location;
-                const idx = positions.indexOf(current);
-                legend.location = positions[(idx + 1) % positions.length];
-                """
-        )
-    )
-    controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-    layout = column(controls, preplot_map, sizing_mode="stretch_both")
 
     return JsonResponse({
         "status": "ok",
@@ -536,43 +417,12 @@ def delete_selected_source_lines(request):
                                  {"sou_preplot_summary": summary.get("SLPreplot") or {},
                                   "rec_preplot_summary": summary.get("RLPreplot") or {},
                                   })
-    preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-    toggle_legend_btn = Button(
-        label="Hide legend",
-        button_type="primary",
-        width=120,
+    layout = pgr.preplot_map(
+        src_epsg=pdb.get_main().epsg,
+        show_shapes=True,  # or False
+        show_layers=True,  # or False
+        show_scale_bar=True,  # or False
     )
-
-    toggle_legend_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-            code="""
-                legend.visible = !legend.visible;
-                btn.label = legend.visible ? "Hide legend" : "Show legend";
-                """
-        )
-    )
-    cycle_legend_pos_btn = Button(
-        label="Legend position",
-        button_type="default",
-        width=150,
-    )
-
-    cycle_legend_pos_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0]),
-            code="""
-                const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                const current = legend.location;
-                const idx = positions.indexOf(current);
-                legend.location = positions[(idx + 1) % positions.length];
-                """
-        )
-    )
-    controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-    layout = column(controls, preplot_map, sizing_mode="stretch_both")
     return JsonResponse({
         "status": "ok",
         "deleted": deleted,
@@ -645,43 +495,12 @@ def add_shape_to_db(request):
         prj_full_names = {s.full_name for s in prj_shapes}
         for shp in shp_list:
             shp.is_indb = 1 if shp.full_name in prj_full_names else 0
-        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-        toggle_legend_btn = Button(
-            label="Hide legend",
-            button_type="primary",
-            width=120,
+        layout = pgr.preplot_map(
+            src_epsg=pdb.get_main().epsg,
+            show_shapes=True,  # or False
+            show_layers=True,  # or False
+            show_scale_bar=True,  # or False
         )
-
-        toggle_legend_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-                code="""
-                            legend.visible = !legend.visible;
-                            btn.label = legend.visible ? "Hide legend" : "Show legend";
-                            """
-            )
-        )
-        cycle_legend_pos_btn = Button(
-            label="Legend position",
-            button_type="default",
-            width=150,
-        )
-
-        cycle_legend_pos_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0]),
-                code="""
-                            const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                            const current = legend.location;
-                            const idx = positions.indexOf(current);
-                            legend.location = positions[(idx + 1) % positions.length];
-                            """
-            )
-        )
-        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-        layout = column(controls, preplot_map, sizing_mode="stretch_both")
         html = render_to_string(
             "baseproject/partials/shape_folder_rows.html",
             {"shp_list": shp_list},
@@ -765,43 +584,12 @@ def project_layers_update(request):
 
         pdb = ProjectDB(project.db_path)
         pgr =PreplotGraphics(project.db_path)
-        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-        toggle_legend_btn = Button(
-            label="Hide legend",
-            button_type="primary",
-            width=120,
+        layout = pgr.preplot_map(
+            src_epsg=pdb.get_main().epsg,
+            show_shapes=True,  # or False
+            show_layers=True,  # or False
+            show_scale_bar=True,  # or False
         )
-
-        toggle_legend_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-                code="""
-                        legend.visible = !legend.visible;
-                        btn.label = legend.visible ? "Hide legend" : "Show legend";
-                        """
-            )
-        )
-        cycle_legend_pos_btn = Button(
-            label="Legend position",
-            button_type="default",
-            width=150,
-        )
-
-        cycle_legend_pos_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0]),
-                code="""
-                        const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                        const current = legend.location;
-                        const idx = positions.indexOf(current);
-                        legend.location = positions[(idx + 1) % positions.length];
-                        """
-            )
-        )
-        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-        layout = column(controls, preplot_map, sizing_mode="stretch_both")
         layer = ProjectLayer(
             layer_id=layer_id,
             fill_color=fill_color,
@@ -853,43 +641,12 @@ def project_shapes_delete(request):
             request=request,
         )
         shp_html = render_to_string("baseproject/partials/prj_shp_body.html", {"prj_shapes": prj_shapes})
-        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-        toggle_legend_btn = Button(
-            label="Hide legend",
-            button_type="primary",
-            width=120,
+        layout = pgr.preplot_map(
+            src_epsg=pdb.get_main().epsg,
+            show_shapes=True,  # or False
+            show_layers=True,  # or False
+            show_scale_bar=True,  # or False
         )
-
-        toggle_legend_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-                code="""
-                                    legend.visible = !legend.visible;
-                                    btn.label = legend.visible ? "Hide legend" : "Show legend";
-                                    """
-            )
-        )
-        cycle_legend_pos_btn = Button(
-            label="Legend position",
-            button_type="default",
-            width=150,
-        )
-
-        cycle_legend_pos_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0]),
-                code="""
-                                    const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                                    const current = legend.location;
-                                    const idx = positions.indexOf(current);
-                                    legend.location = positions[(idx + 1) % positions.length];
-                                    """
-            )
-        )
-        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-        layout = column(controls, preplot_map, sizing_mode="stretch_both")
         return JsonResponse({"ok": True,
                              "deleted": deleted,
                              "shapes_in_folder": html,
@@ -1196,43 +953,12 @@ def upload_csv_layer_ajax(request):
     # render updated tbody
 
     layers_body = pdb.get_layers_table()
-    preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-    preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-    toggle_legend_btn = Button(
-        label="Hide legend",
-        button_type="primary",
-        width=120,
+    layout = pgr.preplot_map(
+        src_epsg=pdb.get_main().epsg,
+        show_shapes=True,  # or False
+        show_layers=True,  # or False
+        show_scale_bar=True,  # or False
     )
-
-    toggle_legend_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-            code="""
-                legend.visible = !legend.visible;
-                btn.label = legend.visible ? "Hide legend" : "Show legend";
-                """
-        )
-    )
-    cycle_legend_pos_btn = Button(
-        label="Legend position",
-        button_type="default",
-        width=150,
-    )
-
-    cycle_legend_pos_btn.js_on_click(
-        CustomJS(
-            args=dict(legend=preplot_map.legend[0]),
-            code="""
-                const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                const current = legend.location;
-                const idx = positions.indexOf(current);
-                legend.location = positions[(idx + 1) % positions.length];
-                """
-        )
-    )
-    controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-    layout = column(controls, preplot_map, sizing_mode="stretch_both")
 
     return JsonResponse({
         "ok": True,
@@ -1262,43 +988,12 @@ def delete_csv_layers(request):
         pgr=PreplotGraphics(project.db_path)
 
         deleted = pdb.delete_csv_layers(ids)
-        preplot_map = pgr.preplot_map(src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_project_shapes_layers(preplot_map, default_src_epsg=pdb.get_main().epsg)
-        preplot_map = pgr.add_csv_layers_to_map(preplot_map, csv_epsg=pdb.get_main().epsg, max_labels=2000)
-        toggle_legend_btn = Button(
-            label="Hide legend",
-            button_type="primary",
-            width=120,
+        layout = pgr.preplot_map(
+            src_epsg=pdb.get_main().epsg,
+            show_shapes=True,  # or False
+            show_layers=True,  # or False
+            show_scale_bar=True,  # or False
         )
-
-        toggle_legend_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0], btn=toggle_legend_btn),
-                code="""
-                    legend.visible = !legend.visible;
-                    btn.label = legend.visible ? "Hide legend" : "Show legend";
-                    """
-            )
-        )
-        cycle_legend_pos_btn = Button(
-            label="Legend position",
-            button_type="default",
-            width=150,
-        )
-
-        cycle_legend_pos_btn.js_on_click(
-            CustomJS(
-                args=dict(legend=preplot_map.legend[0]),
-                code="""
-                    const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
-                    const current = legend.location;
-                    const idx = positions.indexOf(current);
-                    legend.location = positions[(idx + 1) % positions.length];
-                    """
-            )
-        )
-        controls = row(toggle_legend_btn, cycle_legend_pos_btn)
-        layout = column(controls, preplot_map, sizing_mode="stretch_both")
 
         return JsonResponse({"ok": True,
                              "deleted_ids": ids,

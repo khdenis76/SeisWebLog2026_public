@@ -48,6 +48,27 @@ export function initBboxPlotClick() {
     if (plotDiv) {
       plotDiv.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
     }
+    const plotDivId2 = "rov-depth-qc-plot";
+    const plotDiv2 = document.getElementById(plotDivId2);
+    const plotSOGId = 'vessel-sog-plot'
+    const plotSOG = document.getElementById(plotSOGId)
+    const plotHDOPId="gnss-hdop-plot"
+    const plotHDOP =document.getElementById(plotHDOPId)
+    const plotHDGId="hdg-cog-plot"
+    const plotHDG =document.getElementById(plotHDGId)
+
+    if (plotDiv2) {
+      plotDiv2.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
+    }
+    if (plotSOG) {
+      plotSOG.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
+    }
+    if (plotHDOP) {
+      plotHDOP.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
+    }
+    if (plotHDG) {
+      plotHDG.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
+    }
 
     try {
       const resp = await fetch(url, {
@@ -65,6 +86,18 @@ export function initBboxPlotClick() {
         if (plotDiv) plotDiv.innerHTML = "";
         alert(data.error || "Failed to load plot");
         return;
+        if (plotDiv2) plotDiv2.innerHTML = "";
+        alert(data.error || "Failed to load plot");
+        return;
+        if (plotSOG) plotSOG.innerHTML = "";
+        alert(data.error || "Failed to load plot");
+        return;
+        if (plotHDOP) plotHDOP.innerHTML = "";
+        alert(data.error || "Failed to load plot");
+        return;
+        if (plotHDG) plotHDG.innerHTML = "";
+        alert(data.error || "Failed to load plot");
+        return;
       }
 
       if (!data.gnss_qc_plot) {
@@ -72,9 +105,36 @@ export function initBboxPlotClick() {
         alert("Server did not return json_item");
         return;
       }
-
       // Render using your helper
       renderBokehInto(plotDivId, data.gnss_qc_plot);
+      if (!data.rovs_depths_plot) {
+        if (plotDiv2) plotDiv2.innerHTML = "";
+        alert("Server did not return json_item");
+        return;
+      }
+      // Render using your helper
+      renderBokehInto(plotDivId2, data.rovs_depths_plot);
+      if (!data.vessel_sog) {
+        if (plotSOG) plotSOG.innerHTML = "";
+        alert("Server did not return json_item");
+        return;
+      }
+      // Render using your helper
+      renderBokehInto(plotSOGId, data.vessel_sog);
+      if (!data.hdop_plot) {
+        if (plotHDOP) plotHDOP.innerHTML = "";
+        alert("Server did not return json_item");
+        return;
+      }
+      // Render using your helper
+      renderBokehInto(plotHDOPId, data.hdop_plot);
+       if (!data.cog_vs_hdg_plot) {
+        if (plotHDG) plotHDG.innerHTML = "";
+        alert("Server did not return json_item");
+        return;
+      }
+      // Render using your helper
+      renderBokehInto(plotHDGId, data.cog_vs_hdg_plot);
 
     } catch (err) {
       console.error(err);

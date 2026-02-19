@@ -21,6 +21,7 @@ class MainSettings:
     start_project: str = field(default_factory=lambda: date.today().isoformat())
     # Estimated duration of the project in days
     project_duration: int = 30
+    color_scheme:str ='dark'
 @dataclass
 class GeometrySettings:
     """
@@ -102,6 +103,10 @@ class NodeQCSettings:
     percent_of_depth: float = 0.0
     # 0 = radial, 1 = inline, 2 = crossline
     use_offset: int = 0
+    battery_life: int = 0
+    gnss_diffage_warning: int = 20
+    gnss_diffage_error: int = 30
+    gnss_fixed_quality: int =5
 @dataclass
 class GunQCSettings:
     """

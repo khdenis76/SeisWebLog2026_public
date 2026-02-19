@@ -60,7 +60,11 @@
                 <th title="Minimum sigma3">σ3 min</th>
                 <th title="Maximum sigma3">σ3 max</th>
         </thead>
-        <tbody id="dsr-line-table-body">
+        <tbody id="dsr-line-table-body"
+               data-select-url="{% url 'dsr_line_onclick' %}"
+               data-target-nodes="line-nodes"
+               data-target-stations="line-stations"
+               data-target-days="line-days">
                 {{ dsr_lines_body|safe }}
         </tbody>
     </table>

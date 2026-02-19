@@ -1,6 +1,7 @@
 
 {% for r in lines %}
-<tr data-line="{{ r.Line }}
+<tr data-line="{{ r.Line }}"
+    class="dsr-line"
     data-day="{{ r.FirstDeployTime|default_if_none:''|slice:":10" }}"
     data-depstart="{{ r.FirstDeployTime|default_if_none:'' }}"
     data-depend="{{ r.LastDeployTime|default_if_none:'' }}">

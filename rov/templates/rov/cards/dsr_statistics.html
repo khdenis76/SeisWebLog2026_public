@@ -1,6 +1,6 @@
-<div class="card-header bg-primary clearfix p-0" id="dsr-stat-card">
-    <div class="card-header ">
-        <div class="clearfix bg-warning fw-bold mt-1 mb-1">
+<div class="card-header clearfix p-0" id="dsr-stat-card">
+    <div class="card-header bg-success text-white ">
+        <div class="clearfix fw-bold mt-1 mb-1">
             <h6 class="float-start text-white ms-2 mt-1"><i class="fas fa-calculator me-2"></i> ROV STATISTICS </h6>
             <button class="btn btn-sm float-end me-2"
                     data-bs-toggle="collapse"
@@ -14,8 +14,9 @@
                 <i id="rov-stat-toggle-icon" class="fas fa-window-minimize"></i>
             </button>
         </div>
-        <div class="card-body collapse show" id="rov-stat-card-body">
-
-        </div>
     </div>
+        <div class="card-body collapse show bg-secondary" id="rov-stat-card-body">
+                  {{ dsr_statistics_table|safe }}
+        </div>
+
 </div>

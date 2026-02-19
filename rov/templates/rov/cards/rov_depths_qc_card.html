@@ -1,12 +1,14 @@
-<div class="card shadow">
+<div class="card shadow p-1 qc-card" id="depth-comparison-card">
     <div class="card-header bg-primary text-white p-0 clearfix">
-       <h6 class="ms-2 mt-1 mb-1 float-start"><i class="fas fa-location me-2 "></i> GNSS-QC</h6>
-       <button type="button" class="btn btn-sm mt-1 mb-1 text-white float-end me-2" id="gnss-qc-min-max-btn">
-           <i class="fas fa-window-minimize" id="gnss-qc-toggle-icon"></i>
+       <h6 class="ms-2 mt-2 float-start"><i class="fas fa-bath me-2 "></i> DEPTHS COMPARISON</h6>
+       <button type="button" class="btn btn-close mt-1 me-2 float-end"></button>
+        <button type="button" class="btn btn-sm mt-1 mb-1 float-end me-2" id="depth-qc-min-max-btn">
+           <i class="fas fa-window-minimize" id="rov-depth-toggle-icon"></i>
        </button>
+
     </div>
-    <div class="card-body" id="gnss-qc-card-body">
-        <div id="gnss-qc-plot" class="w-100" style="height: 70vh">
+    <div class="card-body" id="rov-depth-qc-card-body">
+        <div id="rov-depth-qc-plot" class="w-100" style="height: 70vh">
 
         </div>
     </div>

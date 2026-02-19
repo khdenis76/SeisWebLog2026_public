@@ -1,82 +1,193 @@
 <div class="modal fade" id="bbox-config-modal" tabindex="-1" aria-hidden="true">
-             <div class="modal-dialog modal-dialog-centered  modal-lg">
-                         <div class="modal-content">
-                                  <div class="modal-header">
-                                      <h5><i class="fas fa-sliders me-2"></i> NEW BLACK BOX LOG CONFIG  </h5>
-                                  </div>
-                                  <div class="modal-body">
-                                           <form id="bbox-config-form" method="post" action="{% url 'save_bbox_config' %}">
-                                      <input id="bbox-file-input"
-                                             class="form-control"
-                                             type="file"
-                                             accept=".csv"
-                                             name="csv_file"
-                                             data-headers-url="{% url 'csv_headers' %}">
-                                       <div class="mb-2">
-                                          <label for="layer-name" class="form-label">Config Name</label>
-                                          <input id="layer-name" name="layer_name" class="form-control">
-                                       </div>
-                                       <div class="mt-2 mb-2 w-100">
-                                             <table class="table table-hover">
-                                                    <tbody>
-                                                        <tr><td colspan="2">
-                                                            <div class="input-group mb-3">
-                                                                     <span class="input-group-text" id="basic-addon1">VESSEL NAME</span>
-                                                                     <input type="text"
-                                                                            class="form-control"
-                                                                            placeholder="Vessel name"
-                                                                            aria-label="Vessel name"
-                                                                            name="vessel_name"
-                                                                            id="vessel-name"
-                                                                            aria-describedby="basic-addon1">
-                                                            </div>
-                                                        </td> </tr>
-                                                        <tr>
-                                                            <td>
-                                                                <div class="input-group mb-3">
-                                                                     <span class="input-group-text" id="basic-addon1">ROV 1</span>
-                                                                     <input type="text" id="rov1-name" name="rov1_name">
-                                                                </div>
-                                                            </td>
-                                                            <td>
-                                                                <div class="input-group mb-3">
-                                                                     <span class="input-group-text" id="basic-addon1">ROV 2</span>
-                                                                     <input type="text" id="rov2-name" name="rov2_name">
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                           <tr>
-                                                              <td>
-                                                                <div class="input-group mb-3">
-                                                                     <span class="input-group-text" id="basic-addon1">GNSS 1</span>
-                                                                     <input type="text" id="gnss1-name" name="gnss1_name">
-                                                                </div>
-                                                            </td>
-                                                            <td>
-                                                                <div class="input-group mb-3">
-                                                                     <span class="input-group-text" id="basic-addon1">GNSS 2</span>
-                                                                     <input type="text" id="gnss2-name" name="gnss2_name">
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    </tbody>
-                                             </table>
-                                       </div>
-                                       {{ bbox_fields_selectors|safe }}
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
 
-                                   </form>
-                                  <div id="csvErr" class="alert alert-danger d-none mt-2"></div>
-                                  </div>
-                                  <div class="modal-footer">
-                                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                                            Cancel
-                                      </button>
-                                      <button id="btnSaveBBoxCfg"
-                                              type="button"
-                                              class="btn btn-danger">
-                                          <i class="fas fa-floppy-disk me-2"></i>Save
-                                      </button>
-                                  </div>
-                         </div>
-             </div>
+      <!-- Header -->
+      <div class="modal-header bbox-modal-header">
+        <div class="w-100">
+          <div class="d-flex align-items-center justify-content-between">
+            <h5 class="modal-title mb-0">
+              <i class="fas fa-sliders me-2"></i>NEW BLACK BOX LOG CONFIG
+            </h5>
+            <span class="bbox-chip">
+              <i class="fas fa-cubes"></i> BBOX Config
+            </span>
+          </div>
+          <small class="opacity-75 d-block mt-1">
+            Upload a CSV, choose field mapping, and save the config template.
+          </small>
+        </div>
+
+        <button type="button"
+                class="btn-close btn-close-white"
+                data-bs-dismiss="modal"
+                aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <form id="bbox-config-form" method="post" action="{% url 'save_bbox_config' %}">
+          <!-- CSV file -->
+          <div class="bbox-section">
+            <div class="bbox-section-head">
+              <div class="bbox-title">
+                <span class="bbox-dot"></span>CSV source
+              </div>
+              <span class="text-muted small">.csv only</span>
+            </div>
+            <div class="bbox-section-body">
+              <input id="bbox-file-input"
+                     class="form-control"
+                     type="file"
+                     accept=".csv"
+                     name="csv_file"
+                     data-headers-url="{% url 'csv_headers' %}">
+              <div class="form-text mt-2">
+                <i class="fas fa-circle-info me-1"></i>
+                After selecting a CSV, headers will be loaded to build field selectors.
+              </div>
+            </div>
+          </div>
+
+          <!-- Config name -->
+          <div class="bbox-section">
+            <div class="bbox-section-head">
+              <div class="bbox-title">
+                <span class="bbox-dot" style="background:linear-gradient(135deg,#0dcaf0,#0d6efd); box-shadow:0 0 0 4px rgba(13,202,240,.18);"></span>
+                Config identity
+              </div>
+            </div>
+            <div class="bbox-section-body">
+              <label for="layer-name" class="form-label fw-semibold">Config Name</label>
+              <input id="layer-name"
+                     name="layer_name"
+                     class="form-control"
+                     list="bbox-config-names"
+                     autocomplete="off"
+                     data-configs-url="{% url 'bbox_configs_list' %}"
+                     data-config-detail-url-template="{% url 'bbox_config_detail' 0 %}">
+              <datalist id="bbox-config-names"></datalist>
+              <div class="form-text mt-2">
+                <i class="fas fa-lightbulb me-1"></i>
+                Start typing to reuse an existing config name (datalist).
+              </div>
+            </div>
+          </div>
+
+          <!-- Labels -->
+          <div class="bbox-section">
+            <div class="bbox-section-head">
+              <div class="bbox-title">
+                <span class="bbox-dot" style="background:linear-gradient(135deg,#ffc107,#fd7e14); box-shadow:0 0 0 4px rgba(255,193,7,.18);"></span>
+                Display labels
+              </div>
+              <span class="text-muted small">names used in legends/titles</span>
+            </div>
+
+            <div class="bbox-section-body">
+              <table class="table bbox-grid-table">
+                <tbody>
+                  <tr>
+                    <td colspan="2">
+                      <div class="input-group">
+                        <span class="input-group-text">VESSEL NAME</span>
+                        <input type="text"
+                               class="form-control"
+                               placeholder="Vessel name"
+                               name="vessel_name"
+                               id="vessel-name">
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td>
+                      <div class="input-group">
+                        <span class="input-group-text">ROV 1</span>
+                        <input type="text" class="form-control" id="rov1-name" name="rov1_name">
+                      </div>
+                    </td>
+                    <td>
+                      <div class="input-group">
+                        <span class="input-group-text">ROV 2</span>
+                        <input type="text" class="form-control" id="rov2-name" name="rov2_name">
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td>
+                      <div class="input-group">
+                        <span class="input-group-text">GNSS 1</span>
+                        <input type="text" class="form-control" id="gnss1-name" name="gnss1_name">
+                      </div>
+                    </td>
+                    <td>
+                      <div class="input-group">
+                        <span class="input-group-text">GNSS 2</span>
+                        <input type="text" class="form-control" id="gnss2-name" name="gnss2_name">
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td>
+                      <div class="input-group">
+                        <span class="input-group-text">Depth Sensor 1</span>
+                        <input type="text" class="form-control" id="Depth1-name" name="Depth1_name">
+                      </div>
+                    </td>
+                    <td>
+                      <div class="input-group">
+                        <span class="input-group-text">Depth Sensor 2</span>
+                        <input type="text" class="form-control" id="Depth2-name" name="Depth2_name">
+                      </div>
+                    </td>
+                  </tr>
+
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Field selectors (your server-rendered block) -->
+          <div class="bbox-section">
+            <div class="bbox-section-head">
+              <div class="bbox-title">
+                <span class="bbox-dot" style="background:linear-gradient(135deg,#20c997,#0d6efd); box-shadow:0 0 0 4px rgba(32,201,151,.18);"></span>
+                Column mapping
+              </div>
+              <span class="text-muted small">auto-built from CSV headers</span>
+            </div>
+            <div class="bbox-section-body">
+              {{ bbox_fields_selectors|safe }}
+            </div>
+          </div>
+
+        </form>
+
+        <div id="csvErr" class="alert alert-danger d-none mt-3"></div>
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer bbox-modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-bbox-cancel" data-bs-dismiss="modal">
+          Cancel
+        </button>
+
+        <button type="button"
+                id="btnClearBBoxForm"
+                class="btn btn-outline-secondary btn-bbox-clear me-auto">
+          <i class="fas fa-eraser me-2"></i>Clear
+        </button>
+
+        <button id="btnSaveBBoxCfg"
+                type="button"
+                class="btn btn-bbox-save">
+          <i class="fas fa-floppy-disk me-2"></i>Save
+        </button>
+      </div>
+
+    </div>
+  </div>
 </div>

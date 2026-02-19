@@ -1,6 +1,3 @@
-{# templates/_sidebar.html #}
-
-<!-- OFFCANVAS MENU -->
 <div class="offcanvas offcanvas-start"
      tabindex="-1"
      id="sidebarOffcanvas"
@@ -8,37 +5,88 @@
 
   <div class="offcanvas-header">
     <h5 class="offcanvas-title" id="sidebarOffcanvasLabel">
-      <i class="fa-solid fa-bars-staggered me-2"></i>Меню
+      <i class="fa-solid fa-bars-staggered me-2"></i>Menu
     </h5>
     <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
   </div>
 
   <div class="offcanvas-body">
 
-    <div class="text-muted text-uppercase small mb-2">Проект</div>
-    <ul class="nav flex-column mb-3">
-      <li class="nav-item"><a class="nav-link" href="{% url 'projects' %}">Все проекты</a></li>
-      <li class="nav-item"><a class="nav-link" href="{% url 'project_settings' %}">Настройки проекта</a></li>
+    <!-- PROJECT -->
+    <div class="sidebar-section-title">Project</div>
+    <ul class="nav flex-column">
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'projects' %}">
+          <i class="fa-solid fa-diagram-project"></i>All Projects
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'project_settings' %}">
+          <i class="fa-solid fa-gear"></i>Project Settings
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'base_project_settings' %}">
+          <i class="fa-solid fa-shapes"></i>Preplot & shapes
+        </a>
+      </li>  
     </ul>
 
-    <div class="text-muted text-uppercase small mb-2">Навигация</div>
-    <ul class="nav flex-column mb-3">
-      <li class="nav-item"><a class="nav-link" href="{% url 'base_project_settings' %}">Preplot</a></li>
-      <li class="nav-item"><a class="nav-link" href="#">DSR</a></li>
-      <li class="nav-item"><a class="nav-link" href="{% url 'rov_main_view' %}">ROV SURVEY</a></li>
+    <!-- NAVIGATION -->
+    <div class="sidebar-section-title">QC & Production</div>
+    <ul class="nav flex-column">
+      
+      
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'rov_main_view' %}">
+          <i class="fa-solid fa-water"></i>ROV OBN
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="fa-solid fa-table"></i>NOAR OBN
+        </a>
+      </li>  
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="fa-solid fa-table"></i>SOURCE QC
+        </a>
+      </li>  
     </ul>
 
-    <div class="text-muted text-uppercase small mb-2">QC & Production</div>
-    <ul class="nav flex-column mb-3">
-      <li class="nav-item"><a class="nav-link" href="#">QC Dashboard</a></li>
-      <li class="nav-item"><a class="nav-link" href="#">Vessel Activity</a></li>
-      <li class="nav-item"><a class="nav-link" href="#">Production log</a></li>
+    <!-- QC -->
+    <div class="sidebar-section-title">Item 2</div>
+    <ul class="nav flex-column">
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="fa-solid fa-chart-line"></i>QC Dashboard
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="fa-solid fa-ship"></i>Vessel Activity
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="fa-solid fa-clipboard-list"></i>Production Log
+        </a>
+      </li>
     </ul>
 
-    <div class="text-muted text-uppercase small mb-2">Сервис</div>
-    <ul class="nav flex-column mb-3">
-      <li class="nav-item"><a class="nav-link" href="#">Логи</a></li>
-      <li class="nav-item"><a class="nav-link" href="{% url 'admin:index' %}">Админка</a></li>
+    <!-- SERVICE -->
+    <div class="sidebar-section-title">Service</div>
+    <ul class="nav flex-column">
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="fa-solid fa-file-lines"></i>Logs
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'admin:index' %}">
+          <i class="fa-solid fa-user-shield"></i>Admin Panel
+        </a>
+      </li>
     </ul>
 
   </div>

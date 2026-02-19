@@ -104,6 +104,12 @@
                   <input type="number" name="main_project_duration" class="form-control"
                          value="{{ main.project_duration }}">
                 </div>
+                <div class="col-md-4">
+                  <label class="form-label">Default color scheme:</label>
+                  <input type="text" name="main_color_scheme" class="form-control"
+                         value="{{ main.color_scheme }}">
+                </div>  
+                  
               </div>
             </div>
 
@@ -208,6 +214,26 @@
                         Use crossline offset
                       </option>
                     </select>
+                  </div>
+                   <div class="col-md-4">
+                    <label class="form-label">Battery life,days</label>
+                    <input type="number" step="1" name="battery_life" class="form-control"
+                           value="{{ node_qc.battery_life }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">GNSS Diff. Age warning</label>
+                    <input type="number" step="1" name="gnss_diffage_warning" class="form-control"
+                           value="{{ node_qc.gnss_diffage_warning }}">
+                  </div> 
+                  <div class="col-md-4">
+                    <label class="form-label">GNSS Diff. Age error</label>
+                    <input type="number" step="1" name="gnss_diffage_error" class="form-control"
+                           value="{{ node_qc.gnss_diffage_error }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">GNSS Fixed quality</label>
+                    <input type="number" step="1" name="gnss_fixed_quality" class="form-control"
+                           value="{{ node_qc.gnss_fixed_quality }}">
                   </div>
                 </div>
               </div>

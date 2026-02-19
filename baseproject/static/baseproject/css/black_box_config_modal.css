@@ -1,0 +1,112 @@
+/* ===== BBOX Config Modal Theme ===== */
+#bbox-config-modal .modal-content{
+  border:0;
+  border-radius:18px;
+  overflow:hidden;
+  box-shadow: 0 18px 60px rgba(0,0,0,.35);
+}
+
+/* Gradient header */
+#bbox-config-modal .bbox-modal-header{
+  border:0;
+  color:#fff;
+  background: linear-gradient(135deg, #dc3545 0%, #6610f2 55%, #0d6efd 100%);
+}
+
+#bbox-config-modal .bbox-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:.45rem;
+  background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.22);
+  padding: .22rem .6rem;
+  border-radius:999px;
+  font-size:.75rem;
+  color: rgba(255,255,255,.95);
+}
+
+#bbox-config-modal .btn-close.btn-close-white{
+  filter: invert(1) grayscale(100%);
+}
+
+/* Colorful sections */
+#bbox-config-modal .bbox-section{
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background: var(--bs-body-bg);
+  box-shadow: 0 10px 26px rgba(0,0,0,.10);
+  overflow:hidden;
+}
+
+#bbox-config-modal .bbox-section + .bbox-section{ margin-top: 1rem; }
+
+#bbox-config-modal .bbox-section-head{
+  padding:.75rem 1rem;
+  border-bottom:1px solid rgba(255,255,255,.10);
+  background: linear-gradient(135deg, rgba(220,53,69,.10), rgba(13,110,253,.10));
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+}
+
+#bbox-config-modal .bbox-title{
+  font-weight:800;
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  margin:0;
+}
+
+#bbox-config-modal .bbox-dot{
+  width:12px;height:12px;border-radius:50%;
+  background: linear-gradient(135deg,#20c997,#198754);
+  box-shadow:0 0 0 4px rgba(32,201,151,.18);
+}
+
+#bbox-config-modal .bbox-section-body{ padding: 1rem; }
+
+/* Inputs */
+#bbox-config-modal .form-control,
+#bbox-config-modal .form-select,
+#bbox-config-modal .input-group-text{
+  border-radius:12px;
+}
+
+#bbox-config-modal .input-group .input-group-text{
+  font-weight:700;
+}
+
+/* Make table look like a clean layout container */
+#bbox-config-modal .bbox-grid-table{
+  margin:0;
+}
+#bbox-config-modal .bbox-grid-table td{
+  border:0;
+  padding:.35rem .35rem;
+}
+#bbox-config-modal .bbox-grid-table .input-group{
+  margin-bottom:.6rem !important;
+}
+
+/* Footer */
+#bbox-config-modal .bbox-modal-footer{
+  border:0;
+  background: linear-gradient(135deg, rgba(220,53,69,.08), rgba(102,16,242,.08));
+}
+
+#bbox-config-modal .btn-bbox-save{
+  border:0;
+  border-radius:12px;
+  padding:.75rem 1rem;
+  font-weight:900;
+  color:#fff;
+  background: linear-gradient(135deg,#dc3545,#fd7e14);
+  box-shadow: 0 12px 26px rgba(220,53,69,.22);
+}
+#bbox-config-modal .btn-bbox-save:hover{ filter: brightness(1.04); }
+
+#bbox-config-modal .btn-bbox-clear,
+#bbox-config-modal .btn-bbox-cancel{
+  border-radius:12px;
+}

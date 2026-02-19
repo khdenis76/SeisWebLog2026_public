@@ -21,17 +21,27 @@
                   </button>
                   <button type="button"
                           class="btn  btn-warning float-end me-2"
-                          title="Upload csv layer"
+                          title="Set Black Box Log configuration "
                           data-bs-toggle="modal"
                           data-bs-target="#bbox-config-modal"
                   >
                           <i class="fas fa-gears"></i>
                   </button>
+                  <button type="button"
+                          id="sm-export-btn"
+                          class="btn  btn-success float-end me-2"
+                          title="Export curent project database to the SUrvey Manager file"
+                          data-bs-toggle="modal"
+                          data-bs-target="#dsrExportSmModal"
+                          data-rovs-url="{% url 'dsr_rovs_for_timeframe' %}">
+
+                          <i class="fas fa-file-export"></i>
+                  </button>
          </div>
     </div>
 
     <div class="row">
-        <div class="col-4 show collapse" id="left-rov-col">
+        <div class="col-4 " id="left-rov-col">
             <div class="d-flex align-items-center mb-2">
                 <!-- Left spacer -->
                 <div class="flex-grow-1"></div>
@@ -51,14 +61,8 @@
                 <div class="flex-grow-1 text-end">
                       <button type="button"
                                    class="btn btn-sm float-end"
-                                   data-bs-toggle="collapse"
-                                   data-bs-target="#rightpreplotColumn"
-                                   aria-expanded="true"
-                                   onclick="$('#left-rov-col').toggleClass('col-12 col-4');
-                                            $('#left-col-icon').toggleClass('fa-compress fa-expand');
-                                             $('#right-rov-col').toggle();
-                          ">
-                                <i class="fas fa-expand" id="left-col-icon"></i>
+                                   id = "toggle-left-rov-btn">
+                                <i class="fas fa-expand" id="left-rov-toggle-icon"></i>
                       </button>
                 </div>
             </div>
@@ -85,16 +89,26 @@
                                 </button>
                            </li>
                            <li class="nav-item" role="presentation">
-                                <button class="nav-link"
+                              <div class="hover-wrapper">
+                                <button class="nav-link hover-btn"
                                         id="pills-bbox-tab"
                                         data-bs-toggle="pill"
                                         data-bs-target="#pills-bbox"
+                                        data-hover-target="hoverDiv1"
                                         type="button"
                                         role="tab"
                                         aria-controls="pills-bbox"
                                         aria-selected="true">
                                     <i class="fas fa-anchor me-2"></i>BLACK BOX LOG
                                 </button>
+                                <div id="hoverDiv1" class="hover-content">
+                                           <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="gnss-qc-card">GNSS</button>
+                                           <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="hdop-qc-card">PDOP</button>
+                                           <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="depth-comparison-card">DEPTH</button>
+                                           <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="vessel-sog-card"> SOG</button>
+                                           <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="drift-qc-card">DRIFT</button>
+                                </div>
+                              </div>
                            </li>
                            <li class="nav-item" role="presentation">
                                 <button class="nav-link"
@@ -113,14 +127,8 @@
                 <div class="flex-grow-1 text-end">
                       <button type="button"
                                    class="btn btn-sm float-end"
-                                   data-bs-toggle="collapse"
-                                   data-bs-target="#rightpreplotColumn"
-                                   aria-expanded="true"
-                                   onclick="$('#left-rov-col').toggleClass('col-12 col-4');
-                                            $('#left-col-icon').toggleClass('fa-compress fa-expand');
-                                             $('#right-rov-col').toggle();
-                          ">
-                                <i class="fas fa-expand" id="left-col-icon"></i>
+                                   id = "toggle-right-rov-btn">
+                                <i class="fas fa-expand" id="right-rov-toggle-icon"></i>
                       </button>
                 </div>
             </div>
@@ -130,6 +138,11 @@
                   </div>
                   <div class="tab-pane fade" id="pills-bbox" role="tabpanel" aria-labelledby="pills-bbox-tab">
                       {% include "rov/cards/gnss_qc_card.html" %}
+                      {% include "rov/cards/hdop_pdop_vdop_card.html" %}
+                      {% include "rov/cards/rov_depths_qc_card.html" %}
+                      {% include "rov/cards/vessel_sog_card.html" %}
+                      {% include "rov/cards/cog_hdg_qc_card.html" %}
+                      {% include "rov/cards/drift_qc_card.html" %}
                   </div>
                   <div class="tab-pane fade" id="pills-line" role="tabpanel" aria-labelledby="pills-line-tab">...</div>
             </div>
@@ -139,5 +152,8 @@
 {% include "rov/modals/rov_upload_modal.html" %}
 {% include "rov/modals/dsr_line_filter_modal.html" %}
 {% include "rov/modals/bbox_config_modal.html" %}
+{% include "rov/modals/export_to_sm_modal.html" %}
+{% include "rov/modals/export_to_sps_modal.html" %}
+{% include "rov/partials/toast_container_rov.html" %}
 
 {% endblock %}

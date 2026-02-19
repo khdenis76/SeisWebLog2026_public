@@ -111,6 +111,11 @@ class Project(models.Model):
     @property
     def export_spoint_shapes(self) -> Path:
         return self.export_shapes / "sou_point_shapes"
+
+    @property
+    def export_sm(self) -> Path:
+        return self.export_dir / "sm"
+
     @property
     def logs_dir(self) -> Path:
         return self.abs_path / "logs"
@@ -306,6 +311,7 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
     instance.export_sps1.mkdir(parents=True, exist_ok=True)
     instance.export_sps21.mkdir(parents=True, exist_ok=True)
     instance.export_shapes.mkdir(parents=True, exist_ok=True)
+    instance.export_sm.mkdir(parents=True, exist_ok=True)
 
     instance.export_rline_shapes.mkdir(parents=True, exist_ok=True)
     instance.export_rpoint_shapes.mkdir(parents=True, exist_ok=True)

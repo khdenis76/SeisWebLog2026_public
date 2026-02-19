@@ -10,3 +10,6 @@ pytest~=9.0.2
 Pygments~=2.19.2
 xyzservices~=2025.11.0
 pyproj~=3.7.2
+plotly<=6.5.2
+PySide6>=6.10.2
+pyqtgraph >= 0.14.0

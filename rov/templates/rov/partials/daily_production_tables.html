@@ -1,10 +1,47 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<h6> DAILY DEPLOYMENT</h6>
+<div class="table-scroll" id="deployment-daily-production" style="height: 20vh">
+
+    <table class="table table-hover table-striped-columns">
+        <thead>
+               <th>ROV</th>
+               <th>Line</th>
+               <th>FRP</th>
+               <th>LRP</th>
+               <th>Stations</th>
+        </thead>
+        <tbody>
+              {%  for d in deploy_rows %}
+                  <tr>
+                  <th>{{ d.ROV }}</th>
+                  <th>{{ d.Line }}</th>
+                  <th>{{ d.FRP }}</th>
+                  <th>{{ d.LRP }}</th>
+                  <th>{{ d.TotalNodes }}</th>
+                  </tr>
+              {% endfor %}
+        </tbody>
+    </table>
+</div>
+<h6> DAILY RECOVERY</h6>
+<div class="table-scroll" id="recovery-daily-production" style="height: 20vh">
+     <table class="table table-hover table-striped-columns">
+        <thead>
+               <th>ROV</th>
+               <th>Line</th>
+               <th>FRP</th>
+               <th>LRP</th>
+               <th>Stations</th>
+        </thead>
+        <tbody>
+              {%  for r in rec_rows %}
+                  <tr>
+                  <th>{{ r.ROV }}</th>
+                  <th>{{ r.Line }}</th>
+                  <th>{{ r.FRP }}</th>
+                  <th>{{ r.LRP }}</th>
+                  <th>{{ r.TotalNodes }}</th>
+                  </tr>
+              {% endfor %}
+        </tbody>
+    </table>
+</div>

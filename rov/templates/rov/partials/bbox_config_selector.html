@@ -4,8 +4,9 @@
           {% for l in bb_field_list %}
           <tr>
               <td>{{ l }}</td>
-              <td><SELECT class="bbox-config-selector" data-fieldname="{{ l }}">
-
+              <td><SELECT class="bbox-config-selector"
+                          name="map_{{ l }}"
+                          data-fieldname="{{ l }}">
                   </SELECT>
               </td>
           </tr>

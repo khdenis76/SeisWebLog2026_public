@@ -216,8 +216,8 @@ CREATE TABLE IF NOT EXISTS "DSR" (
     "LinePointIdx" INTEGER,
     "Line" INTEGER,
     "Station" INTEGER,
-    "Node" TEXT NOT NULL DEFAULT 'NA',
-
+    "Node" TEXT,
+    "NODE_HEX_ID" INT NOT NULL,
     "PreplotEasting" REAL,
     "PreplotNorthing" REAL,
     "ROV" TEXT,
@@ -283,46 +283,6 @@ CREATE TABLE IF NOT EXISTS "DSR" (
     "DepTime" INTEGER,
     "RecTime" INTEGER,
     "PointComment" TEXT,
-    "REC_ID" INTEGER,
-    "NODE_ID" INTEGER,
-    "DEPLOY" INTEGER,
-    "RPI" INTEGER,
-    "PART_NO" INTEGER,
-    "RPRE_X" REAL,
-    "RPRE_Y" REAL,
-    "RFIELD_X" REAL,
-    "RFIELD_Y" REAL,
-    "RFIELD_Z" REAL,
-    "REC_X" REAL,
-    "REC_Y" REAL,
-    "REC_Z" REAL,
-    "TIMECORR" REAL,
-    "BULKSHFT" REAL,
-    "QDRIFT" REAL,
-    "LDRIFT" REAL,
-    "TRIMPTCH" REAL,
-    "TRIMROLL" REAL,
-    "TRIMYAW" REAL,
-    "PITCHFIN" REAL,
-    "ROLLFIN" REAL,
-    "YAWFIN" REAL,
-    "TOTDAYS" REAL,
-    "RECCOUNT" INTEGER,
-    "CLKFLAG" INTEGER,
-    "EC1_RUS0" REAL DEFAULT 0,
-    "EC1_RUS1" REAL DEFAULT 0,
-    "EC1_EDT0" REAL DEFAULT 0,
-    "EC1_EDT1" REAL DEFAULT 0,
-    "EC1_EPT0" REAL DEFAULT 0,
-    "EC1_EPT1" REAL DEFAULT 0,
-    "NODSTART" INTEGER DEFAULT 0,
-    "DEPLOYTM" INTEGER DEFAULT 0,
-    "PICKUPTM" INTEGER DEFAULT 0,
-    "RUNTIME" INTEGER DEFAULT 0,
-    "EC2_CD1" INTEGER DEFAULT 0,
-    "TOTSHOTS" INTEGER DEFAULT 0,
-    "TOTPROD" INTEGER DEFAULT 0,
-    "SPSK" INTEGER DEFAULT 0,
     "TIER" INTEGER DEFAULT 1,
     "isExported" INTEGER DEFAULT 0,
     "isRecExported" INTEGER DEFAULT 0,
@@ -359,14 +319,14 @@ CREATE TABLE IF NOT EXISTS "DSR" (
     "DownloadError" INTEGER,
     FOREIGN KEY ("Solution_FK") REFERENCES "DSRSolution"("ID") ON UPDATE CASCADE ON DELETE RESTRICT,
     FOREIGN KEY ("RLPreplot_FK") REFERENCES "RLPreplot"("ID") ON UPDATE CASCADE ON DELETE SET NULL,
-    CONSTRAINT "ux_dsr_line_station_node" UNIQUE ("Line","Station","Node")
+    CONSTRAINT "ux_dsr_line_station_node" UNIQUE ("Line","Station","NODE_HEX_ID")
 );
 
 CREATE INDEX IF NOT EXISTS "ix_dsr_line_station"
     ON "DSR"("Line","Station");
 
 CREATE INDEX IF NOT EXISTS "ix_dsr_node"
-    ON "DSR"("Node");
+    ON "DSR"("NODE_HEX_ID");
 
 CREATE INDEX IF NOT EXISTS "ix_dsr_recidx"
     ON "DSR"("RecIdx");
@@ -381,17 +341,113 @@ CREATE INDEX IF NOT EXISTS "ix_dsr_timestamp1"
     ON "DSR"("TimeStamp1");
 CREATE INDEX IF NOT EXISTS ix_dsr_rlpreplot_fk
 ON DSR(RLPreplot_FK);
+--create rec_db table for fb data
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS REC_DB
+(
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- File link (source rec_db file)
+    File_FK     INTEGER,
+
+    -- Link to RLPreplot geometry
+    Preplot_FK  INTEGER,
+
+    -- Keys from REC_DB file
+    REC_ID   INTEGER,
+    NODE_ID  INTEGER,
+    DEPLOY   INTEGER,
+    RPI      INTEGER,
+    PART_NO  INTEGER,
+
+    -- Geometry fields
+    Line              INTEGER,
+    Point             INTEGER,
+    LinePoint         INTEGER,
+    LinePointIdx      INTEGER,
+
+    TierLine          INTEGER,
+    TierLinePoint     INTEGER,
+    TierLinePointIdx  INTEGER,
+
+    -- Coordinates
+    RPRE_X   REAL,
+    RPRE_Y   REAL,
+    RFIELD_X REAL,
+    RFIELD_Y REAL,
+    RFIELD_Z REAL,
+    REC_X    REAL,
+    REC_Y    REAL,
+    REC_Z    REAL,
+
+    -- Timing / drift
+    TIMECORR REAL,
+    BULKSHFT REAL,
+    QDRIFT   REAL,
+    LDRIFT   REAL,
+
+    TRIMPTCH REAL,
+    TRIMROLL REAL,
+    TRIMYAW  REAL,
+
+    PITCHFIN REAL,
+    ROLLFIN  REAL,
+    YAWFIN   REAL,
+
+    TOTDAYS  REAL,
+    RECCOUNT INTEGER,
+    CLKFLAG  INTEGER,
+
+    EC1_RUS0 REAL    DEFAULT 0,
+    EC1_RUS1 REAL    DEFAULT 0,
+    EC1_EDT0 REAL    DEFAULT 0,
+    EC1_EDT1 REAL    DEFAULT 0,
+    EC1_EPT0 REAL    DEFAULT 0,
+    EC1_EPT1 REAL    DEFAULT 0,
+
+    NODSTART INTEGER DEFAULT 0,
+    DEPLOYTM INTEGER DEFAULT 0,
+    PICKUPTM INTEGER DEFAULT 0,
+    RUNTIME  INTEGER DEFAULT 0,
+
+    EC2_CD1  INTEGER DEFAULT 0,
+    TOTSHOTS INTEGER DEFAULT 0,
+    TOTPROD  INTEGER DEFAULT 0,
+    SPSK     INTEGER DEFAULT 0,
+
+    -- Tier level (default 1)
+    TIER     INTEGER DEFAULT 1,
+
+    -- Composite uniqueness rule
+    UNIQUE (REC_ID, DEPLOY, RPI),
+
+    -- Foreign keys
+    FOREIGN KEY (Preplot_FK)
+        REFERENCES RLPreplot(ID)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE,
+
+    FOREIGN KEY (File_FK)
+        REFERENCES Files(ID)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+);
 
 --create black box table (rov_box)
-CREATE TABLE IF NOT EXISTS BBox_Configs_List (
-    ID INTEGER PRIMARY KEY AUTOINCREMENT,
-    Name TEXT NOT NULL,
-    IsDefault INTEGER DEFAULT 0,
-    rov1_name TEXT,
-    rov2_name TEXT,
-    gnss1_name TEXT,
-    gnss2_name Text,
-    CONSTRAINT ux_bbox_configs_name UNIQUE (Name)
+CREATE TABLE IF NOT EXISTS "BBox_Configs_List" (
+	"ID"	INTEGER,
+	"Name"	TEXT NOT NULL,
+	"IsDefault"	INTEGER DEFAULT 0,
+	"rov1_name"	TEXT,
+	"rov2_name"	TEXT,
+	"gnss1_name"	TEXT,
+	"gnss2_name"	Text,
+	"Vessel_name"	TEXT,
+	"Depth1_name"	TEXT,
+	"Depth2_name"	TEXT,
+	PRIMARY KEY("ID" AUTOINCREMENT),
+	CONSTRAINT "ux_bbox_configs_name" UNIQUE("Name")
 );
 CREATE TRIGGER IF NOT EXISTS trg_bbox_default_singleton
 AFTER UPDATE OF IsDefault ON BBox_Configs_List
@@ -779,7 +835,7 @@ CREATE TABLE  IF NOT EXISTS  CSVpoints (
     Attr2 INTEGER DEFAULT 0,
     Attr3 REAL DEFAULT 0,
     FOREIGN KEY (Layer_FK) REFERENCES CSVLayers(ID) ON DELETE CASCADE);
-CREATE TABLE "project_shapes" (
+CREATE TABLE IF NOT EXISTS "project_shapes" (
                                 "id" INTEGER,
                                 "FullName" TEXT UNIQUE NOT NULL,
                                 "FileName" TEXT,
@@ -789,6 +845,7 @@ CREATE TABLE "project_shapes" (
                                 "LineWidth" INTEGER DEFAULT 1,
                                 "LineStyle" TEXT DEFAULT '', HatchPattern TEXT DEFAULT '', FileCheck INT DEFAULT 1,
 	                            PRIMARY KEY(id,FullName));
+DROP VIEW IF EXISTS PreplotSummaryAllFiles;
 CREATE VIEW IF NOT EXISTS PreplotSummaryAllFiles AS
 
 SELECT
@@ -884,146 +941,377 @@ SELECT
      ORDER BY (COALESCE(RealLineLength,0)=0), COALESCE(RealLineLength,0) ASC, ID ASC
      LIMIT 1
   ) AS ShortestLength;
+DROP VIEW IF EXISTS V_DSR_LineSummary;
 CREATE VIEW IF NOT EXISTS V_DSR_LineSummary AS
+WITH
+-- Aggregate REC_DB by Line using the RLPreplot point id relation:
+-- DSR.RLPreplot_FK == RLPreplot.ID
+-- REC_DB.Preplot_FK == RLPreplot.ID
+rec_by_line AS (
+    SELECT
+        rl.Line AS Line,
+        COUNT(*) AS ProcessedCount
+    FROM REC_DB r
+    JOIN RLPreplot rl
+      ON rl.ID = r.Preplot_FK
+    GROUP BY rl.Line
+),
+
+dsr_by_line AS (
+    SELECT
+        d.Line AS Line,
+
+        -- Planned points
+        MAX(rl.Points) AS PlannedPoints,
+
+        -- RL line flags
+        MAX(rl.isLineClicked)  AS isLineClicked,
+        MAX(rl.isLineDeployed) AS isLineDeployed,
+        MAX(rl.isValidated)    AS isValidated,
+
+        -- Basic counts
+        COUNT(*)                  AS DSRRows,
+        COUNT(DISTINCT d.Station) AS Stations,
+        COUNT(DISTINCT d.Node)    AS Nodes,
+
+        MIN(d.Station) AS MinStation,
+        MAX(d.Station) AS MaxStation,
+
+        -- ROV Deployment / Retrieval counts
+        SUM(CASE
+            WHEN d.TimeStamp IS NOT NULL AND TRIM(d.TimeStamp) <> ''
+            THEN 1 ELSE 0
+        END) AS DeployedCount,
+
+        SUM(CASE
+            WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> ''
+            THEN 1 ELSE 0
+        END) AS RetrievedCount,
+
+        -- SM flags
+        SUM(CASE WHEN UPPER(TRIM(d.Deployed)) = 'YES' THEN 1 ELSE 0 END) AS SMCount,
+        SUM(CASE WHEN UPPER(TRIM(d.PickedUp)) = 'YES' THEN 1 ELSE 0 END) AS SMRCount,
+
+        -- Timing (deployment)
+        MIN(d.TimeStamp) AS FirstDeployTime,
+        MAX(d.TimeStamp) AS LastDeployTime,
+        ROUND((julianday(MAX(d.TimeStamp)) - julianday(MIN(d.TimeStamp))) * 24, 2) AS DeploymentHours,
+
+        -- Timing (retrieval)
+        MIN(d.TimeStamp1) AS FirstRetrieveTime,
+        MAX(d.TimeStamp1) AS LastRetrieveTime,
+        ROUND((julianday(MAX(d.TimeStamp1)) - julianday(MIN(d.TimeStamp1))) * 24, 2) AS RetrievalHours,
+
+        -- Total operation time
+        ROUND((julianday(MAX(d.TimeStamp1)) - julianday(MIN(d.TimeStamp))) * 24, 2) AS TotalOperationHours,
+
+        -- Solution counts
+        SUM(CASE WHEN d.Solution_FK = 1 THEN 1 ELSE 0 END) AS Normal,
+        SUM(CASE WHEN d.Solution_FK = 2 THEN 1 ELSE 0 END) AS CoDeployed,
+        SUM(CASE WHEN d.Solution_FK = 3 THEN 1 ELSE 0 END) AS Losted,
+        SUM(CASE WHEN d.Solution_FK = 4 THEN 1 ELSE 0 END) AS Missplaced,
+        SUM(CASE WHEN d.Solution_FK = 5 THEN 1 ELSE 0 END) AS WrongID,
+        SUM(CASE WHEN d.Solution_FK = 6 THEN 1 ELSE 0 END) AS Overlap,
+
+        -- Delta statistics
+        AVG(d.DeltaEprimarytosecondary) AS AvgDeltaE,
+        MIN(d.DeltaEprimarytosecondary) AS MinDeltaE,
+        MAX(d.DeltaEprimarytosecondary) AS MaxDeltaE,
+
+        AVG(d.DeltaNprimarytosecondary) AS AvgDeltaN,
+        MIN(d.DeltaNprimarytosecondary) AS MinDeltaN,
+        MAX(d.DeltaNprimarytosecondary) AS MaxDeltaN,
+
+        AVG(d.DeltaEprimarytosecondary1) AS AvgDeltaE1,
+        MIN(d.DeltaEprimarytosecondary1) AS MinDeltaE1,
+        MAX(d.DeltaEprimarytosecondary1) AS MaxDeltaE1,
+
+        AVG(d.DeltaNprimarytosecondary1) AS AvgDeltaN1,
+        MIN(d.DeltaNprimarytosecondary1) AS MinDeltaN1,
+        MAX(d.DeltaNprimarytosecondary1) AS MaxDeltaN1,
+
+        -- Sigma statistics (ONLY Sigma..Sigma3)
+        AVG(d.Sigma)  AS AvgSigma,
+        MIN(d.Sigma)  AS MinSigma,
+        MAX(d.Sigma)  AS MaxSigma,
+
+        AVG(d.Sigma1) AS AvgSigma1,
+        MIN(d.Sigma1) AS MinSigma1,
+        MAX(d.Sigma1) AS MaxSigma1,
+
+        AVG(d.Sigma2) AS AvgSigma2,
+        MIN(d.Sigma2) AS MinSigma2,
+        MAX(d.Sigma2) AS MaxSigma2,
+
+        AVG(d.Sigma3) AS AvgSigma3,
+        MIN(d.Sigma3) AS MinSigma3,
+        MAX(d.Sigma3) AS MaxSigma3
+
+    FROM DSR d
+    LEFT JOIN RLPreplot rl
+      ON rl.Line = d.Line
+    GROUP BY d.Line
+)
+
 SELECT
-    d.Line                                   AS Line,
+    s.Line,
+    s.PlannedPoints,
 
-    -- Planned points
-    rl.Points                                AS PlannedPoints,
+    s.isLineClicked,
+    s.isLineDeployed,
+    s.isValidated,
 
-    -- RL line flags
-    MAX(rl.isLineClicked)                    AS isLineClicked,
-    MAX(rl.isLineDeployed)                   AS isLineDeployed,
-    MAX(rl.isValidated)                      AS isValidated,
+    s.DSRRows,
+    s.Stations,
+    s.Nodes,
+    s.MinStation,
+    s.MaxStation,
 
-    -- Basic counts
-    COUNT(*)                                 AS DSRRows,
-    COUNT(DISTINCT d.Station)                AS Stations,
-    COUNT(DISTINCT d.Node)                   AS Nodes,
+    s.DeployedCount,
+    s.RetrievedCount,
 
-    MIN(d.Station)                           AS MinStation,
-    MAX(d.Station)                           AS MaxStation,
+    s.SMCount,
+    s.SMRCount,
 
-    -- ROV Deployment / Retrieval counts
-    SUM(CASE
-        WHEN d.TimeStamp IS NOT NULL AND TRIM(d.TimeStamp) <> ''
-        THEN 1 ELSE 0
-    END)                                    AS DeployedCount,
+    -- Processed points from REC_DB (NOT from DSR)
+    COALESCE(r.ProcessedCount, 0) AS ProcessedCount,
 
-    SUM(CASE
-        WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> ''
-        THEN 1 ELSE 0
-    END)                                    AS RetrievedCount,
+    s.FirstDeployTime,
+    s.LastDeployTime,
+    s.DeploymentHours,
 
-    -- SM flags
-    SUM(CASE
-        WHEN UPPER(TRIM(d.Deployed)) = 'YES'
-        THEN 1 ELSE 0
-    END)                                    AS SMCount,
+    s.FirstRetrieveTime,
+    s.LastRetrieveTime,
+    s.RetrievalHours,
 
-    SUM(CASE
-        WHEN UPPER(TRIM(d.PickedUp)) = 'YES'
-        THEN 1 ELSE 0
-    END)                                    AS SMRCount,
-
-    -- Processed points
-    SUM(CASE
-        WHEN d.REC_ID IS NOT NULL
-        THEN 1 ELSE 0
-    END)                                    AS ProcessedCount,
-
-    -- Timing (deployment)
-    MIN(d.TimeStamp)                         AS FirstDeployTime,
-    MAX(d.TimeStamp)                         AS LastDeployTime,
-    ROUND(
-        (julianday(MAX(d.TimeStamp)) - julianday(MIN(d.TimeStamp))) * 24,
-        2
-    )                                        AS DeploymentHours,
-
-    -- Timing (retrieval)
-    MIN(d.TimeStamp1)                        AS FirstRetrieveTime,
-    MAX(d.TimeStamp1)                        AS LastRetrieveTime,
-    ROUND(
-        (julianday(MAX(d.TimeStamp1)) - julianday(MIN(d.TimeStamp1))) * 24,
-        2
-    )                                        AS RetrievalHours,
-
-    -- Total operation time
-    ROUND(
-        (julianday(MAX(d.TimeStamp1)) - julianday(MIN(d.TimeStamp))) * 24,
-        2
-    )                                        AS TotalOperationHours,
+    s.TotalOperationHours,
 
     -- Percentages vs planned
-    ROUND(
-        100.0 * SUM(CASE
-            WHEN d.TimeStamp IS NOT NULL AND TRIM(d.TimeStamp) <> ''
-            THEN 1 ELSE 0 END)
-        / NULLIF(rl.Points, 0),
-        1
-    )                                        AS DeployedPct,
+    ROUND(100.0 * s.DeployedCount / NULLIF(s.PlannedPoints, 0), 1) AS DeployedPct,
+    ROUND(100.0 * s.RetrievedCount / NULLIF(s.PlannedPoints, 0), 1) AS RetrievedPct,
+    ROUND(100.0 * COALESCE(r.ProcessedCount, 0) / NULLIF(s.PlannedPoints, 0), 1) AS ProcessedPct,
 
-    ROUND(
-        100.0 * SUM(CASE
-            WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> ''
-            THEN 1 ELSE 0 END)
-        / NULLIF(rl.Points, 0),
-        1
-    )                                        AS RetrievedPct,
+    s.Normal,
+    s.CoDeployed,
+    s.Losted,
+    s.Missplaced,
+    s.WrongID,
+    s.Overlap,
 
-    ROUND(
-        100.0 * SUM(CASE
-            WHEN d.REC_ID IS NOT NULL
-            THEN 1 ELSE 0 END)
-        / NULLIF(rl.Points, 0),
-        1
-    )                                        AS ProcessedPct,
+    s.AvgDeltaE,  s.MinDeltaE,  s.MaxDeltaE,
+    s.AvgDeltaN,  s.MinDeltaN,  s.MaxDeltaN,
+    s.AvgDeltaE1, s.MinDeltaE1, s.MaxDeltaE1,
+    s.AvgDeltaN1, s.MinDeltaN1, s.MaxDeltaN1,
 
-    -- Solution counts
-    SUM(CASE WHEN d.Solution_FK = 1 THEN 1 ELSE 0 END) AS Normal,
-    SUM(CASE WHEN d.Solution_FK = 2 THEN 1 ELSE 0 END) AS CoDeployed,
-    SUM(CASE WHEN d.Solution_FK = 3 THEN 1 ELSE 0 END) AS Losted,
-    SUM(CASE WHEN d.Solution_FK = 4 THEN 1 ELSE 0 END) AS Missplaced,
-    SUM(CASE WHEN d.Solution_FK = 5 THEN 1 ELSE 0 END) AS WrongID,
-    SUM(CASE WHEN d.Solution_FK = 6 THEN 1 ELSE 0 END) AS Overlap,
+    s.AvgSigma,  s.MinSigma,  s.MaxSigma,
+    s.AvgSigma1, s.MinSigma1, s.MaxSigma1,
+    s.AvgSigma2, s.MinSigma2, s.MaxSigma2,
+    s.AvgSigma3, s.MinSigma3, s.MaxSigma3
 
-    -- Delta statistics
-    AVG(d.DeltaEprimarytosecondary)          AS AvgDeltaE,
-    MIN(d.DeltaEprimarytosecondary)          AS MinDeltaE,
-    MAX(d.DeltaEprimarytosecondary)          AS MaxDeltaE,
+FROM dsr_by_line s
+LEFT JOIN rec_by_line r
+  ON r.Line = s.Line;
+DROP VIEW IF EXISTS DEPLOY_ROV_Summary;
+CREATE VIEW IF NOT EXISTS DEPLOY_ROV_Summary AS
+WITH base AS (
+    SELECT
+        NULLIF(TRIM(ROV),  '') AS Rov,
+        NULLIF(TRIM(ROV1), '') AS Rov1,
+        TRIM(Line)        AS Line,
+        TRIM(LinePoint)   AS LinePoint,
+        TRIM(Status)      AS Status,
+        TRIM(TimeStamp)   AS TS,
+        TRIM(TimeStamp1)  AS TS1
+    FROM DSR
+),
 
-    AVG(d.DeltaNprimarytosecondary)          AS AvgDeltaN,
-    MIN(d.DeltaNprimarytosecondary)          AS MinDeltaN,
-    MAX(d.DeltaNprimarytosecondary)          AS MaxDeltaN,
+norm AS (
+    SELECT
+        COALESCE(Rov, Rov1) AS RovKey,
+        Rov, Rov1, Line, LinePoint, Status,
 
-    AVG(d.DeltaEprimarytosecondary1)         AS AvgDeltaE1,
-    MIN(d.DeltaEprimarytosecondary1)         AS MinDeltaE1,
-    MAX(d.DeltaEprimarytosecondary1)         AS MaxDeltaE1,
+        -- Deploy day
+        CASE
+            WHEN TS IS NULL OR TS = '' THEN NULL
+            WHEN length(TS) >= 10 THEN date(substr(TS, 1, 10))
+            ELSE NULL
+        END AS Day,
 
-    AVG(d.DeltaNprimarytosecondary1)         AS AvgDeltaN1,
-    MIN(d.DeltaNprimarytosecondary1)         AS MinDeltaN1,
-    MAX(d.DeltaNprimarytosecondary1)         AS MaxDeltaN1,
+        -- Recovery day
+        CASE
+            WHEN TS1 IS NULL OR TS1 = '' THEN NULL
+            WHEN length(TS1) >= 10 THEN date(substr(TS1, 1, 10))
+            ELSE NULL
+        END AS Day1
+    FROM base
+),
 
-    -- Sigma statistics (ONLY Sigma..Sigma3)
-    AVG(d.Sigma)   AS AvgSigma,
-    MIN(d.Sigma)   AS MinSigma,
-    MAX(d.Sigma)   AS MaxSigma,
+agg AS (
+    SELECT
+        RovKey AS Rov,
 
-    AVG(d.Sigma1)  AS AvgSigma1,
-    MIN(d.Sigma1)  AS MinSigma1,
-    MAX(d.Sigma1)  AS MaxSigma1,
+        /* ===== DEPLOY ===== */
+        COUNT(DISTINCT CASE WHEN Rov IS NOT NULL THEN Line END)       AS Lines,
+        COUNT(DISTINCT CASE WHEN Rov IS NOT NULL THEN LinePoint END)  AS Stations,
+        COUNT(CASE           WHEN Rov IS NOT NULL THEN 1 END)         AS Nodes,
+        COUNT(DISTINCT CASE  WHEN Rov IS NOT NULL THEN Day END)       AS Days,
+        MIN(CASE WHEN Rov IS NOT NULL THEN Day END)                   AS FirstDay,
+        MAX(CASE WHEN Rov IS NOT NULL THEN Day END)                   AS LastDay,
 
-    AVG(d.Sigma2)  AS AvgSigma2,
-    MIN(d.Sigma2)  AS MinSigma2,
-    MAX(d.Sigma2)  AS MaxSigma2,
+        /* ===== RECOVERY ===== */
+        COUNT(DISTINCT CASE WHEN Rov1 IS NOT NULL AND Day1 IS NOT NULL THEN Line END)       AS RECLines,
+        COUNT(DISTINCT CASE WHEN Rov1 IS NOT NULL AND Day1 IS NOT NULL THEN LinePoint END)  AS RECStations,
+        COUNT(CASE           WHEN Rov1 IS NOT NULL AND Day1 IS NOT NULL THEN 1 END)         AS RECNodes,
+        COUNT(DISTINCT CASE  WHEN Rov1 IS NOT NULL AND Day1 IS NOT NULL THEN Day1 END)      AS RECDays,
+        MIN(CASE WHEN Rov1 IS NOT NULL AND Day1 IS NOT NULL THEN Day1 END)                  AS RECFirstDay,
+        MAX(CASE WHEN Rov1 IS NOT NULL AND Day1 IS NOT NULL THEN Day1 END)                  AS RECLastDay,
 
-    AVG(d.Sigma3)  AS AvgSigma3,
-    MIN(d.Sigma3)  AS MinSigma3,
-    MAX(d.Sigma3)  AS MaxSigma3
+        /* ===== STATUS COUNTS (Deploy side) ===== */
+        COUNT(DISTINCT CASE WHEN Rov IS NOT NULL AND Status='Collected' THEN Line END)       AS ColLines,
+        COUNT(DISTINCT CASE WHEN Rov IS NOT NULL AND Status='Collected' THEN LinePoint END)  AS ColStations,
+        COUNT(CASE           WHEN Rov IS NOT NULL AND Status='Collected' THEN 1 END)         AS ColNodes,
 
-FROM DSR d
-LEFT JOIN RLPreplot rl ON rl.Line = d.Line
-GROUP BY d.Line, rl.Points
-ORDER BY d.Line;
+        COUNT(DISTINCT CASE WHEN Rov IS NOT NULL AND Status='Picked Up' THEN Line END)       AS PULines,
+        COUNT(DISTINCT CASE WHEN Rov IS NOT NULL AND Status='Picked Up' THEN LinePoint END)  AS PUStations,
+        COUNT(CASE           WHEN Rov IS NOT NULL AND Status='Picked Up' THEN 1 END)         AS PUNodes,
+
+        COUNT(DISTINCT CASE WHEN Rov IS NOT NULL AND Status='Deployed' THEN Line END)        AS SMDLines,
+        COUNT(DISTINCT CASE WHEN Rov IS NOT NULL AND Status='Deployed' THEN LinePoint END)   AS SMDStations,
+        COUNT(CASE           WHEN Rov IS NOT NULL AND Status='Deployed' THEN 1 END)          AS SMDNodes
+
+    FROM norm
+    WHERE RovKey IS NOT NULL
+    GROUP BY RovKey
+)
+
+-- Per ROV rows
+SELECT * FROM agg
+
+UNION ALL
+
+-- TOTAL row
+SELECT
+    'Total' AS Rov,
+
+    SUM(Lines)     AS Lines,
+    SUM(Stations)  AS Stations,
+    SUM(Nodes)     AS Nodes,
+
+    -- Deploy Days = span from earliest FirstDay to latest LastDay
+    CASE WHEN MIN(FirstDay) IS NOT NULL AND MAX(LastDay) IS NOT NULL
+         THEN CAST(julianday(MAX(LastDay)) - julianday(MIN(FirstDay)) + 1 AS INT)
+         ELSE NULL
+    END AS Days,
+    MIN(FirstDay)  AS FirstDay,
+    MAX(LastDay)   AS LastDay,
+
+    SUM(RECLines)     AS RECLines,
+    SUM(RECStations)  AS RECStations,
+    SUM(RECNodes)     AS RECNodes,
+
+    -- Recovery Days span
+    CASE WHEN MIN(RECFirstDay) IS NOT NULL AND MAX(RECLastDay) IS NOT NULL
+         THEN CAST(julianday(MAX(RECLastDay)) - julianday(MIN(RECFirstDay)) + 1 AS INT)
+         ELSE NULL
+    END AS RECDays,
+    MIN(RECFirstDay)  AS RECFirstDay,
+    MAX(RECLastDay)   AS RECLastDay,
+
+    SUM(ColLines)     AS ColLines,
+    SUM(ColStations)  AS ColStations,
+    SUM(ColNodes)     AS ColNodes,
+
+    SUM(PULines)      AS PULines,
+    SUM(PUStations)   AS PUStations,
+    SUM(PUNodes)      AS PUNodes,
+
+    SUM(SMDLines)     AS SMDLines,
+    SUM(SMDStations)  AS SMDStations,
+    SUM(SMDNodes)     AS SMDNodes
+
+FROM agg;
+
+DROP VIEW IF EXISTS Daily_Deployment;
+CREATE VIEW IF NOT EXISTS Daily_Deployment AS
+SELECT
+    DATE(TimeStamp)                 AS ProdDate,
+    TRIM(Line)                      AS Line,
+    TRIM(ROV)                       AS ROV,
+    MIN(CAST(NULLIF(Station,'') AS REAL)) AS FRP,
+    MAX(CAST(NULLIF(Station,'') AS REAL)) AS LRP,
+    COUNT(*)                        AS TotalNodes
+FROM DSR
+WHERE TimeStamp IS NOT NULL
+  AND TRIM(TimeStamp) <> ''
+  AND ROV IS NOT NULL
+  AND TRIM(ROV) <> ''
+GROUP BY
+    DATE(TimeStamp),
+    TRIM(Line),
+    TRIM(ROV);
+DROP VIEW IF EXISTS Daily_Recovery;
+CREATE VIEW IF NOT EXISTS Daily_Recovery AS
+SELECT
+    DATE(TimeStamp1)                AS ProdDate,
+    TRIM(Line)                      AS Line,
+    TRIM(ROV1)                      AS ROV,
+    MIN(CAST(NULLIF(Station,'') AS REAL)) AS FRP,
+    MAX(CAST(NULLIF(Station,'') AS REAL)) AS LRP,
+    COUNT(*)                        AS TotalNodes
+FROM DSR
+WHERE TimeStamp IS NOT NULL
+  AND TRIM(TimeStamp) <> ''
+  AND ROV1 IS NOT NULL
+  AND TRIM(ROV1) <> ''
+GROUP BY
+    DATE(TimeStamp),
+    TRIM(Line),
+    TRIM(ROV1);
+CREATE TABLE IF NOT EXISTS REC_DB
+(
+    "ID" INTEGER AUTOINCREMENT NUT NULL,
+    "REC_ID"   INTEGER,
+    "NODE_ID"  INTEGER,
+    "DEPLOY"   INTEGER,
+    "RPI"      INTEGER,
+    "PART_NO"  INTEGER,
+    "RPRE_X"   REAL,
+    "RPRE_Y"   REAL,
+    "RFIELD_X" REAL,
+    "RFIELD_Y" REAL,
+    "RFIELD_Z" REAL,
+    "REC_X"    REAL,
+    "REC_Y"    REAL,
+    "REC_Z"    REAL,
+    "TIMECORR" REAL,
+    "BULKSHFT" REAL,
+    "QDRIFT"   REAL,
+    "LDRIFT"   REAL,
+    "TRIMPTCH" REAL,
+    "TRIMROLL" REAL,
+    "TRIMYAW"  REAL,
+    "PITCHFIN" REAL,
+    "ROLLFIN"  REAL,
+    "YAWFIN"   REAL,
+    "TOTDAYS"  REAL,
+    "RECCOUNT" INTEGER,
+    "CLKFLAG"  INTEGER,
+    "EC1_RUS0" REAL    DEFAULT 0,
+    "EC1_RUS1" REAL    DEFAULT 0,
+    "EC1_EDT0" REAL    DEFAULT 0,
+    "EC1_EDT1" REAL    DEFAULT 0,
+    "EC1_EPT0" REAL    DEFAULT 0,
+    "EC1_EPT1" REAL    DEFAULT 0,
+    "NODSTART" INTEGER DEFAULT 0,
+    "DEPLOYTM" INTEGER DEFAULT 0,
+    "PICKUPTM" INTEGER DEFAULT 0,
+    "RUNTIME"  INTEGER DEFAULT 0,
+    "EC2_CD1"  INTEGER DEFAULT 0,
+    "TOTSHOTS" INTEGER DEFAULT 0,
+    "TOTPROD"  INTEGER DEFAULT 0,
+    "SPSK"     INTEGER DEFAULT 0,
+    "TIER"     INTEGER DEFAULT 1,
+    CONSTRAINT ("REC_ID","DEPLOY","RPI")
+);
 
 

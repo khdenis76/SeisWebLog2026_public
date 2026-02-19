@@ -67,7 +67,8 @@ class ProjectDB:
                     epsg TEXT NOT NULL,
                     line_code TEXT NOT NULL,
                     start_project TEXT NOT NULL,
-                    project_duration INTEGER NOT NULL
+                    project_duration INTEGER NOT NULL,
+                    color_scheme TEXT DEFAULT 'dark'
                 );
                 """
             )
@@ -79,15 +80,15 @@ class ProjectDB:
                     INSERT INTO project_main
                         (id, name, location, area, client, contractor,
                          project_client_id, project_contractor_id,
-                         epsg, line_code, start_project, project_duration)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         epsg, line_code, start_project, project_duration,color_scheme)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         m.name, m.location, m.area,
                         m.client, m.contractor,
                         m.project_client_id, m.project_contractor_id,
                         m.epsg, m.line_code,
-                        m.start_project, m.project_duration,
+                        m.start_project, m.project_duration,m.color_scheme
                     ),
                 )
 
@@ -132,14 +133,19 @@ class ProjectDB:
             # -------- project_node_qc --------
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS project_node_qc (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    max_il_offset REAL NOT NULL,
-                    max_xl_offset REAL NOT NULL,
-                    max_radial_offset REAL NOT NULL,
-                    percent_of_depth REAL NOT NULL,
-                    use_offset INTEGER NOT NULL
-                );
+                CREATE TABLE IF NOT EXISTS "project_node_qc" (
+	                     "id"	INTEGER CHECK("id" = 1),
+	                     "max_il_offset"	REAL NOT NULL,
+	                     "max_xl_offset"	REAL NOT NULL,
+	                     "max_radial_offset"	REAL NOT NULL,
+	                     "percent_of_depth"	REAL NOT NULL,
+	                     "use_offset"	INTEGER NOT NULL,
+	                     "battery_life"	INTEGER DEFAULT 0,
+	                     "gnss_diffage_warning"	INTEGER DEFAULT 0,
+	                     "gnss_diffage_error"	INTEGER DEFAULT 0,
+	                     "gnss_fixed_quality"	INTEGER DEFAULT 0,
+	                     PRIMARY KEY("id")
+                )
                 """
             )
             cur.execute("SELECT COUNT(*) AS cnt FROM project_node_qc;")
@@ -149,12 +155,12 @@ class ProjectDB:
                     """
                     INSERT INTO project_node_qc
                         (id, max_il_offset, max_xl_offset, max_radial_offset,
-                         percent_of_depth, use_offset)
-                    VALUES (1, ?, ?, ?, ?, ?)
+                         percent_of_depth, use_offset,battery_life,gnss_diffage_warning,gnss_diffage_error,gnss_fixed_quality)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         n.max_il_offset, n.max_xl_offset, n.max_radial_offset,
-                        n.percent_of_depth, n.use_offset,
+                        n.percent_of_depth, n.use_offset,n.battery_life,n.gnss_diffage_warning,n.gnss_diffage_error,n.gnss_fixed_quality
                     ),
                 )
 
@@ -266,6 +272,7 @@ class ProjectDB:
                 line_code=row["line_code"],
                 start_project=row["start_project"],
                 project_duration=row["project_duration"],
+                color_scheme = row["color_scheme"],
             )
     def get_geometry(self) -> GeometrySettings:
         with self._connect() as conn:
@@ -299,6 +306,12 @@ class ProjectDB:
                 max_radial_offset=row["max_radial_offset"],
                 percent_of_depth=row["percent_of_depth"],
                 use_offset=row["use_offset"],
+                battery_life=row["battery_life"],
+                gnss_diffage_error=row["gnss_diffage_error"],
+                gnss_fixed_quality=row["gnss_fixed_quality"],
+                gnss_diffage_warning=row["gnss_diffage_warning"],
+
+
             )
     def get_gun_qc(self) -> GunQCSettings:
         with self._connect() as conn:
@@ -365,7 +378,7 @@ class ProjectDB:
                 UPDATE project_main
                 SET name = ?, location = ?, area = ?, client = ?, contractor = ?,
                     project_client_id = ?, project_contractor_id = ?,
-                    epsg = ?, line_code = ?, start_project = ?, project_duration = ?
+                    epsg = ?, line_code = ?, start_project = ?, project_duration = ?,color_scheme = ?
                 WHERE id = 1;
                 """,
                 (
@@ -373,7 +386,7 @@ class ProjectDB:
                     data.client, data.contractor,
                     data.project_client_id, data.project_contractor_id,
                     data.epsg, data.line_code,
-                    data.start_project, data.project_duration,
+                    data.start_project, data.project_duration,data.color_scheme
                 ),
             )
             conn.commit()
@@ -404,7 +417,8 @@ class ProjectDB:
                 """
                 UPDATE project_node_qc
                 SET max_il_offset = ?, max_xl_offset = ?, max_radial_offset = ?,
-                    percent_of_depth = ?, use_offset = ?
+                    percent_of_depth = ?, use_offset = ?,battery_life=?,gnss_diffage_error=?,gnss_diffage_warning=?,
+                    gnss_fixed_quality=?
                 WHERE id = 1;
                 """,
                 (
@@ -413,6 +427,10 @@ class ProjectDB:
                     data.max_radial_offset,
                     data.percent_of_depth,
                     data.use_offset,
+                    data.battery_life,
+                    data.gnss_diffage_error,
+                    data.gnss_diffage_warning,
+                    data.gnss_fixed_quality
                 ),
             )
             conn.commit()
@@ -1994,6 +2012,7 @@ class ProjectDB:
             "StartY",
             "EndX",
             "EndY",
+            "MinPoint", "MaxPoint", "RealStartX", "RealStartY", "RealEndX", "RealEndY"
         )
 
         sql = f"""

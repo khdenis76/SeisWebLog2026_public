@@ -34,44 +34,39 @@ export function initBBCsvHeaderFetch() {
         body: fd,
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
         showErr(data.error || "Failed to read CSV headers.");
         return;
       }
 
-      // Put same options into all selects
+      // ✅ Update options in all selects BUT KEEP current selection if possible
       if (data && typeof data.options_html === "string") {
-             document.querySelectorAll(".bbox-config-selector").forEach(el => {
-                 el.innerHTML = data.options_html;
-             });
-      } else {
-                   console.error("bbox-config-selector: invalid options_html", data);
-      }
-
-      // (Optional) auto-select common names (client side)
-      const headersLower = (data.headers || []).map(h => h.toLowerCase());
-      const pick = (sel, aliases) => {
-        for (let i = 0; i < headersLower.length; i++) {
-          const h = headersLower[i];
-          if (aliases.some(a => h === a || h.includes(a))) {
-            sel.value = data.headers[i];
-            return;
+        document.querySelectorAll(".bbox-config-selector").forEach((el) => {
+          const prev = el.value;            // remember current selection
+          el.innerHTML = data.options_html; // replace options
+          window.__bboxApplyMappingToSelectors();
+          // restore selection if still present in new options
+          if (prev && Array.from(el.options).some((o) => o.value === prev)) {
+            el.value = prev;
           }
+        });
+
+        // ✅ Apply mapping from selected config (if any)
+        if (typeof window.__bboxApplyMappingToSelectors === "function") {
+          window.__bboxApplyMappingToSelectors();
         }
-      };
-      //pick(selPoint, ["point", "point_name", "name", "id", "station", "pt"]);
-      //pick(selX, ["x", "easting", "east", "lon", "longitude"]);
-      //pick(selY, ["y", "northing", "north", "lat", "latitude"]);
-      //pick(selZ, ["z", "elev", "elevation", "depth"]);
+
+      } else {
+        console.error("bbox-config-selector: invalid options_html", data);
+      }
 
     } catch (e) {
       console.error(e);
       if (e instanceof TypeError) {
-         // usually fetch/network problems
-         showErr("Network error while uploading CSV.");
+        showErr("Network error while uploading CSV.");
       } else {
-               showErr(e.message || "Unexpected error.");
+        showErr(e.message || "Unexpected error.");
       }
     }
   });

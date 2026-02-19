@@ -1,13 +1,18 @@
 import io
 import json
 import os
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from bokeh.embed import json_item
+from bokeh.layouts import column, gridplot
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
-from django.views.decorators.http import require_POST
+from django.template.loader import render_to_string
+from django.views.decorators.http import require_POST, require_GET
 
 from core.models import UserSettings
 from core.projectdb import ProjectDB
@@ -31,13 +36,21 @@ def rov_main_view(request):
     bbox_fields_selectors = dsrdb.get_config_selector_table()
     bbox_config_list = dsrdb.get_bbox_configs_list()
     bbox_file_tbody = dsrdb.get_bbox_file_table()
+    rows = dsrdb.get_bbox_configs_list()  # you already have this
+    sm_file_name = Path(project.export_csv / "sm.csv")
+    dsrdb.export_dsr_to_csv(file_name=sm_file_name, sql=dsrdb.build_dsr_export_sql())
+    dsr_statistics_table =dsrdb.get_dsr_html_stat()
     return render(request,
                   "rov/rovpage.html",
                   {"project": project,
                    "dsr_lines_body": dsr_lines_body,
                    "bbox_fields_selectors": bbox_fields_selectors,
                    "bbox_config_list": bbox_config_list,
-                   "bbox_file_tbody": bbox_file_tbody})
+                   "bbox_file_tbody": bbox_file_tbody,
+                   "ok": True,
+                   "configs": rows,
+                   "dsr_statistics_table":dsr_statistics_table,
+                   })
 @require_POST
 @login_required
 def rov_upload_dsr(request):
@@ -60,12 +73,13 @@ def rov_upload_dsr(request):
 
     total_processed = 0
     total_upserted = 0
+    total_skipped = 0
     result_files = []
 
     for f in files:
         try:
 
-            processed, upserted = dsrdb.upsert_ip_stream(
+            processed, upserted,skipped = dsrdb.upsert_ip_stream(
                 file_obj=f.file,
                 rec_idx=rec_idx,
                 tier=tier,
@@ -73,11 +87,13 @@ def rov_upload_dsr(request):
 
             total_processed += processed
             total_upserted += upserted
+            total_skipped += skipped
 
             result_files.append({
                 "file": f.name,
                 "processed": processed,
                 "upserted": upserted,
+                "skipped": skipped,
             })
 
         except Exception as e:
@@ -86,6 +102,13 @@ def rov_upload_dsr(request):
                 status=500,
             )
     dsr_lines_body = dsrdb.render_dsr_line_summary_body()
+    dsr_statistics_table = dsrdb.get_dsr_html_stat()
+    file_name = Path(project.export_csv / "dsr.csv")
+    dsrdb.export_dsr_to_csv(file_name=file_name)
+
+
+
+
     return JsonResponse({
         "status": "ok",
         "tier": tier,
@@ -93,7 +116,10 @@ def rov_upload_dsr(request):
         "solution": solution_name,
         "total_processed": total_processed,
         "total_upserted": total_upserted,
+        "total_skipped": total_skipped,
         "files": result_files,
+        "dsr_lines_body": dsr_lines_body,
+        "dsr_statistics_table":dsr_statistics_table,
     })
 @require_POST
 @login_required
@@ -141,7 +167,7 @@ def rov_upload_survey_manager(request):
             buffer = io.StringIO(text)
 
             # reuse your core loader by passing buffer instead of filename
-            res = dsrdb.load_sm_file_to_db(f,update_key="linepointidx")
+            res = dsrdb.load_sm_file_to_db(f,update_key="unique")
             res["original_name"] = f.name
             results.append(res)
 
@@ -155,7 +181,10 @@ def rov_upload_survey_manager(request):
             })
 
     errors = [r for r in results if "error" in r]
-
+    sm_file_name = Path(project.export_csv / "sm.csv")
+    dsrdb.export_dsr_to_csv(file_name=sm_file_name, sql=dsrdb.build_dsr_export_sql())
+    dsr_lines_body = dsrdb.render_dsr_line_summary_body()
+    dsr_statistics_table=dsrdb.get_dsr_html_stat()
     if errors:
         return JsonResponse(
             {
@@ -171,6 +200,8 @@ def rov_upload_survey_manager(request):
             "success": f"Survey Manager imported ({len(results)} file(s))",
             "results": results,
             "updated_total": updated_total,
+            "dsr_lines_body": dsr_lines_body,
+            "dsr_statistics_table":dsr_statistics_table,
         }
     )
 @require_POST
@@ -299,7 +330,7 @@ def rov_upload_rec_db(request):
     # If you want to refresh the DSR line summary table after upload:
     # (your JS can inject this HTML into the table body)
     dsr_line_body_html = dsrdb.render_dsr_line_summary_body(request=request)
-
+    dsr_statistics_table = dsrdb.get_dsr_html_stat()
     return JsonResponse(
         {
             "success": f"REC_DB uploaded: {len(results)} file(s)",
@@ -307,6 +338,7 @@ def rov_upload_rec_db(request):
             "rows_read_total": total_rows_read,
             "updates_attempted_total": total_updates_attempted,
             "dsr_line_body_html": dsr_line_body_html,
+            "dsr_statistics_table": dsr_statistics_table,
         }
     )
 
@@ -363,6 +395,8 @@ def save_bbox_config(request):
         rov2_name = request.POST.get("rov2_name", "").strip()
         gnss1_name = request.POST.get("gnss1_name", "").strip()
         gnss2_name = request.POST.get("gnss2_name", "").strip()
+        Depth1_name = request.POST.get("Depth1_name", "").strip()
+        Depth2_name = request.POST.get("Depth2_name", "").strip()
 
 
         mapping = json.loads(request.POST.get("mapping_json", "{}"))
@@ -385,10 +419,13 @@ def save_bbox_config(request):
         # )
         cfg_id = dsrd.save_bbox_config(
             name=cfg_name,
+            vessel_name=vessel_name,
             rov1_name=rov1_name,
             rov2_name=rov2_name,
             gnss1_name=gnss1_name,
             gnss2_name=gnss2_name,
+            depth1_name=Depth1_name,
+            depth2_name=Depth2_name,
             mapping=mapping,
             is_default=False,
         )
@@ -455,41 +492,10 @@ def delete_selected_dsr_lines(request):
             # DELETE → REC DB (RESET fields)
             # --------------------------------------------------
             elif mode == "recdb":
-                RECDB_NULL_COLS = [
-                    "REC_ID", "NODE_ID",
-                    "RPRE_X", "RPRE_Y",
-                    "RFIELD_X", "RFIELD_Y", "RFIELD_Z",
-                    "REC_X", "REC_Y", "REC_Z",
-                    "TIMECORR", "BULKSHFT",
-                    "QDRIFT", "LDRIFT",
-                    "TRIMPTCH", "TRIMROLL", "TRIMYAW",
-                    "PITCHFIN", "ROLLFIN", "YAWFIN",
-                ]
-
-                RECDB_ZERO_COLS = [
-                    "DEPLOY", "RPI", "PART_NO",
-                    "TOTDAYS", "RECCOUNT", "CLKFLAG",
-                    "EC1_RUS0", "EC1_RUS1",
-                    "EC1_EDT0", "EC1_EDT1",
-                    "EC1_EPT0", "EC1_EPT1",
-                    "NODSTART",
-                    "DEPLOYTM", "PICKUPTM", "RUNTIME",
-                    "EC2_CD1", "TOTSHOTS", "TOTPROD",
-                    "SPSK", "TIER",
-                ]
-
-                set_null = ", ".join(f"{c}=NULL" for c in RECDB_NULL_COLS)
-                set_zero = ", ".join(f"{c}=0" for c in RECDB_ZERO_COLS)
-
                 conn.execute(
-                    f"""
-                    UPDATE DSR
-                    SET {set_null}, {set_zero}
-                    WHERE Line IN ({placeholders})
-                    """,
+                    f"DELETE FROM REC_DB WHERE Line IN ({placeholders})",
                     lines,
                 )
-
             # --------------------------------------------------
             # DELETE → SM (RESET fields)
             # --------------------------------------------------
@@ -571,28 +577,413 @@ def delete_bbox_files(request):
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 @require_POST
+@login_required
 def bbox_file_selected(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
+
     try:
         payload = json.loads(request.body or "{}")
-        file_id = int(payload.get("file_id"))
-        file_name = payload.get("file_name")
-        if not file_id:
-            return JsonResponse({"ok": False, "error": "No IDs"})
+        file_id = int(payload.get("file_id") or 0)
+        file_name = payload.get("file_name") or ""
+
+        if not file_id and not file_name:
+            return JsonResponse({"ok": False, "error": "No file_id / file_name"}, status=400)
+
         bbgr = BlackBoxGraphics(project.db_path)
-        file_details = bbgr.get_bbox_config_names_by_filename(file_name)
-        layout = bbgr.bokeh_gnss_qc_timeseries(file_name=file_name,
-                                      gnss1_label=file_details['gnss1_name'],
-                                      gnss2_label=file_details['gnss2_name'],is_show=False)
-        # build your bokeh figure p = figure(...)
-        # p = make_gnss_qc_plot(file_id)
 
-        #item = json_item(layout, "gnss-qc-plot")  # target id
+        # ---- 1) load file meta / labels (light query)
+        # (kept same logic as you already have)
+        file_details = bbgr.get_bbox_config_names_by_filename(file_name) if file_name else {}
 
-        return JsonResponse({"ok": True, "gnss_qc_plot": json_item(layout)})
+        # ---- 2) ONE heavy query for ALL plots
+        # Use file_name (your existing workflow uses filename)
+        data = bbgr.load_bbox_data(
+            file_name=file_name if file_name else None,
+            file_ids=[file_id] if (not file_name and file_id) else None,
+            # columns=None -> loads the shared common package for many plots
+            # you can also pass start_ts/end_ts here later if you add UI time filters
+        )
+        dsr_df = bbgr.dsr_points_in_bbox_timeframe(data)
+        # ---- 3) build plots from same dataframe
+        gnss_plot = bbgr.bokeh_gnss_qc_timeseries(
+            title="GNSS QC",
+            gnss1_label=file_details.get("gnss1_name"),
+            gnss2_label=file_details.get("gnss2_name"),
+            is_show=False,
+            data=data,
+        )
+
+        rovs_depths_plot = bbgr.bokeh_bbox_depth12_diff_timeseries(df=data, diff_threshold=10, plot_kind="vbar", is_show=False)
+        vessel_sog = bbgr.bokeh_bbox_sog_timeseries(df=data,plot_kind="line",is_show=False)
+        hdop_plot = bbgr.bokeh_bbox_gnss_hdop_timeseries(df=data,is_show=False,return_json=False)
+        cog_vs_hdg_plot = bbgr.boke_cog_hdg_timeseries_all(df=data,is_show=False)
+
+        return JsonResponse({
+            "ok": True,
+            "gnss_qc_plot": json_item(gnss_plot),
+            "rovs_depths_plot": json_item(rovs_depths_plot),
+            "vessel_sog": json_item(vessel_sog),
+            "hdop_plot":json_item(hdop_plot),
+            "cog_vs_hdg_plot": json_item(cog_vs_hdg_plot),
+        })
+
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
+@require_GET
+@login_required
+def bbox_configs_list(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    dsrdb = DSRDB(project.db_path)
+    rows = dsrdb.get_bbox_configs_list()  # you already have this
+
+    # For datalist we only need names (and maybe default marker)
+    return JsonResponse({
+        "ok": True,
+        "configs": rows,  # each: {id,name,is_default,rov1_name,...}
+    })
+@require_GET
+@login_required
+def bbox_config_detail(request, config_id: int):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    dsrdb = DSRDB(project.db_path)
+
+    # header fields (from list)
+    all_cfgs = dsrdb.get_bbox_configs_list()
+    cfg = next((c for c in all_cfgs if int(c["id"]) == int(config_id)), None)
+    if not cfg:
+        return JsonResponse({"ok": False, "error": "Config not found"}, status=404)
+
+    # mapping rows (FieldName -> FileColumn)
+    mapping = dsrdb.get_bbox_config_mapping(config_id)
+
+    return JsonResponse({
+        "ok": True,
+        "config": cfg,
+        "mapping": mapping,  # {"VesselEasting":"IP E ...", ...}
+    })
+@require_POST
+@login_required
+def read_bbox_headers(request):
+    """
+    Read CSV headers from uploaded BlackBox CSV (in memory).
+    Returns headers + <option> HTML for mapping selects.
+    """
+    f = request.FILES.get("csv_file")
+    if not f:
+        return JsonResponse({"ok": False, "error": "No CSV file provided"}, status=400)
+
+    try:
+        raw = f.read()
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252", errors="ignore")
+
+        # detect separator from first line
+        first_line = text.splitlines()[0] if text else ""
+        if "," in first_line and first_line.count(",") >= first_line.count("\t"):
+            sep = ","
+        elif "\t" in first_line:
+            sep = "\t"
+        else:
+            sep = None  # auto / whitespace
+
+        from io import StringIO
+        import pandas as pd
+
+        df = pd.read_csv(
+            StringIO(text),
+            sep=sep,
+            nrows=0,
+            engine="python",
+        )
+
+        headers = [str(c).strip() for c in df.columns if str(c).strip()]
+        if not headers:
+            return JsonResponse({"ok": False, "error": "No headers found"}, status=400)
+
+        options = ['<option value="">— Select column —</option>']
+        options += [f'<option value="{h}">{h}</option>' for h in headers]
+
+        return JsonResponse({
+            "ok": True,
+            "headers": headers,
+            "options_html": "\n".join(options),
+        })
+
+    except Exception as e:
+        return JsonResponse(
+            {"ok": False, "error": f"Failed to read CSV headers: {e}"},
+            status=500,
+        )
+@require_POST
+@login_required
+def dsr_export_sm(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    dsrdb = DSRDB(project.db_path)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    mode = (payload.get("mode") or "day").strip().lower()
+    status = (payload.get("status") or "deployed").strip().lower()
+    depth_mode = (payload.get("depth_mode") or "neg").strip().lower()
+    fmt = (payload.get("format") or "mass_nodes").strip().lower()
+    rovs = payload.get("rovs") or []
+
+    if status not in ("deployed", "recovered"):
+        return JsonResponse({"ok": False, "error": "Invalid status"}, status=400)
+    if fmt not in ("z_nodes", "mass_nodes"):
+        return JsonResponse({"ok": False, "error": "Invalid format"}, status=400)
+    if depth_mode not in ("neg", "abs"):
+        return JsonResponse({"ok": False, "error": "Invalid depth_mode"}, status=400)
+    if not isinstance(rovs, list) or not rovs:
+        return JsonResponse({"ok": False, "error": "Select at least one ROV"}, status=400)
+
+    export_type = 0 if status == "deployed" else 1
+    export_abs = 1 if depth_mode == "abs" else 0
+    zexp = 1 if fmt == "z_nodes" else 0
+
+    sm_folder = project.export_sm
+    if not sm_folder:
+        return JsonResponse({"ok": False, "error": "SM folder not configured"}, status=400)
+
+    # Build day range + optional ts range
+    ts_from = None
+    ts_to = None
+
+    if mode == "day":
+        first_day = (payload.get("day") or "").strip()
+        if not first_day:
+            return JsonResponse({"ok": False, "error": "Missing day"}, status=400)
+        last_day = None
+    else:
+        dt_from = (payload.get("from") or "").strip()
+        dt_to = (payload.get("to") or "").strip()
+        if not dt_from or not dt_to:
+            return JsonResponse({"ok": False, "error": "Missing from/to"}, status=400)
+
+        # interval timestamps: "YYYY-MM-DDTHH:MM" -> "YYYY-MM-DD HH:MM:SS"
+        def _norm_dt(s: str) -> str:
+            s = s.replace("T", " ")
+            if len(s) == 16:
+                s += ":00"
+            return s
+
+        ts_from = _norm_dt(dt_from)
+        ts_to = _norm_dt(dt_to)
+
+        # keep these for fallback/naming (not strictly required)
+        first_day = dt_from[:10]
+        last_day = dt_to[:10]
+
+    result = dsrdb.export_dsr_to_sm(
+        first_day=first_day,
+        last_day=last_day,
+        rovs=rovs,
+        export_type=export_type,
+        export_abs=export_abs,
+        zexp=zexp,
+        output_dir=sm_folder,
+        mark_exported=True,
+        ts_from=ts_from,
+        ts_to=ts_to,
+    )
+
+    if "error" in result:
+        return JsonResponse({"ok": False, "error": result["error"]}, status=400)
+
+    return JsonResponse({
+        "ok": True,
+        "message": "DSR successfully exported to SM format.",
+        "file": result.get("success"),
+        "filename": result.get("filename"),
+        "rows": int(result.get("rows", 0)),
+    })
+
+
+
+# rov/views.py
+
+@require_POST
+def dsr_rovs_for_timeframe(request):
+    """
+    POST JSON:
+        {
+            "mode": "day" | "interval",
+            "day": "YYYY-MM-DD",              # required if mode=day
+            "from": "YYYY-MM-DDTHH:MM",       # required if mode=interval
+            "to":   "YYYY-MM-DDTHH:MM"
+        }
+
+    Returns:
+        {
+            "rovs": ["ROV1", "ROV2"],
+            "count": 2
+        }
+    """
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    mode = payload.get("mode", "day")
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    try:
+        # Get current project DB path (adapt to your project structure)
+        dsrdb = DSRDB(project.db_path)
+
+        if mode == "day":
+            day = payload.get("day")
+            rovs = dsrdb.get_rovs_for_timeframe(
+                mode="day",
+                day=day,
+            )
+        else:
+            dt_from = payload.get("from")
+            dt_to = payload.get("to")
+            rovs = dsrdb.get_rovs_for_timeframe(
+                mode="interval",
+                dt_from=dt_from,
+                dt_to=dt_to,
+            )
+
+        return JsonResponse({
+            "rovs": rovs,
+            "count": len(rovs),
+        })
+
+    except ValueError as e:
+        # raised from DSRDB validation
+        return JsonResponse({"error": str(e)}, status=400)
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": f"Failed to load ROV list: {str(e)}"},
+            status=500
+        )
+@require_POST
+@login_required
+def select_prod_day(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        day = (payload.get("day") or "").strip()
+        if not day:
+            return JsonResponse({"error": "Missing day"}, status=400)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    dsrdb = DSRDB(project.db_path)
+    deploy_rows = dsrdb.get_daily_recovery(date=day,view_name="Daily_Deployment")
+    rec_rows = dsrdb.get_daily_recovery(date=day,view_name="Daily_Recovery")
+    html = render_to_string("rov/partials/daily_production_tables.html",
+                     {"deploy_rows": deploy_rows, "rec_rows": rec_rows})
+    return JsonResponse({
+        "html": html,
+        "deploy_count": len(deploy_rows),
+        "recovery_count": len(rec_rows),
+    })
+@require_POST
+@login_required
+def export_dsr_to_sps (request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    dsrdb = DSRDB(project.db_path)
+    pdb = ProjectDB(project.db_path)
+    try:
+        selected_lines = json.loads(request.POST.get("selected_lines", "[]"))
+
+        if not selected_lines:
+            return JsonResponse({"ok": False, "message": "No lines selected."}, status=400)
+
+        export_header = request.POST.get("export_header") in ("1", "true", "on")
+        use_seq = request.POST.get("use_seq") in ("1", "true", "on")
+        use_line_seq = request.POST.get("use_line_seq") in ("1", "true", "on")
+        use_line_fn = request.POST.get("use_line_fn") in ("1", "true", "on")
+        seq = (request.POST.get("seq") or "01").strip()
+        pcode = (request.POST.get("pcode") or "R1").strip()
+        rov_export = request.POST.get("rov_export")  # "0" / "1" / "2"
+        sps_ver = request.POST.get("sps_ver")  # "1" / "2"
+        how_exp = request.POST.get("how_exp")  # "1" / "2"
+
+        # TODO: run your export logic here (write files on disk / DB record / etc.)
+        export_dir = project.export_sps1 if sps_ver == "1" else project.export_sps21
+        header_file_path = f"{project.hdr_dir}/header1.txt" if sps_ver == "1" else f"{project.hdr_dir}/header2.txt"
+        if rov_export == "0":
+           export_dir =f"{export_dir}/dep/"
+        if rov_export == "1":
+            export_dir = f"{export_dir}/rec/"
+        if rov_export == "2":
+            export_dir = f"{export_dir}/fb/"
+
+        dsrdb.export_dsr_lines_to_sps(
+            export_dir = export_dir,
+            selected_lines=selected_lines,
+            header_file_path=header_file_path,
+            export_header=export_header,
+            pcode=pcode,
+            sps_format=sps_ver,
+            kind=rov_export,
+            use_seq=use_seq,
+            use_line_seq=use_line_seq,
+            seq=seq,
+            how_exp=how_exp,
+            line_code=pdb.get_main().line_code,
+            use_line_code=use_line_fn,
+        )
+        # Example output:
+        created_files = [f"SPS_{line}_{seq}.txt" for line in selected_lines]
+
+        return JsonResponse({
+            "ok": True,
+            "message": f"Exported {len(selected_lines)} line(s) to SPS.",
+            "files": created_files,
+            "meta": {
+                "export_header": export_header,
+                "use_seq": use_seq,
+                "use_line_seq": use_line_seq,
+                "seq": seq,
+                "pcode": pcode,
+                "rov_export": rov_export,
+                "sps_ver": sps_ver,
+                "how_exp": how_exp,
+            }
+        })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "message": str(e)}, status=500)
+@require_POST
+@login_required
+def dsr_line_onclick (request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    return JsonResponse({"ok":"ok"})

@@ -38,4 +38,252 @@
 #dsr-line-table-head th.sticky-col-2 {
   z-index: 6;
 }
+/* wrapper keeps the popup positioned under the pill */
+.hover-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.hover-content {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 200px;
+  background: white;
+  border: 1px solid rgba(0,0,0,.15);
+  border-radius: .5rem;
+  padding: .5rem;
+  box-shadow: 0 .5rem 1rem rgba(0,0,0,.15);
+  z-index: 2000;
+
+  display: none;
+}
+/* ===== Export SPS Modal Theme ===== */
+#export-sps-modal .modal-content {
+  border: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 18px 60px rgba(0,0,0,.35);
+}
+
+#export-sps-modal .sps-modal-header {
+  background: linear-gradient(135deg, #0d6efd, #6610f2);
+  color: #fff;
+  border: 0;
+}
+
+#export-sps-modal .sps-modal-header .modal-title {
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+
+#export-sps-modal .sps-chip {
+  background: rgba(255,255,255,.18);
+  border: 1px solid rgba(255,255,255,.22);
+  color: rgba(255,255,255,.95);
+  border-radius: 999px;
+  padding: .22rem .6rem;
+  font-size: .75rem;
+}
+
+#export-sps-modal .sps-section {
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: var(--bs-body-bg);
+  box-shadow: 0 10px 26px rgba(0,0,0,.10);
+}
+
+#export-sps-modal .sps-section .sps-section-header {
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(135deg, rgba(25,135,84,.12), rgba(13,110,253,.10));
+  padding: .75rem 1rem;
+}
+
+#export-sps-modal .sps-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  font-weight: 700;
+}
+
+#export-sps-modal .sps-bullet {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #20c997, #198754);
+  box-shadow: 0 0 0 4px rgba(32,201,151,.18);
+}
+
+#export-sps-modal .sps-section .sps-section-body {
+  padding: 1rem;
+}
+
+#export-sps-modal .form-control,
+#export-sps-modal .form-select {
+  border-radius: 12px;
+}
+
+#export-sps-modal .form-check-input:checked {
+  background-color: #20c997;
+  border-color: #20c997;
+}
+
+#export-sps-modal .sps-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.10), rgba(255,255,255,0));
+  margin: .85rem 0;
+}
+
+#export-sps-modal .sps-footer {
+  border: 0;
+  background: linear-gradient(135deg, rgba(13,110,253,.08), rgba(102,16,242,.08));
+}
+
+#export-sps-modal .btn-sps-export {
+  border: 0;
+  border-radius: 12px;
+  padding: .8rem 1.1rem;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg,#198754,#20c997);
+  box-shadow: 0 12px 26px rgba(25,135,84,.28);
+}
+
+#export-sps-modal .btn-sps-export:hover {
+  filter: brightness(1.03);
+}
+
+#export-sps-modal .btn-sps-cancel {
+  border-radius: 12px;
+}
+/* ===== Export SM Modal (dark-mode friendly, colorful) ===== */
+#dsrExportSmModal .modal-content{
+  border:0;
+  border-radius:18px;
+  overflow:hidden;
+  box-shadow: 0 18px 60px rgba(0,0,0,.35);
+}
+
+/* Gradient header */
+#dsrExportSmModal .sm-modal-header{
+  border:0;
+  color:#fff;
+  background: linear-gradient(135deg, #0d6efd 0%, #6610f2 55%, #20c997 100%);
+}
+
+#dsrExportSmModal .sm-modal-header .sm-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:.45rem;
+  background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.22);
+  padding: .22rem .6rem;
+  border-radius:999px;
+  font-size:.75rem;
+  color: rgba(255,255,255,.95);
+}
+
+#dsrExportSmModal .btn-close.btn-close-white{
+  filter: invert(1) grayscale(100%);
+}
+
+/* Section cards */
+#dsrExportSmModal .sm-section{
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background: var(--bs-body-bg);
+  box-shadow: 0 10px 26px rgba(0,0,0,.10);
+  overflow:hidden;
+  margin-bottom: 1rem;
+}
+
+#dsrExportSmModal .sm-section .sm-section-head{
+  padding:.75rem 1rem;
+  border-bottom:1px solid rgba(255,255,255,.10);
+  background: linear-gradient(135deg, rgba(13,110,253,.10), rgba(32,201,151,.10));
+}
+
+#dsrExportSmModal .sm-section .sm-section-body{
+  padding:1rem;
+}
+
+#dsrExportSmModal .sm-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:.5rem;
+  font-weight:800;
+}
+
+#dsrExportSmModal .sm-dot{
+  width:12px;height:12px;border-radius:50%;
+  background: linear-gradient(135deg,#20c997,#198754);
+  box-shadow:0 0 0 4px rgba(32,201,151,.18);
+}
+
+/* Inputs */
+#dsrExportSmModal .form-control,
+#dsrExportSmModal .form-select{
+  border-radius:12px;
+}
+
+#dsrExportSmModal .form-check-input:checked{
+  background-color:#20c997;
+  border-color:#20c997;
+}
+
+/* ROV list box */
+#dsrExportSmModal .sm-rov-box{
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background: var(--bs-body-bg);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.05);
+}
+
+/* Footer */
+#dsrExportSmModal .sm-modal-footer{
+  border:0;
+  background: linear-gradient(135deg, rgba(13,110,253,.08), rgba(102,16,242,.08));
+}
+
+#dsrExportSmModal .btn-sm-export{
+  border:0;
+  border-radius:12px;
+  padding:.75rem 1rem;
+  font-weight:800;
+  color:#fff;
+  background: linear-gradient(135deg,#0d6efd,#6610f2);
+  box-shadow: 0 12px 26px rgba(13,110,253,.25);
+}
+
+#dsrExportSmModal .btn-sm-export:hover{
+  filter: brightness(1.04);
+}
+
+#dsrExportSmModal .btn-sm-close{
+  border-radius:12px;
+}
+
+
+/* shown when JS adds this class */
+.hover-content.is-open {
+  display: block;
+}
+.hover-wrapper > .hover-content {
+  display: none !important;
+}
+
+.hover-wrapper > .hover-content.is-open {
+  display: block !important;
+}
+tr.dsr-line {
+  cursor: pointer;
+}
+tr.dsr-line.is-active {
+  background-color: rgba(13,110,253,.08);
+}
+table tr.dsr-line.is-active > td,
+table tr.dsr-line.is-active > th {
+  background-color: rgba(13,110,253,.08) !important;
+}
+
 

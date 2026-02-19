@@ -4,6 +4,12 @@ import { initAllJSForRovUpload } from "../../rov/js/init.js";
 import {initAllJSForBaseproject} from "./init.js";
 
 document.addEventListener("DOMContentLoaded", () => {
+  const current = window.location.pathname;
+    document.querySelectorAll("#sidebarOffcanvas .nav-link").forEach(link => {
+        if (link.getAttribute("href") === current) {
+            link.classList.add("active");
+        }
+    });
   //baseproject
   initAllJSForBaseproject()
   //rov JS

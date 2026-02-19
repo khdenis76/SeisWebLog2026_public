@@ -1,10 +1,61 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<ul class="nav nav-tabs" id="rovTabs" role="tablist">
+
+    {% for r in data %}
+        <li class="nav-item" role="presentation">
+            <button class="nav-link{% if r.Rov == 'Total' %} active{% endif %}"
+                    id="rov-tab-{{ forloop.counter }}"
+                    data-bs-toggle="tab"
+                    data-bs-target="#rov-{{ forloop.counter }}"
+                    type="button"
+                    role="tab">
+                {% if r.Rov == 'Total' %}
+                    {{ r.Rov }}
+                {% else %}
+                    ROV{{ r.Rov }}
+                {% endif %}
+
+            </button>
+        </li>
+    {% endfor %}
+</ul>
+
+<div class="tab-content border border-top-0 p-3" id="rovTabsContent">
+
+    {% for r in data %}
+        <div class="tab-pane fade {% if r.Rov == 'Total' %}show active{% endif %}"
+             id="rov-{{ forloop.counter }}"
+             role="tabpanel">
+
+            <!-- NODES DEPLOYMENT -->
+            <h6 class="fw-bold mt-2">Survey(DSR)</h6>
+            <div class="table-scroll" style="height: 20vh">
+            <table class="table table-sm table-striped table-hover">
+                <tr><th></th><th>DEPLOYMENT</th><th>RECOVERY</th></tr>
+                <tr><th>Days</th><td>{{ r.Days }}</td><td>{{ r.RECDays }}</td></tr>
+                <tr><th>First Day</th><td>{{ r.FirstDay }}</td><td>{{ r.RECFirstDay }}</td></tr>
+                <tr><th>Last Day</th><td>{{ r.LastDay }}</td><td>{{ r.RECLastDay }}</td></tr>
+                <tr><th>Lines</th><td>{{ r.Lines }}</td><td>{{ r.RECLines }}</td></tr>
+                <tr><th>Stations</th><td>{{ r.Stations }}</td><td>{{ r.RECStations }}</td></tr>
+                <tr><th>Nodes</th><td>{{ r.Nodes }}</td><td>{{ r.RECNodes }}</td></tr>
+            </table>
+            </div>
+            <!-- SURVEY MANAGER -->
+            <h6 class="fw-bold mt-4">Survey Manager(SM)</h6>
+            <div class="table-scroll" style="height: 15vh">
+            <table class="table table-sm table-striped table-hover">
+                <tr><th></th>
+                    <th>SM DEPLOYMENT</th>
+                    <th>SM Picked up</th>
+                    <th>SM Collected</th>
+                </tr>
+                <tr><th>Lines</th><td>{{ r.SMDLines }}</td><td>{{ r.PULines }}</td><td>{{ r.ColLines }}</td></tr>
+                <tr><th>Stations</th><td>{{ r.SMDStations }}</td><td>{{ r.PUStations }}</td><td>{{ r.ColStations }}</td></tr>
+                <tr><th>Nodes</th><td>{{ r.SMDNodes }}</td><td>{{ r.PUNodes }}</td><td>{{ r.ColNodes }}</td></tr>
+            </table>
+            </div>
+            <!-- PROC -->
+
+
+        </div>
+    {% endfor %}
+</div>

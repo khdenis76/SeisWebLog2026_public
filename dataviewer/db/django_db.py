@@ -8,7 +8,7 @@ class DjangoDbError(Exception):
 
 
 class DjangoDb:
-    def __init__(self, db_dir: str = "..", db_name: str = "db.sqlite", timeout_sec: float = 5.0):
+    def __init__(self, db_dir: str = "..", db_name: str = "db.sqlite3", timeout_sec: float = 5.0):
         self.db_path = (Path(db_dir).expanduser().resolve() / db_name)
         self.timeout_sec = float(timeout_sec)
 

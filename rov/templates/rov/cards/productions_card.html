@@ -17,7 +17,16 @@
                 <button class="nav-link active" id="pills-dsr-tab" data-bs-toggle="pill" data-bs-target="#pills-dsr" type="button" role="tab" aria-controls="pills-dsr" aria-selected="true">DSR</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link" id="pills-bbox-tab" data-bs-toggle="pill" data-bs-target="#pills-bbox" type="button" role="tab" aria-controls="pills-bbox" aria-selected="false">BLACK BOX</button>
+                <button class="nav-link" id="pills-bbox-list-tab" data-bs-toggle="pill" data-bs-target="#pills-bbox-list" type="button" role="tab" aria-controls="pills-bbox-list" aria-selected="false">BLACK BOX</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link"
+                        id="daily-prod-tab" data-bs-toggle="pill"
+                        data-bs-target="#pills-daily-prod"
+                        type="button" role="tab" aria-controls="pills-daily-prod" aria-selected="false">
+                    <i class="fas fa-calendar"></i>
+                            DAILY PRODUCTION
+                       </button>
             </li>
         </ul>
         <div class="tab-content mt-0" id="pills-tabContent">
@@ -29,7 +38,17 @@
                            </div>
                      {% include "rov/partials/dsr_line_table.html" %}
                       <div class="clearfix mt-2">
+                       <button type="button"
+                                     class="btn btn-success float-start"
+                                     id="export-dsr2sps-btn"
+                                     data-bs-toggle="modal"
+                                     data-bs-target="#export-sps-modal"
+                                     data-url ="{% url 'export_dsr_to_sps' %}"
+                                     title="Click for Export selected lines to SPS ">
+                                     <i class="fas fa-file-export me-2"></i> SPS
+                             </button>
                        <div class="btn-group float-end" role="group">
+
                              <button type="button"
                                      class="btn btn-danger dropdown-toggle"
                                      data-bs-toggle="dropdown"
@@ -47,7 +66,7 @@
                    </div>
 
                </div>
-               <div class="tab-pane fade" id="pills-bbox" role="tabpanel" aria-labelledby="pills-bbox-tab" tabindex="0">
+               <div class="tab-pane fade" id="pills-bbox-list" role="tabpanel" aria-labelledby="pills-bbox-list-tab" tabindex="0">
                     <div class="table-scroll w-100" style="height: 50vh">
                            <table class="table table-hover" id="bbox-file-table">
                                 <thead>
@@ -66,6 +85,15 @@
                            </button>
                     </div>
                </div>
+            <div class="tab-pane fade" id="pills-daily-prod" role="tabpanel" aria-labelledby="daily-prod-tab" tabindex="0">
+                <div class="row">
+                    <input type="date" id="production-day-select" data-dayurl ="{% url 'select_prod_day' %}">
+                </div>
+                <div class="w-100" id="daily-prod-container" style="height:45vh">
+
+                </div>
+            </div>
+
         </div>
     </div><!--End of card-body -->
 

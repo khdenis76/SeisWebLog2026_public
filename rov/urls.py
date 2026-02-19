@@ -14,4 +14,12 @@ urlpatterns = [
     path('dsr/delete_line',delete_selected_dsr_lines,name="delete_selected_dsr_lines"),
     path('delete/bbox',delete_bbox_files,name="delete_bbox_files"),
     path('bbox/file_selected',bbox_file_selected,name='bbox_file_selected'),
+    path("rov/bbox/configs/", bbox_configs_list, name="bbox_configs_list"),
+    path("rov/bbox/config/<int:config_id>/", bbox_config_detail, name="bbox_config_detail"),
+    path("rov/bbox/read-headers/",read_bbox_headers,name="csv_headers",),
+    path("export/sm/",dsr_export_sm,name="dsr_export_sm"),
+    path("dsr/rovs-for-timeframe/",dsr_rovs_for_timeframe,name="dsr_rovs_for_timeframe"),
+    path("dsr/production/day",select_prod_day,name="select_prod_day"),
+    path("dsr/export/sps",export_dsr_to_sps,name="export_dsr_to_sps"),
+    path("dsr/line.selected",dsr_line_onclick,name="dsr_line_onclick"),
 ]

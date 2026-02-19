@@ -1,10 +1,24 @@
 <div class="modal fade" id="rovUploadModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
 
-      <div class="modal-header">
-        <h5 class="modal-title fw-semibold">Upload ROV Files</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      <!-- Header -->
+      <div class="modal-header rov-modal-header">
+        <div class="w-100">
+          <div class="d-flex align-items-center justify-content-between">
+            <h5 class="modal-title fw-semibold mb-0">
+              <i class="fas fa-cloud-arrow-up me-2"></i>Upload ROV Files
+            </h5>
+            <span class="rov-chip">
+              <i class="fas fa-folder-open"></i> Import
+            </span>
+          </div>
+          <small class="opacity-75 d-block mt-1">
+            Select file type → choose files → upload into project DB.
+          </small>
+        </div>
+
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
 
       <form id="rov-upload-form" method="post" enctype="multipart/form-data" action="">
@@ -12,68 +26,107 @@
 
         <div class="modal-body">
 
-          <div class="mb-3">
-            <label class="form-label fw-semibold">File type</label>
-            <select class="form-select"
-                    id="rov-file-type"
-                    name="file_type"
-                    required
-                    data-url-dsr="{% url 'rov_upload_dsr' %}"
-                    data-url-survey-manager="{% url 'rov_upload_survey_manager' %}"
-                    data-url-black-box="{% url 'rov_upload_black_box' %}"
-                    data-url-rec-db="{% url 'rov_upload_rec_db' %}">
-              <option value="" selected disabled>Select file type</option>
-              <option value="DSR">DSR</option>
-              <option value="SURVEY_MANAGER">Survey Manager</option>
-              <option value="BLACK_BOX">Black Box</option>
-              <option value="REC_DB">REC_DB</option>
-            </select>
-          </div>
-          <label for="bblog-config-select" class="form-label">BBLog configuration:</label>
-          <div class="mb-3 input-group">
-               <select id="bblog-config-select" class="form-control">
+          <!-- Section: file type -->
+          <div class="rov-section">
+            <div class="rov-section-head">
+              <span class="rov-badge"><span class="rov-dot"></span>File type</span>
+              <span class="text-muted small">required</span>
+            </div>
 
-                  {%  for c in bbox_config_list%}
-                      {% if c.is_default == true %}
-                         <option selected value="{{ c.id }}">
-                             {{ c.name }}
-                         </option>
-                      {% else %}
-                         <option value="{{ c.id }}">
-                             {{ c.name }}
-                         </option>
-                      {% endif %}
-                      {% endfor %}
-
+            <div class="rov-section-body">
+              <label class="form-label fw-semibold">Select file type</label>
+              <select class="form-select"
+                      id="rov-file-type"
+                      name="file_type"
+                      required
+                      data-url-dsr="{% url 'rov_upload_dsr' %}"
+                      data-url-survey-manager="{% url 'rov_upload_survey_manager' %}"
+                      data-url-black-box="{% url 'rov_upload_black_box' %}"
+                      data-url-rec-db="{% url 'rov_upload_rec_db' %}">
+                <option value="" selected disabled>Select file type</option>
+                <option value="DSR">DSR</option>
+                <option value="SURVEY_MANAGER">Survey Manager</option>
+                <option value="BLACK_BOX">Black Box</option>
+                <option value="REC_DB">REC_DB</option>
               </select>
+            </div>
+          </div>
+
+          <!-- Section: bbox config -->
+          <div class="rov-section">
+            <div class="rov-section-head">
+              <span class="rov-badge">
+                <span class="rov-dot" style="background:linear-gradient(135deg,#ffc107,#fd7e14); box-shadow:0 0 0 4px rgba(255,193,7,.18);"></span>
+                BBLog configuration
+              </span>
+              <span class="text-muted small">optional</span>
+            </div>
+
+            <div class="rov-section-body">
+              <label for="bblog-config-select" class="form-label fw-semibold">BBLog configuration</label>
+
+              <div class="input-group">
+                <select id="bblog-config-select" class="form-select">
+                  {% for c in bbox_config_list %}
+                    {% if c.is_default == true %}
+                      <option selected value="{{ c.id }}">{{ c.name }}</option>
+                    {% else %}
+                      <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endif %}
+                  {% endfor %}
+                </select>
+
                 <button class="btn btn-outline-secondary"
                         type="button"
                         id="set-default-bbox"
                         data-post-url="{% url 'set_default_bbox_config' %}">
-                    <i class="fas fa-thumbtack me-2"></i> Set Default
+                  <i class="fas fa-thumbtack me-2"></i>Set Default
                 </button>
-          </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Select files</label>
-            <input type="file"
-                   class="form-control"
-                   id="rov-file-input"
-                   name="files"
-                   multiple
-                   disabled
-                   required>
-            <div class="form-text" id="rov-file-help">Select file type first</div>
-            <div class="small text-muted mt-1" id="rov-files-count"></div>
+              </div>
+
+              <div class="form-text mt-2">
+                Used only for Black Box uploads (column mapping).
+              </div>
+            </div>
           </div>
 
-          <div class="small text-muted" id="rov-upload-status"></div>
+          <!-- Section: files -->
+          <div class="rov-section">
+            <div class="rov-section-head">
+              <span class="rov-badge">
+                <span class="rov-dot" style="background:linear-gradient(135deg,#0dcaf0,#0d6efd); box-shadow:0 0 0 4px rgba(13,202,240,.18);"></span>
+                Files
+              </span>
+              <span class="text-muted small">multiple</span>
+            </div>
+
+            <div class="rov-section-body">
+              <label class="form-label fw-semibold">Select files</label>
+              <input type="file"
+                     class="form-control"
+                     id="rov-file-input"
+                     name="files"
+                     multiple
+                     disabled
+                     required>
+
+              <div class="form-text" id="rov-file-help">Select file type first</div>
+              <div class="small text-muted mt-1" id="rov-files-count"></div>
+
+              <div class="small text-muted mt-3" id="rov-upload-status"></div>
+            </div>
+          </div>
 
         </div>
 
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-primary fw-semibold" id="rov-upload-btn" disabled>
-            Upload
+        <!-- Footer -->
+        <div class="modal-footer rov-modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-rov-cancel" data-bs-dismiss="modal">
+            Cancel
+          </button>
+
+          <button type="submit" class="btn btn-rov-upload" id="rov-upload-btn" disabled>
+            <i class="fas fa-upload me-2"></i>Upload
           </button>
         </div>
       </form>

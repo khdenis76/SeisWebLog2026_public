@@ -32,13 +32,13 @@ def dashboard_view(request):
         return redirect("projects")
 
     project = settings.active_project
-
+    pdb=ProjectDB(project.db_path)
     if not project.can_view(request.user):
         settings.active_project = None
         settings.save()
         return redirect("projects")
 
-    return render(request, "dashboard.html", {"project": project})
+    return render(request, "dashboard.html", {"project": project,"color_scheme":pdb.get_main().color_scheme})
 
 
 # ======================= PROJECT FORMS =======================
@@ -318,6 +318,10 @@ def project_settings_view(request):
             max_radial_offset=f_float("node_max_radial_offset", "0"),
             percent_of_depth=f_float("node_percent_of_depth", "0"),
             use_offset=f_int("node_use_offset", "0"),
+            battery_life=f_int("battery_life", "0"),
+            gnss_fixed_quality=f_int("gnss_fixed_quality", "0"),
+            gnss_diffage_warning=f_int("gnss_diffage_warning", "0"),
+            gnss_diffage_error=f_int("gnss_diffage_error", "0")
         )
 
         # ---- GUN QC ----

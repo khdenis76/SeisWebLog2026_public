@@ -1,10 +1,220 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="modal fade" id="export-sps-modal"
+     data-bs-backdrop="static"
+     data-bs-keyboard="false"
+     tabindex="-1"
+     aria-labelledby="exportSpsModalLabel"
+     aria-hidden="true">
+
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content border-0 shadow-lg">
+
+      <!-- ================= HEADER ================= -->
+      <div class="modal-header text-white"
+           style="background: linear-gradient(135deg,#0d6efd,#6610f2);">
+        <div>
+          <h5 class="modal-title fw-bold" id="exportSpsModalLabel">
+            <i class="fas fa-file-export me-2"></i>Export to SPS Format
+          </h5>
+          <small class="opacity-75">
+            Configure SPS export parameters for selected ROV lines
+          </small>
+        </div>
+        <button type="button"
+                class="btn-close btn-close-white"
+                data-bs-dismiss="modal">
+        </button>
+      </div>
+
+      <form id="export-sps-form"
+            method="get"
+            action="/rov/export-to-sps/">
+
+        <div class="modal-body">
+
+          <input type="hidden"
+                 id="sps-selected-lines"
+                 name="selected_lines">
+
+          <!-- ================= GENERAL ================= -->
+          <div class="p-3 rounded mb-4"
+               style="background: var(--bs-secondary-bg);">
+
+            <div class="d-flex align-items-center mb-3">
+              <span class="badge bg-primary me-2">1</span>
+              <h6 class="mb-0 fw-semibold">General Options</h6>
+            </div>
+
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input"
+                     type="checkbox"
+                     id="sps-selected-only"
+                     checked disabled>
+              <label class="form-check-label" for="sps-selected-only">
+                Export selected lines only
+              </label>
+            </div>
+
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input"
+                     type="checkbox"
+                     id="sps-export-header"
+                     name="export_header"
+                     value="1">
+              <label class="form-check-label" for="sps-export-header">
+                Include text header
+              </label>
+            </div>
+
+            <hr>
+
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input"
+                     type="checkbox"
+                     id="sps-use-seq"
+                     name="use_seq"
+                     value="1">
+              <label class="form-check-label" for="sps-use-seq">
+                Add sequence number to file name
+              </label>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input"
+                     type="checkbox"
+                     id="sps-use-line-fn"
+                     name="use_line_fn"
+                     value="1">
+              <label class="form-check-label" for="sps-use-line-seq">
+                Add line prefix to file name
+              </label>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input"
+                     type="checkbox"
+                     id="sps-use-line-seq"
+                     name="use_line_seq"
+                     value="1">
+              <label class="form-check-label" for="sps-use-line-seq">
+                Combine line name + sequence number
+              </label>
+            </div>
+
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label fw-semibold">Seq. Number</label>
+                <input type="text"
+                       class="form-control border-primary"
+                       id="sps-seq"
+                       name="seq"
+                       value="01">
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label fw-semibold">Point Code</label>
+                <input type="text"
+                       class="form-control border-success"
+                       id="sps-pcode"
+                       name="pcode"
+                       value="R1">
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ================= COORDINATE SOURCE ================= -->
+          <div class="p-3 rounded mb-4"
+               style="background: var(--bs-tertiary-bg);">
+
+            <div class="d-flex align-items-center mb-3">
+              <span class="badge bg-success me-2">2</span>
+              <h6 class="mb-0 fw-semibold">Coordinate Source</h6>
+            </div>
+
+            <div class="form-check mb-2">
+              <input class="form-check-input"
+                     type="radio"
+                     name="rov_export"
+                     value="0"
+                     checked>
+              <label class="form-check-label">
+                Primary deployment coordinate
+              </label>
+            </div>
+
+            <div class="form-check mb-2">
+              <input class="form-check-input"
+                     type="radio"
+                     name="rov_export"
+                     value="1">
+              <label class="form-check-label">
+                Primary pick-up coordinate
+              </label>
+            </div>
+
+            <div class="form-check">
+              <input class="form-check-input"
+                     type="radio"
+                     name="rov_export"
+                     value="2">
+              <label class="form-check-label">
+                First Break solution
+              </label>
+            </div>
+
+          </div>
+
+          <!-- ================= FORMAT ================= -->
+          <div class="p-3 rounded"
+               style="background: var(--bs-secondary-bg);">
+
+            <div class="d-flex align-items-center mb-3">
+              <span class="badge bg-warning text-dark me-2">3</span>
+              <h6 class="mb-0 fw-semibold">Format</h6>
+            </div>
+
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">SPS Version</label>
+                <select class="form-select border-info"
+                        name="sps_ver">
+                  <option value="1">SPS v1.0</option>
+                  <option value="2">SPS v2.1</option>
+                </select>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">How to export</label>
+                <select class="form-select border-warning"
+                        name="how_exp">
+                  <option value="1">Split by lines</option>
+                  <option value="2" selected>One file for all</option>
+                </select>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- ================= FOOTER ================= -->
+        <div class="modal-footer border-0">
+
+          <button type="button"
+                  class="btn btn-outline-secondary"
+                  data-bs-dismiss="modal">
+            <i class="fas fa-times me-2"></i>Cancel
+          </button>
+
+          <button type="button"
+                  data-url ="{% url 'export_dsr_to_sps' %}"
+                  class="btn btn-lg text-white"
+                  style="background: linear-gradient(135deg,#198754,#20c997);">
+            <i class="fas fa-file-export me-2"></i>Export SPS
+          </button>
+
+        </div>
+
+      </form>
+
+    </div>
+  </div>
+</div>

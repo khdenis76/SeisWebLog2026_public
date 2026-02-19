@@ -158,7 +158,8 @@ function initLoadingLottie() {
           renderBokehInto("preplot-map-div", data.preplot_map);
       }
       if (data.prep_stat){
-          document.getElementById("preplot-statcard").innerHTML = data.prep_stat
+          const preplot_summary_container=document.getElementById("preplot-statcard")
+          preplot_summary_container.innerHTML = data.prep_stat
       }
       if (data?.hdr1 !== undefined) {
         hdr_editor1.innerHTML=data.hdr1
