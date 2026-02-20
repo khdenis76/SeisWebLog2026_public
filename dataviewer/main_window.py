@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtGui import QAction
 
@@ -246,10 +247,35 @@ class MainWindow(QtWidgets.QMainWindow):
                 radius=25.0,
                 line_color="red",
                 fill_color=None,
-                line_width=1.0,
+                line_width=2.0,
                 max_circles=200000,
+                name="R = 25m"
             )
             self.tabs.map_plot.addItem(self.rp_circle_item)
+            # remove old proxy if exists
+            if getattr(self, "rp_circle_legend_proxy", None) is not None:
+                try:
+                    self.tabs.legend.removeItem(self.rp_circle_legend_proxy.name())
+                except Exception:
+                    pass
+                self.rp_circle_legend_proxy = None
+
+            # build proxy just for legend
+            proxy_pen = pg.mkPen("red", width=2.0)
+            proxy_brush = pg.QtGui.QBrush(pg.QtCore.Qt.NoBrush)  # since fill_color=None
+
+            self.rp_circle_legend_proxy = pg.PlotDataItem(
+                [0], [0],
+                pen=proxy_pen,
+                symbol="o",
+                symbolPen=proxy_pen,
+                symbolBrush=proxy_brush,
+                symbolSize=10,
+                name=self.rp_circle_item.name()
+            )
+
+            self.tabs.legend.addItem(self.rp_circle_legend_proxy, self.rp_circle_legend_proxy.name())
+
 
         except ProjectDbError as e:
             self.statusBar().showMessage(str(e), 10000)
@@ -289,46 +315,89 @@ class MainWindow(QtWidgets.QMainWindow):
             self.dsr_line_df = pdb.read_dsr_for_line(line)
             depth_df, st_col = self._make_station_depth_df(self.dsr_line_df)
             # BlackBox subset in Date1 window for this line
-            self.bb_line_df = pdb.read_blackbox_for_line_by_date1_window(line)
+            try:
+                self.bb_line_df = pdb.read_blackbox_for_line_by_date1_window(line)
+            except Exception:
+                self.bb_line_df = None
 
-            # plot tracks on map
+            # plot tracks on map (vessel / rov ins / usbl)
             self.plot_blackbox_tracks(self.bb_line_df)
 
-            key = f"depth_vs_station_line_{line}"
-            w = self.plot_manager.get_or_create(key, title=f"Depth vs Station — Line {line}",seq=1)
-            # connect plot click -> zoom map (optional)
+            # ----------- DEPTH WINDOW -----------
+            key = "depth_vs_station"
+            w = self.plot_manager.get_or_create(key, title="Depth vs Station", seq=1)
+
+            w.show()
+            w.raise_()
+            w.activateWindow()
+
+            # IMPORTANT: tag window with current line (for red-line updates)
+            w.state["current_line"] = int(line)
             w.state["on_station_selected"] = lambda st: self.on_dsr_station_clicked(line, st)
+
+            # OPTIONAL (uncomment if you want red line cleared when line changes)
+            # prev_line = w.state.get("prev_line")
+            # if prev_line is not None and int(prev_line) != int(line):
+            #     w.state.pop("selected_station", None)
+            #     if "sel_line" in w.items:
+            #         w.items["sel_line"].setVisible(False)
+            # w.state["prev_line"] = int(line)
+
             PlotFactory.build_two_series_vs_station(
                 w,
                 depth_df,
-                station_col=st_col,
+                station_col="Station",  # <-- force Station on X axis (if you want)
                 series1_col="PrimaryElevation",
                 series2_col="SecondaryElevation",
                 y_label="Elevation",
                 title=f"Depth vs Station — Line {line}",
             )
-            key1 = f"sigmas_vs_station_line_{line}"
-            w1 = self.plot_manager.get_or_create(key1, title=f"Sigma1 vs Station — Line {line}",seq=2)
-            # connect plot click -> zoom map (optional)
+
+            # ----------- SIGMA WINDOW -----------
+            key1 = "sigmas_vs_station"
+            w1 = self.plot_manager.get_or_create(key1, title="Sigma vs Station", seq=2)
+
+            w1.show()
+            w1.raise_()
+            w1.activateWindow()
+
+            # IMPORTANT: tag window with current line (for red-line updates)
+            w1.state["current_line"] = int(line)
             w1.state["on_station_selected"] = lambda st: self.on_dsr_station_clicked(line, st)
+
+            # OPTIONAL (uncomment if you want red line cleared when line changes)
+            # prev_line1 = w1.state.get("prev_line")
+            # if prev_line1 is not None and int(prev_line1) != int(line):
+            #     w1.state.pop("selected_station", None)
+            #     if "sel_line" in w1.items:
+            #         w1.items["sel_line"].setVisible(False)
+            # w1.state["prev_line"] = int(line)
+
             PlotFactory.build_two_series_vs_station(
                 w1,
                 depth_df,
-                station_col=st_col,
+                station_col="Station",  # <-- force Station on X axis (if you want)
                 series1_col="Sigma1",
                 series2_col="Sigma2",
                 y_label="Sigma",
                 title=f"Sigma vs Station — Line {line}",
             )
 
-            self.plot_manager.show(key)
-            self.plot_manager.show(key1)
+            # ✅ Sync X zoom/pan
+            w1.plot.setXLink(w.plot)
 
-            # 3) plot primary + secondary
+            # 3) plot primary + secondary on map
             self.plot_dsr_primary_secondary(self.dsr_line_df)
 
+            # ✅ Zoom map to project extent (RPPreplot)
+            if self.rp_layer and self.rp_layer.get("curve"):
+                bounds = self.rp_layer["curve"].boundingRect()
+                vb = self.tabs.map_plot.getViewBox()
+                vb.setRange(bounds, padding=0.02)
+
             self.statusBar().showMessage(
-                f"Line {line}: stations {len(df_st)}, dsr rows {len(self.dsr_line_df)}"
+                f"Line {line}: stations {len(df_st)}, dsr rows {len(self.dsr_line_df)}",
+                8000
             )
 
         except ProjectDbError as e:
@@ -409,30 +478,68 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_station_selection_lines(self, line: int, station: int):
         st = float(station)
 
-        # update ALL plot windows that belong to this line and have sel_line
         for key, w in self.plot_manager.windows.items():
-            if not key.endswith(f"_line_{line}"):
-                continue
             if not w or not hasattr(w, "items"):
                 continue
+
+            # ✅ match by stored current line
+            if int(w.state.get("current_line", -1)) != int(line):
+                continue
+
             sel = w.items.get("sel_line")
             if sel is None:
                 continue
-            try:
-                sel.setPos(st)
-                sel.setVisible(True)
-                w.state["selected_station"] = int(station)
-            except Exception:
-                pass
+
+            sel.setPos(st)
+            sel.setVisible(True)
+            w.state["selected_station"] = int(station)
 
     def on_dsr_station_clicked(self, line: int, station: int):
         if not self.current_project:
             return
-        # ALWAYS move red line(s) in all plot windows for this line
-        self._update_station_selection_lines(line, station)
 
+        try:
+            stf = float(station)
+            sti = int(float(station))
+        except Exception:
+            return
 
-        # --- then try to zoom map ---
+        # 1) Update red vertical line in BOTH windows
+        for key in ("depth_vs_station", "sigmas_vs_station"):
+            w = self.plot_manager.windows.get(key)
+            if not w or not hasattr(w, "items"):
+                continue
+
+            # only update windows that currently display this line
+            try:
+                if int(w.state.get("current_line", -1)) != int(line):
+                    continue
+            except Exception:
+                continue
+
+            # If sel_line does not exist yet, just store selection and let PlotFactory restore it
+            sel = w.items.get("sel_line")
+            w.state["selected_station"] = sti
+
+            if sel is not None:
+                sel.setPos(stf)
+                sel.setVisible(True)
+                sel.setZValue(10_000)
+
+                # ✅ Force redraw immediately (this is the key)
+                try:
+                    w.plot.getViewBox().update()
+                except Exception:
+                    pass
+                w.plot.repaint()
+
+        # Process pending paint events (helps on Windows)
+        try:
+            QtWidgets.QApplication.processEvents()
+        except Exception:
+            pass
+
+        # 2) Zoom map to this station
         try:
             pdb = ProjectDb(self.current_project["project_dir"])
             center = pdb.read_dsr_station_center(line, station)
@@ -444,12 +551,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self.zoom_map_to_xy(center["X"], center["Y"], half_size_m=50.0)
             self.statusBar().showMessage(f"Zoom to Line {line} Station {station} (±50 m)")
-
+            print("clicked station:", station)
+            print("plot x range:", w.plot.viewRange()[0])
         except ProjectDbError as e:
             self.statusBar().showMessage(str(e), 10000)
 
     def _make_station_depth_df(self, dsr_line_df):
-        st_col = "LinePoint" if "LinePoint" in dsr_line_df.columns else "Station"
+        if "Station" in dsr_line_df.columns:
+            st_col = "Station"
+        elif "LinePoint" in dsr_line_df.columns:
+            st_col = "LinePoint"
+        else:
+            raise ValueError("Neither Station nor LinePoint found")
         out = (
             dsr_line_df.groupby(st_col, as_index=False)[["PrimaryElevation", "SecondaryElevation", "Sigma1","Sigma2"]]
             .mean(numeric_only=True)
@@ -571,5 +684,32 @@ class MainWindow(QtWidgets.QMainWindow):
             point_size=4,
             line_width=1.0,
         )
+
+    def closeEvent(self, event):
+        # Close all secondary plot windows
+        if hasattr(self, "plot_manager"):
+            self.plot_manager.close_all()
+
+        super().closeEvent(event)
+
+    def _set_station_marker_on_windows(self, line: int, station: int):
+        for key in ("depth_vs_station", "sigmas_vs_station"):
+            w = self.plot_manager.windows.get(key)
+            if not w or not hasattr(w, "items"):
+                continue
+
+            # only update if this window currently displays the same line
+            if int(w.state.get("current_line", -1)) != int(line):
+                continue
+
+            sel = w.items.get("sel_line")
+            if sel is None:
+                continue
+
+            sel.setPos(float(station))
+            sel.setVisible(True)
+            w.state["selected_station"] = int(station)
+
+
 
 

@@ -87,7 +87,7 @@ class LeftPanel(QtWidgets.QFrame):
         # RIGHT: Stations table (MUST be StationTableWidget so arrows emit)
         self.tbl_dsr_stations = StationTableWidget()
         self.tbl_dsr_stations.setColumnCount(5)
-        self.tbl_dsr_stations.setHorizontalHeaderLabels(["Line", "Station", "Nodes", "FirstTime", "LastTime"])
+        self.tbl_dsr_stations.setHorizontalHeaderLabels(["Line", "Station", "Node", "ROV", "Deploy T"])
         self.tbl_dsr_stations.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_dsr_stations.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl_dsr_stations.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -282,10 +282,10 @@ class LeftPanel(QtWidgets.QFrame):
 
         for r in range(len(df)):
             self.tbl_dsr_stations.setItem(r, 0, QtWidgets.QTableWidgetItem(str(df.iloc[r]["Line"])))
-            self.tbl_dsr_stations.setItem(r, 1, QtWidgets.QTableWidgetItem(str(df.iloc[r]["LinePoint"])))
-            self.tbl_dsr_stations.setItem(r, 2, QtWidgets.QTableWidgetItem(str(df.iloc[r]["Nodes"])))
-            self.tbl_dsr_stations.setItem(r, 3, QtWidgets.QTableWidgetItem(str(df.iloc[r]["FirstTime"])))
-            self.tbl_dsr_stations.setItem(r, 4, QtWidgets.QTableWidgetItem(str(df.iloc[r]["LastTime"])))
+            self.tbl_dsr_stations.setItem(r, 1, QtWidgets.QTableWidgetItem(str(df.iloc[r]["Station"])))
+            self.tbl_dsr_stations.setItem(r, 2, QtWidgets.QTableWidgetItem(str(df.iloc[r]["Node"])))
+            self.tbl_dsr_stations.setItem(r, 3, QtWidgets.QTableWidgetItem(str(df.iloc[r]["ROV"])))
+            self.tbl_dsr_stations.setItem(r, 4, QtWidgets.QTableWidgetItem(str(df.iloc[r]["DeployTime"])))
 
         self.tbl_dsr_stations.resizeColumnsToContents()
         self.tbl_dsr_stations.setCurrentCell(0, 0)

@@ -30,3 +30,12 @@ class PlotManager(QtCore.QObject):
         w.show()
         w.raise_()
         w.activateWindow()
+
+    def close_all(self):
+        for key, w in list(self.windows.items()):
+            try:
+                w.close()
+            except Exception:
+                pass
+        self.windows.clear()
+

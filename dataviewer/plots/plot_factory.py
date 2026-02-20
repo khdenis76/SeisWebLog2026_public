@@ -149,6 +149,7 @@ class PlotFactory:
             brush=pg.mkBrush(point_color),
             pen=None,
             pxMode=True,
+            name =plot_name,
         )
 
         scatter.plot_name = plot_name
@@ -161,92 +162,116 @@ class PlotFactory:
             "plot_id": plot_id,
         }
 
-
     def create_circle_layer_fast(
             df,
             x_col="X",
             y_col="Y",
-            radius_col=None,  # optional: per-row radius in data units
-            radius=10.0,  # default radius in data units
+            radius_col=None,
+            radius=10.0,
             line_color="yellow",
-            fill_color=None,  # e.g. (255,0,0,40) or "rgba(255,0,0,40)" if you already use that
+            fill_color=None,
             line_width=1.0,
-            max_circles=None,  # e.g. 200000 to cap
+            max_circles=None,
+            name=None,
     ):
-        """
-        Very fast circle drawing in DATA units (meters/UTM/etc.)
-        Returns a SINGLE GraphicsObject you add once:
-            item = create_circle_layer_fast(...)
-            plot.addItem(item)
-        """
-
-        # local Qt imports via pyqtgraph to avoid you managing imports elsewhere
         QtCore = pg.QtCore
         QtGui = pg.QtGui
 
+        class _Empty(pg.GraphicsObject):
+            def paint(self, p, *args):
+                return
+
+            def boundingRect(self):
+                return QtCore.QRectF()
+
         if df is None or df.empty:
-            # return an empty item (safe)
-            class _Empty(pg.GraphicsObject):
-                def paint(self, p, *args): ...
-
-                def boundingRect(self): return QtCore.QRectF()
-
             return _Empty()
 
         for c in (x_col, y_col):
             if c not in df.columns:
                 raise ValueError(f"Missing column: {c}")
 
-        d = df[[x_col, y_col] + ([radius_col] if radius_col and radius_col in df.columns else [])].dropna().copy()
+        cols = [x_col, y_col]
+        if radius_col and radius_col in df.columns:
+            cols.append(radius_col)
+
+        d = df[cols].dropna()
         if d.empty:
-            class _Empty(pg.GraphicsObject):
-                def paint(self, p, *args): ...
-
-                def boundingRect(self): return QtCore.QRectF()
-
             return _Empty()
 
         if max_circles and len(d) > max_circles:
-            d = d.iloc[:max_circles].copy()
+            d = d.iloc[:max_circles]
 
-        # convert once
         xs = d[x_col].astype(float).to_numpy()
         ys = d[y_col].astype(float).to_numpy()
+
+        rs = None
         if radius_col and radius_col in d.columns:
             rs = d[radius_col].astype(float).to_numpy()
-        else:
-            rs = None
 
-        # pen/brush once
+        # filter finite values ONCE (and keep arrays aligned)
+        mask = np.isfinite(xs) & np.isfinite(ys)
+        if rs is not None:
+            mask &= np.isfinite(rs)
+
+        xs = xs[mask]
+        ys = ys[mask]
+        if rs is not None:
+            rs = rs[mask]
+
+        if xs.size == 0:
+            return _Empty()
+
         pen = pg.mkPen(line_color, width=line_width)
-        brush = pg.mkBrush(fill_color) if fill_color is not None else QtCore.Qt.BrushStyle.NoBrush
 
-        # Build picture (cached drawing)
+        # ALWAYS provide a real QBrush (avoid native crashes)
+        if fill_color is None:
+            brush = QtGui.QBrush(QtCore.Qt.NoBrush)
+        else:
+            brush = pg.mkBrush(fill_color)
+
         picture = QtGui.QPicture()
         painter = QtGui.QPainter(picture)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, False)
         painter.setPen(pen)
-        if brush is not QtCore.Qt.BrushStyle.NoBrush:
-            painter.setBrush(brush)
+        painter.setBrush(brush)
 
-        # draw all circles
         if rs is None:
             r0 = float(radius)
             for x, y in zip(xs, ys):
                 painter.drawEllipse(QtCore.QPointF(x, y), r0, r0)
+            rmax = r0
         else:
+            # draw per-row radius
             for x, y, r in zip(xs, ys, rs):
                 rr = float(r)
                 painter.drawEllipse(QtCore.QPointF(x, y), rr, rr)
+            rmax = float(np.nanmax(rs)) if rs.size else float(radius)
 
         painter.end()
 
-        # One GraphicsObject that replays the picture quickly
+        # bounds (must be finite)
+        if not np.isfinite(rmax) or rmax < 0:
+            rmax = float(radius)
+
+        xmin = float(np.nanmin(xs) - rmax)
+        xmax = float(np.nanmax(xs) + rmax)
+        ymin = float(np.nanmin(ys) - rmax)
+        ymax = float(np.nanmax(ys) + rmax)
+
+        w = xmax - xmin
+        h = ymax - ymin
+        if not (np.isfinite(w) and np.isfinite(h)) or w <= 0 or h <= 0:
+            bounds = QtCore.QRectF()
+        else:
+            bounds = QtCore.QRectF(xmin, ymin, w, h)
+
         class CirclePictureItem(pg.GraphicsObject):
-            def __init__(self, pic, bounds):
+            def __init__(self, pic, bounds, nm):
                 super().__init__()
                 self._pic = pic
                 self._bounds = bounds
+                self._name = nm
 
             def paint(self, p, *args):
                 p.drawPicture(0, 0, self._pic)
@@ -254,22 +279,11 @@ class PlotFactory:
             def boundingRect(self):
                 return self._bounds
 
-        # Bounding rect (important for correct view auto-range)
-        if rs is None:
-            rmax = float(radius)
-        else:
-            rmax = float(np.nanmax(rs)) if len(rs) else float(radius)
+            def name(self):
+                return self._name
 
-        xmin = float(np.nanmin(xs) - rmax)
-        xmax = float(np.nanmax(xs) + rmax)
-        ymin = float(np.nanmin(ys) - rmax)
-        ymax = float(np.nanmax(ys) + rmax)
-        bounds = QtCore.QRectF(xmin, ymin, xmax - xmin, ymax - ymin)
+        return CirclePictureItem(picture, bounds, name or "CircleLayer")
 
-        item = CirclePictureItem(picture, bounds)
-        # optional metadata
-        item.plot_name = "CircleLayer"
-        return item
     @staticmethod
     def build_two_series_vs_station(
             w,
@@ -305,6 +319,7 @@ class PlotFactory:
 
             w.items["sel_line"] = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("red", width=2))
             w.items["sel_line"].setVisible(False)
+            w.items["sel_line"].setZValue(10_000)
 
             w.plot.addItem(w.items["curve1"])
             w.plot.addItem(w.items["curve2"])
@@ -367,6 +382,20 @@ class PlotFactory:
         w.items["scatter2"].setData(spots2)
 
         w.plot.enableAutoRange()
+
+        # --- restore selected station line if we have it ---
+        st = w.state.get("selected_station")
+        if st is not None:
+            try:
+                stf = float(st)
+                # show only if station is in current X-range
+                if len(x) and (x.min() <= stf <= x.max()):
+                    w.items["sel_line"].setPos(stf)
+                    w.items["sel_line"].setVisible(True)
+                else:
+                    w.items["sel_line"].setVisible(False)
+            except Exception:
+                w.items["sel_line"].setVisible(False)
 
     @staticmethod
     def set_depth_window_selected_station(w, station: int):

@@ -835,7 +835,7 @@ CREATE TABLE  IF NOT EXISTS  CSVpoints (
     Attr2 INTEGER DEFAULT 0,
     Attr3 REAL DEFAULT 0,
     FOREIGN KEY (Layer_FK) REFERENCES CSVLayers(ID) ON DELETE CASCADE);
-CREATE TABLE IF NOT EXISTS "project_shapes" (
+CREATE TABLE IF NOT EXISTS project_shapes (
                                 "id" INTEGER,
                                 "FullName" TEXT UNIQUE NOT NULL,
                                 "FileName" TEXT,
@@ -843,7 +843,9 @@ CREATE TABLE IF NOT EXISTS "project_shapes" (
                                 "FillColor" TEXT DEFAULT '#000000',
                                 "LineColor" TEXT DEFAULT '#000000',
                                 "LineWidth" INTEGER DEFAULT 1,
-                                "LineStyle" TEXT DEFAULT '', HatchPattern TEXT DEFAULT '', FileCheck INT DEFAULT 1,
+                                "LineStyle" TEXT DEFAULT '',
+                                "HatchPattern" TEXT DEFAULT '',
+                                "FileCheck" INT DEFAULT 1,
 	                            PRIMARY KEY(id,FullName));
 DROP VIEW IF EXISTS PreplotSummaryAllFiles;
 CREATE VIEW IF NOT EXISTS PreplotSummaryAllFiles AS
@@ -1269,7 +1271,7 @@ GROUP BY
     TRIM(ROV1);
 CREATE TABLE IF NOT EXISTS REC_DB
 (
-    "ID" INTEGER AUTOINCREMENT NUT NULL,
+    "ID" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     "REC_ID"   INTEGER,
     "NODE_ID"  INTEGER,
     "DEPLOY"   INTEGER,
@@ -1311,7 +1313,7 @@ CREATE TABLE IF NOT EXISTS REC_DB
     "TOTPROD"  INTEGER DEFAULT 0,
     "SPSK"     INTEGER DEFAULT 0,
     "TIER"     INTEGER DEFAULT 1,
-    CONSTRAINT ("REC_ID","DEPLOY","RPI")
+    UNIQUE (REC_ID, DEPLOY, RPI)
 );
 
 

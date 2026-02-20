@@ -484,19 +484,32 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
                     (f.shapes_folder, f.image_folder, f.local_prj_folder, f.bb_folder, f.segy_folder),
                 )
             sql = """
-                       CREATE TABLE IF NOT EXISTS "project_shapes" (
-                                    "id" INTEGER, 
-                                    "FullName" TEXT UNIQUE NOT NULL,
-                                    "FileName" TEXT,
-                                    "isFilled" INTEGER DEFAULT 0,
-                                    "FillColor" TEXT DEFAULT '#000000',
-                                    "LineColor" TEXT DEFAULT '#000000',
-                                    "LineWidth" INTEGER DEFAULT 1,
-                                    "LineStyle" TEXT DEFAULT '',
-    	                            PRIMARY KEY(id,FullName));
+                       CREATE TABLE IF NOT EXISTS project_shapes (
+                                "id" INTEGER,
+                                "FullName" TEXT UNIQUE NOT NULL,
+                                "FileName" TEXT,
+                                "isFilled" INTEGER DEFAULT 0,
+                                "FillColor" TEXT DEFAULT '#000000',
+                                "LineColor" TEXT DEFAULT '#000000',
+                                "LineWidth" INTEGER DEFAULT 1,
+                                "LineStyle" TEXT DEFAULT '',
+                                "HatchPattern" TEXT DEFAULT '',
+                                "FileCheck" INT DEFAULT 1,
+	                            PRIMARY KEY(id,FullName));
                 """
             cur.execute(sql)
             conn.commit()
+    def run_sql_file(connect, path):
+        with open(path, "r", encoding="utf-8") as file:
+            sql = file.read()
+
+        with connect() as conn:
+            cursor = conn.cursor()
+            cursor.executescript(sql)  # для SQLite
+        conn.commit()
+        conn.close()
+        print("SQL file executed.")
+
     if not created:
         return
 
@@ -540,6 +553,7 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
 
     if not db_path.exists() or db_path.stat().st_size == 0:
         init_db(connect)
+        run_sql_file(connect,"core/newproject.sql")
 
 
 

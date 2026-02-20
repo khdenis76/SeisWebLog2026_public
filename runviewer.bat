@@ -9,7 +9,8 @@ set "CURRENT_DIR=%~dp0"
 ECHO "CURRENT DIR: %CURRENT_DIR%"
 REM Activate virtual environment (must be inside project folder)
 call myenv\Scripts\activate
-cd %CURRENT_DIR%\dataviewer
-python -m app.py
+ECHO "CURRENT DIR: %CURRENT_DIR%"
+cd %CURRENT_DIR%
+python -m dataviewer.app
 
 pause

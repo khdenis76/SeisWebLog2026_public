@@ -12,6 +12,9 @@ class CentralTabs(QtWidgets.QTabWidget):
         map_layout.setContentsMargins(8, 8, 8, 8)
 
         self.map_plot = pg.PlotWidget(title="Map (Easting / Northing)")
+        self.legend = self.map_plot.addLegend()
+        self.legend.setBrush(pg.mkBrush(30, 30, 30, 200))  # background
+        self.legend.setPen(pg.mkPen('w'))
         self.map_plot.showGrid(x=True, y=True)
         self.map_plot.setLabel("bottom", "Easting")
         self.map_plot.setLabel("left", "Northing")

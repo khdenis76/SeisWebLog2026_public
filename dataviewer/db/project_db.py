@@ -290,9 +290,12 @@ class ProjectDb:
                 SELECT
                     Line,
                     LinePoint,
-                    MIN(TimeStamp) AS FirstTime,
-                    MAX(TimeStamp) AS LastTime,
-                    COUNT(*) AS Nodes
+                    Station,
+                    Node,
+                    ROV,ROV1,
+                    TimeStamp as DeployTime,
+                    TimeStamp1 AS RecTime
+                    
                 FROM DSR
                 WHERE Line = ?
                 GROUP BY Line, LinePoint
@@ -316,7 +319,7 @@ class ProjectDb:
                     COUNT(*)             AS N
                 FROM DSR
                 WHERE Line = ?
-                  AND LinePoint = ?
+                  AND Station = ?
                   AND PrimaryEasting IS NOT NULL
                   AND PrimaryNorthing IS NOT NULL
                 """,
