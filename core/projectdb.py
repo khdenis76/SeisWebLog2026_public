@@ -44,6 +44,43 @@ class ProjectDB:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def update_days_in_water(self):
+        """
+        Update DSR:
+          - DaysInWater = Date1 - Date (if Date1 valid)
+          - TodayDaysInWater = today - Date (if Date1 NULL or 0)
+        """
+
+        with self._connect() as conn:
+            cur = conn.cursor()
+
+            # 1️⃣ Update DaysInWater (when Date1 exists and not 0)
+            cur.execute("""
+                UPDATE DSR
+                   SET DaysInWater = CAST(
+                       julianday(date("TimeStamp1")) - julianday(date("TimeStamp"))
+                   AS INTEGER)
+                   WHERE "TimeStamp" IS NOT NULL
+                     AND "TimeStamp1" IS NOT NULL
+                     AND TRIM("TimeStamp1") <> ''
+                     AND "TimeStamp1" <> '0'
+                     AND julianday("TimeStamp") IS NOT NULL
+                     AND julianday("TimeStamp1") IS NOT NULL;
+            """)
+
+            # 2️⃣ Update TodayDaysInWater (when Date1 missing or 0)
+            cur.execute("""
+                UPDATE DSR
+                   SET TodayDaysInWater = CAST(
+                       julianday(date('now')) - julianday(date("TimeStamp"))
+                   AS INTEGER)
+                   WHERE "TimeStamp" IS NOT NULL
+                     AND ("TimeStamp1" IS NULL OR TRIM("TimeStamp1") = '' OR "TimeStamp1" = '0')
+                     AND julianday("TimeStamp") IS NOT NULL;
+            """)
+
+            conn.commit()
+
     # ======================= INIT DB =======================
     def init_db(self) -> None:
         """

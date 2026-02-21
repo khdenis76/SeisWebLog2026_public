@@ -22,4 +22,6 @@ urlpatterns = [
     path("dsr/production/day",select_prod_day,name="select_prod_day"),
     path("dsr/export/sps",export_dsr_to_sps,name="export_dsr_to_sps"),
     path("dsr/line.selected",dsr_line_onclick,name="dsr_line_onclick"),
+    path("dsr/battery_life/",load_battery_life_map,name="load_battery_life_map"),
+    path("dsr/battery_days_left",load_battery_rest_days_map,name="load_battery_rest_days_map"),
 ]

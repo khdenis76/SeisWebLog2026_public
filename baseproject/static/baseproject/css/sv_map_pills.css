@@ -1,0 +1,176 @@
+/* container */
+.mixed-pills{
+  display:flex;
+  gap:.6rem;
+  align-items:center;
+  padding:.35rem;
+  border-radius: 999px;
+  background: rgba(0,0,0,.03);
+}
+
+/* base feel + switch animation */
+.mixed-pills .nav-link{
+  position: relative;
+  font-weight: 700;
+  padding: .62rem 1.15rem;
+  border: 0;
+  background: transparent;
+  transition:
+    transform .18s ease,
+    box-shadow .18s ease,
+    background-color .18s ease,
+    color .18s ease,
+    border-color .18s ease,
+    filter .18s ease;
+  will-change: transform, box-shadow;
+}
+
+.mixed-pills .nav-link:focus{
+  box-shadow: none; /* remove bootstrap focus ring */
+}
+
+.mixed-pills .nav-link.active{
+  transform: translateY(-2px) scale(1.03);
+}
+
+/* ------------------------------ */
+/* MAP: animated gradient pill     */
+/* ------------------------------ */
+.pill-map{
+  border-radius: 4px;
+  color: #0b6b7a;
+  background: rgba(13,202,240,.14);
+}
+
+/* active: animated gradient */
+.pill-map.active{
+  color: #fff;
+  background: linear-gradient(120deg, #0dcaf0, #0d6efd, #20c997, #0dcaf0);
+  background-size: 300% 300%;
+  animation: mapGradient 3.8s ease infinite;
+  box-shadow: 0 14px 28px rgba(13,110,253,.25);
+  filter: saturate(1.1);
+}
+
+@keyframes mapGradient{
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* subtle shine on active */
+.pill-map.active::after{
+  content:"";
+  position:absolute;
+  inset: 2px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(255,255,255,.30), rgba(255,255,255,0));
+  pointer-events:none;
+  mix-blend-mode: soft-light;
+}
+
+/* ---------------------------------------------- */
+/* HISTOGRAM: sunset orange, sharp bordered pill  */
+/* ---------------------------------------------- */
+.pill-hist{
+  border-radius: 10px;            /* sharp-ish */
+  background: rgba(255,255,255,.9);
+  border: 2px solid rgba(253,126,20,.75);
+  color: #c85b00;
+}
+
+/* active: sunset fill + glow pulse */
+.pill-hist.active{
+  color: #1c1208;
+  background: linear-gradient(135deg, #ffc107, #fd7e14, #ff4d6d);
+  border-color: rgba(253,126,20,.15);
+  box-shadow: 0 0 0 .25rem rgba(253,126,20,.22), 0 16px 34px rgba(253,126,20,.18);
+  animation: histPulse 900ms ease-out 1;
+}
+
+@keyframes histPulse{
+  0%   { box-shadow: 0 0 0 0 rgba(253,126,20,.35), 0 10px 20px rgba(253,126,20,.12); }
+  100% { box-shadow: 0 0 0 .25rem rgba(253,126,20,.22), 0 16px 34px rgba(253,126,20,.18); }
+}
+
+/* hover nice */
+.pill-map:hover{ filter: brightness(0.98); }
+.pill-hist:hover{ filter: brightness(0.98); }
+/* ---------------------------------- */
+/* PRODUCTION: neon + hatch texture   */
+/* ---------------------------------- */
+.pill-prod{
+  border-radius: 14px;                 /* unique shape (not same as others) */
+  color: #5a2ca0;
+  background:
+    linear-gradient(0deg, rgba(111,66,193,.10), rgba(111,66,193,.10)),
+    repeating-linear-gradient(135deg, rgba(111,66,193,.10) 0 10px, rgba(111,66,193,0) 10px 20px);
+  border: 2px solid rgba(111,66,193,.35);
+}
+
+.pill-prod.active{
+  color: #fff;
+  border-color: rgba(255,255,255,.18);
+  background: linear-gradient(135deg, #6f42c1, #b5179e, #ff4d6d);
+  background-size: 220% 220%;
+  animation: prodGlow 2.8s ease infinite;
+  box-shadow:
+    0 0 0 .22rem rgba(111,66,193,.18),
+    0 18px 40px rgba(181,23,158,.20);
+}
+
+@keyframes prodGlow{
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* small “spark” animation on switch */
+.pill-prod.active::after{
+  content:"";
+  position:absolute;
+  inset:-6px;
+  border-radius: 16px;
+  background: radial-gradient(circle at 30% 20%, rgba(255,255,255,.35), rgba(255,255,255,0) 55%);
+  pointer-events:none;
+  animation: prodSpark 650ms ease-out 1;
+}
+
+@keyframes prodSpark{
+  from { opacity: .9; transform: scale(.98); }
+  to   { opacity: 0;  transform: scale(1.03); }
+}
+/* ---------------------------------- */
+/* CALENDAR: glass time-style pill   */
+/* ---------------------------------- */
+.pill-calendar{
+  border-radius: 12px;
+  padding: .6rem 1.15rem;
+  font-weight: 700;
+
+  background: rgba(255,255,255,.65);
+  backdrop-filter: blur(6px);
+  border: 2px solid rgba(13,110,253,.25);
+
+  color: #0d6efd;
+}
+
+/* Active state */
+.pill-calendar.active{
+  color: #fff;
+  background: linear-gradient(135deg,#0d6efd,#6610f2);
+  border-color: rgba(255,255,255,.2);
+
+  box-shadow:
+    0 0 0 .25rem rgba(13,110,253,.20),
+    0 18px 40px rgba(102,16,242,.18);
+
+  animation: calendarPulse 900ms ease-out 1;
+}
+
+/* small clock pulse animation */
+@keyframes calendarPulse{
+  0%   { transform: scale(.96); }
+  50%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}

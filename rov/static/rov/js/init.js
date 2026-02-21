@@ -23,6 +23,8 @@ import {initDsrRovListAutoReload} from "./dsrExportRovs.js";
 import {initDailyProdDaySelect} from "./dailyProdDaySelect.js";
 import {initExportSpsModal} from "./initExportSpsModal.js";
 import {initDsrLineClick} from "./initDSRLineClick.js";
+import {initBatteryLifeMap,initBatteryLifeRestMap} from "./initBatteryLifeButton.js";
+
 
 
 export function initAllJSForRovUpload() {
@@ -48,6 +50,8 @@ export function initAllJSForRovUpload() {
   initExportSpsModal();
   initDsrExportSmModal({ rovNames: window.DSR_ROV_NAMES || [] });
   initDsrLineClick();
+  initBatteryLifeMap();
+  initBatteryLifeRestMap();
 
 
     // GNSS QC

@@ -3,24 +3,32 @@ from bokeh.layouts import gridplot
 
 from dsr_line_graphics import DSRLineGraphics
 from bbox_graphics import BlackBoxGraphics
+from dsr_map_graphics import DSRMapPlots
+
 project_db_path="D:\\04_TEST_DATA\\AW1\\data\\project.sqlite3"
-plgr=DSRLineGraphics(project_db_path)
-bbr=BlackBoxGraphics(project_db_path)
+
+dsr_plot = DSRMapPlots(project_db_path)
+rp_data = dsr_plot.read_rp_preplot()
+dsr_data = dsr_plot.read_dsr()
+dsr_plot.make_map(rp_df=rp_data,dsr_data=dsr_data, is_show=True)
+
+#plgr=DSRLineGraphics(project_db_path)
+#bbr=BlackBoxGraphics(project_db_path)
 #rows=plgr.get_sigmas_deltas(14233)
 #plgr.plot_dep_deltas(14233,rows,True)
 #plgr.bokeh_scatter_rov_depth1_vs_depth2_qc(is_show=True)
 #plgr.bokeh_compare_sensors_rov1(rov_num =1,start_ts="2026-02-05 00:00:00", end_ts="2026-02-07 00:00:00" ,is_show=True,plot="hist")
 
 
-data = bbr.load_bbox_data(file_ids=[16])
-dsr_df = bbr.dsr_points_in_bbox_timeframe(data)
+#data = bbr.load_bbox_data(file_ids=[16])
+#dsr_df = bbr.dsr_points_in_bbox_timeframe(data)
 
 
 #bbr.boke_cog_hdg_timeseries_all(df=data)
 #bbr.bokeh_bbox_sog_timeseries(df=data,plot_kind='line',is_show=True)
-p = bbr.bokeh_drift_timeseries(df=data,is_show=False,cog_col="ROV1_COG",hdg_col="ROV1_HDG", vn_col="Rov1Name", return_json=False)
+#p = bbr.bokeh_drift_timeseries(df=data,is_show=False,cog_col="ROV1_COG",hdg_col="ROV1_HDG", vn_col="Rov1Name", return_json=False)
 #p = bbr.add_dsr_vertical_lines(p, dsr_df)
-show(p)
+#show(p)
 
         #bbr.bokeh_bbox_sog_timeseries(df=data,plot_kind="scater",is_show=True)
 #bbr.bokeh_polar_qc_cog(df =data,is_show=True)

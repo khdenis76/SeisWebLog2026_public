@@ -317,6 +317,8 @@ CREATE TABLE IF NOT EXISTS "DSR" (
     "DownloadedDatainMB" INTEGER,
     "ExpectedDatainMB" INTEGER,
     "DownloadError" INTEGER,
+    "DaysInWater" INTEGER DEFAULT 0,
+    "TodayDaysInWater" INTEGER DEFAULT 0,
     FOREIGN KEY ("Solution_FK") REFERENCES "DSRSolution"("ID") ON UPDATE CASCADE ON DELETE RESTRICT,
     FOREIGN KEY ("RLPreplot_FK") REFERENCES "RLPreplot"("ID") ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT "ux_dsr_line_station_node" UNIQUE ("Line","Station","NODE_HEX_ID")

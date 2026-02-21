@@ -4,9 +4,11 @@ import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib import request
 
-from bokeh.embed import json_item
+from bokeh.embed import json_item, components
 from bokeh.layouts import column, gridplot
+from bokeh.palettes import Turbo256
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse
@@ -16,6 +18,7 @@ from django.views.decorators.http import require_POST, require_GET
 
 from core.models import UserSettings
 from core.projectdb import ProjectDB
+from rov.dsr_map_graphics import DSRMapPlots
 from rov.dsrclass import DSRDB
 from rov.bbox_graphics import BlackBoxGraphics
 
@@ -32,6 +35,61 @@ def rov_main_view(request):
     if not project.can_edit(request.user):
         raise PermissionDenied
     dsrdb = DSRDB(project.db_path)
+    dsrdb.pdb.update_days_in_water()
+    dsr_map_plot = DSRMapPlots(project.db_path,default_epsg=dsrdb.pdb.get_main().epsg,use_tiles=True)
+    rp_data = dsr_map_plot.read_rp_preplot()
+    dsr_data = dsr_map_plot.read_dsr()
+    rec_db_data = dsr_map_plot.read_recdb()
+    layers = [
+       dict(
+            name="Deployment",
+            df='dsr',
+            x_col="PrimaryEasting",
+            y_col="PrimaryNorthing",
+            marker="circle",
+            size=6,
+            alpha=0.9,
+            color='blue',
+            # color_col="ROV",                       # categorical color mapping
+            where="ROV.notna() and ROV1 != ''",  # filter: ROV not empty
+        ),
+        dict(
+            name="Recovered Nodes",
+            df='dsr',
+            x_col="PrimaryEasting1",
+            y_col="PrimaryNorthing1",
+            marker="circle",
+            size=6,
+            alpha=0.9,
+            color='orange',
+            # color_col="ROV",                       # categorical color mapping
+            where="ROV1.notna() and ROV1 != ''",  # filter: ROV not empty
+        ),
+        dict(
+            name="Processed Nodes",
+            df='rec',
+            x_col="REC_X",
+            y_col="REC_Y",
+            marker="circle",
+            size=6,
+            alpha=0.9,
+            color='red',
+            # color_col="ROV",                       # categorical color mapping
+            where=None,  # filter: ROV not empty
+        ),
+    ]
+    progress_map = dsr_map_plot.make_map_multi_layers(
+        rp_df=rp_data,  # your RPPreplot dataframe
+        dsr_df=dsr_data,  # your DSR dataframe
+        rec_db_df=rec_db_data,
+        title="PROJECT PROGRESS MAP",
+        layers=layers,
+        show_preplot=True,
+        show_shapes=True,
+        show_tiles=True,  # if using mercator tiles
+    )
+
+    pp_map_script, pp_map_div = components(progress_map)
     dsr_lines_body = dsrdb.render_dsr_line_summary_body()
     bbox_fields_selectors = dsrdb.get_config_selector_table()
     bbox_config_list = dsrdb.get_bbox_configs_list()
@@ -50,6 +108,8 @@ def rov_main_view(request):
                    "ok": True,
                    "configs": rows,
                    "dsr_statistics_table":dsr_statistics_table,
+                   "pp_map_script":pp_map_script,
+                   "pp_map_div":pp_map_div,
                    })
 @require_POST
 @login_required
@@ -987,3 +1047,96 @@ def dsr_line_onclick (request):
     if not project:
         return JsonResponse({"ok": False, "error": "No active project"}, status=400)
     return JsonResponse({"ok":"ok"})
+@require_POST
+@login_required
+def load_battery_life_map(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+       return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    pdb=ProjectDB(project.db_path)
+    pdb.update_days_in_water()
+
+    map_plot = DSRMapPlots(project.db_path,default_epsg=pdb.get_main().epsg)
+    rp_data = map_plot.read_rp_preplot()
+    dsr_data = map_plot.read_dsr()
+    rec_db_data = map_plot.read_recdb()
+    layers=[
+        dict(
+            name="Battery Life",
+            df='dsr',
+            x_col="PrimaryEasting",
+            y_col="PrimaryNorthing",
+            marker="circle",
+            size=6,
+            alpha=0.9,
+            color_col="TodayDaysInWater",  # categorical color mapping
+            bins=8,  # number of bins
+            bin_method="equal",  # "equal" or "quantile"
+            include_lowest=True,
+            palette="Turbo256",
+            where="ROV1.isna() or ROV1.str.strip() == ''",  # filter: ROV is empty
+        ),
+    ]
+    bl_map = progress_map = map_plot.make_map_multi_layers(
+        rp_df=rp_data,  # your RPPreplot dataframe
+        dsr_df=dsr_data,  # your DSR dataframe
+        rec_db_df=rec_db_data,
+        title="BATTERY LIFE MAP",
+        layers=layers,
+        show_preplot=True,
+        show_shapes=True,
+        show_tiles=True,  # if using mercator tiles
+    )
+    bl_json_map = json_item(bl_map)
+    return JsonResponse({"ok": True, "map": bl_json_map})
+@require_POST
+@login_required
+def load_battery_rest_days_map(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+       return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    data = json.loads(request.body)
+
+    max_days = int(data.get("max_days_in_water", 130))
+    bins_number = int(data.get("bins_number", 8))
+    pdb=ProjectDB(project.db_path)
+    pdb.update_days_in_water()
+
+
+    map_plot = DSRMapPlots(project.db_path,default_epsg=pdb.get_main().epsg)
+    rp_data = map_plot.read_rp_preplot()
+    dsr_data = map_plot.read_dsr()
+    dsr_data['RemDays'] = max_days - dsr_data["TodayDaysInWater"]
+    rec_db_data = map_plot.read_recdb()
+    layers=[
+        dict(
+            name="Remaining battery life (days).",
+            df='dsr',
+            x_col="PrimaryEasting",
+            y_col="PrimaryNorthing",
+            marker="circle",
+            size=6,
+            alpha=0.9,
+            color_col='RemDays',  # categorical color mapping
+            bins=bins_number,  # number of bins
+            bin_method="equal",  # "equal" or "quantile"
+            include_lowest=True,
+            palette="Turbo256",
+            where="ROV1.isna() or ROV1.str.strip() == ''",  # filter: ROV is empty
+        ),
+    ]
+    bl_map = progress_map = map_plot.make_map_multi_layers(
+        rp_df=rp_data,  # your RPPreplot dataframe
+        dsr_df=dsr_data,  # your DSR dataframe
+        rec_db_df=rec_db_data,
+        title="Remaining battery life (days).",
+        layers=layers,
+        show_preplot=True,
+        show_shapes=True,
+        show_tiles=True,  # if using mercator tiles
+    )
+    bl_json_map = json_item(bl_map)
+    return JsonResponse({"ok": True, "map": bl_json_map})
+

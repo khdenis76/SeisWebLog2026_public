@@ -1,0 +1,128 @@
+<ul class="nav mixed-pills" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link pill-map active"
+            data-bs-toggle="pill"
+            data-bs-target="#progress-map-tab"
+            type="button"
+            role="tab"
+            aria-selected="true">
+      <i class="fa-solid fa-map me-1"></i> Progress Map
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link pill-map"
+            data-bs-toggle="pill"
+            data-bs-target="#batterylife-map-tab"
+            type="button"
+            role="tab"
+            aria-selected="true">
+      <i class="fa-solid fa-battery-car me-1"></i> Battery Life
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link pill-map"
+            data-bs-toggle="pill"
+            data-bs-target="#batteryliferest-map-tab"
+            type="button"
+            role="tab"
+            aria-selected="true">
+      <i class="fa-solid fa-skull-car me-1"></i> Battery Life (Days Left)
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+  <button class="nav-link pill-prod"
+          data-bs-toggle="pill"
+          data-bs-target="#tabProd"
+          type="button"
+          role="tab"
+          aria-selected="false">
+    <i class="fa-solid fa-chart-pie me-1"></i> Production
+  </button>
+</li>
+    <li class="nav-item" role="presentation">
+  <button class="nav-link pill-calendar"
+          data-bs-toggle="pill"
+          data-bs-target="#tabCalendar"
+          type="button"
+          role="tab"
+          aria-selected="false">
+    <i class="fa-solid fa-calendar-days me-1"></i> Calendar
+  </button>
+</li>
+
+  <li class="nav-item" role="presentation">
+    <button class="nav-link pill-hist"
+            data-bs-toggle="pill"
+            data-bs-target="#tabHist"
+            type="button"
+            role="tab"
+            aria-selected="false">
+      <i class="fa-solid fa-chart-column me-1"></i> Histogram
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content mt-3">
+  <div class="tab-pane fade show active" id="progress-map-tab" role="tabpanel">
+      {{ pp_map_script|safe }}
+      <div class="w-100 bokeh-light-scope" style="height: 80vh" id="progress-map-container">
+        {{ pp_map_div|safe }}
+      </div>
+  </div>
+  <div class="tab-pane fade" id="batterylife-map-tab" role="tabpanel">
+      <div class="row">
+          <button type="button"
+                  id="bl-load-button"
+                  class="btn btn-warning btn-sm"
+                  data-url="{% url 'load_battery_life_map' %}">
+              <i class="fas fa-image me-2"></i>
+              Load map
+          </button>
+      </div>
+      <div class="w-100 bokeh-light-scope" style="height: 80vh" id="bl-map-container">
+
+      </div>
+  </div>
+  <div class="tab-pane fade" id="batteryliferest-map-tab" role="tabpanel">
+      <div class="row">
+
+          <div class="input-group">
+               <button type="button"
+               class="btn btn-sm btn-warning me-3"
+               id="bl-load-button2"
+               data-url="{% url 'load_battery_rest_days_map' %}">
+               <i class="fas fa-image me-2"></i>
+               Load map
+          </button>
+               <span class="input-group-text" id="basic-addon1">MAX DAYS UNDER THE WATER</span>
+               <input type="number"
+                      class="form-control"
+                      min="1"
+                      max="200"
+                      step="1"
+                      name="max_days_in_water"
+                      id="max-days-in-water"
+                      value="130">
+          </div>
+           <div class="input-group">
+               <span class="input-group-text" id="basic-addon1">NUMBER OF GROUPS</span>
+               <input type="number"
+                      class="form-control"
+                      min="2"
+                      max="20"
+                      step="1"
+                      name="bins_number"
+                      id="bins-number"
+                      value="2">
+           </div>
+
+      </div>
+
+       <div class="w-100 bokeh-light-scope" style="height: 100vh" id="bl2-map-container"></div>
+
+
+  </div>
+   </div>
+  </div>
+  <div class="tab-pane fade" id="tabHist" role="tabpanel">...</div>
+</div>

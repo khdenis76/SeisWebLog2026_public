@@ -1,0 +1,42 @@
+/* =========================================================
+   Bokeh Light Scope (Bootstrap Dark Safe)
+   ========================================================= */
+
+.bokeh-light-scope {
+  color-scheme: light;
+}
+
+.bokeh-light-scope .bk-root {
+  background-color: #ffffff;
+  color: #111111;
+}
+
+/* Force real input elements */
+.bokeh-light-scope .bk-root input,
+.bokeh-light-scope .bk-root select,
+.bokeh-light-scope .bk-root textarea {
+  background-color: #ffffff !important;
+  color: #111111 !important;
+  -webkit-text-fill-color: #111111 !important;
+  caret-color: #111111 !important;
+  border: 1px solid #ced4da !important;
+}
+
+/* Spinner buttons */
+.bokeh-light-scope .bk-root .bk-btn,
+.bokeh-light-scope .bk-root button {
+  background-color: #ffffff !important;
+  color: #111111 !important;
+  border: 1px solid #ced4da !important;
+}
+
+/* Labels */
+.bokeh-light-scope .bk-root label,
+.bokeh-light-scope .bk-root .bk-label {
+  color: #212529 !important;
+}
+
+/* Toolbar background */
+.bokeh-light-scope .bk-toolbar {
+  background-color: #f8f9fa !important;
+}
