@@ -1,75 +1,74 @@
 <ul class="nav mixed-pills" role="tablist">
-  <li class="nav-item" role="presentation">
-    <button class="nav-link pill-map active"
-            data-bs-toggle="pill"
-            data-bs-target="#progress-map-tab"
-            type="button"
-            role="tab"
-            aria-selected="true">
-      <i class="fa-solid fa-map me-1"></i> Progress Map
-    </button>
-  </li>
-  <li class="nav-item" role="presentation">
-    <button class="nav-link pill-map"
-            data-bs-toggle="pill"
-            data-bs-target="#batterylife-map-tab"
-            type="button"
-            role="tab"
-            aria-selected="true">
-      <i class="fa-solid fa-battery-car me-1"></i> Battery Life
-    </button>
-  </li>
-  <li class="nav-item" role="presentation">
-    <button class="nav-link pill-map"
-            data-bs-toggle="pill"
-            data-bs-target="#batteryliferest-map-tab"
-            type="button"
-            role="tab"
-            aria-selected="true">
-      <i class="fa-solid fa-skull-car me-1"></i> Battery Life (Days Left)
-    </button>
-  </li>
-  <li class="nav-item" role="presentation">
-  <button class="nav-link pill-prod"
-          data-bs-toggle="pill"
-          data-bs-target="#tabProd"
-          type="button"
-          role="tab"
-          aria-selected="false">
-    <i class="fa-solid fa-chart-pie me-1"></i> Production
-  </button>
-</li>
-    <li class="nav-item" role="presentation">
-  <button class="nav-link pill-calendar"
-          data-bs-toggle="pill"
-          data-bs-target="#tabCalendar"
-          type="button"
-          role="tab"
-          aria-selected="false">
-    <i class="fa-solid fa-calendar-days me-1"></i> Calendar
-  </button>
-</li>
-
-  <li class="nav-item" role="presentation">
-    <button class="nav-link pill-hist"
-            data-bs-toggle="pill"
-            data-bs-target="#tabHist"
-            type="button"
-            role="tab"
-            aria-selected="false">
-      <i class="fa-solid fa-chart-column me-1"></i> Histogram
-    </button>
-  </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link pill-map active"
+                data-bs-toggle="pill"
+                data-bs-target="#progress-map-tab"
+                type="button"
+                role="tab"
+                aria-selected="true">
+          <i class="fa-solid fa-map me-1"></i> Progress Map
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link pill-map"
+                data-bs-toggle="pill"
+                data-bs-target="#batterylife-map-tab"
+                type="button"
+                role="tab"
+                aria-selected="true">
+          <i class="fa-solid fa-battery-car me-1"></i> Battery Life
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link pill-map"
+                data-bs-toggle="pill"
+                data-bs-target="#batteryliferest-map-tab"
+                type="button"
+                role="tab"
+                aria-selected="true">
+          <i class="fa-solid fa-skull-car me-1"></i> Battery Life (Days Left)
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+              <button class="nav-link pill-prod"
+                      data-bs-toggle="pill"
+                      data-bs-target="#prod-pie-tab"
+                      type="button"
+                      role="tab"
+                      aria-selected="false">
+                <i class="fa-solid fa-chart-pie me-1"></i> Deployment & Recovery
+              </button>
+      </li>
+      <li class="nav-item" role="presentation">
+               <button class="nav-link pill-calendar"
+                       data-bs-toggle="pill"
+                       data-bs-target="#dbd-prod-tab"
+                       type="button"
+                       role="tab"
+                       aria-selected="false">
+                 <i class="fa-solid fa-calendar-days me-1"></i> Daily Production
+               </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link pill-hist"
+                data-bs-toggle="pill"
+                data-bs-target="#tabHist"
+                type="button"
+                role="tab"
+                aria-selected="false">
+          <i class="fa-solid fa-chart-column me-1"></i> Histogram
+        </button>
+      </li>
 </ul>
 
 <div class="tab-content mt-3">
-  <div class="tab-pane fade show active" id="progress-map-tab" role="tabpanel">
-      {{ pp_map_script|safe }}
-      <div class="w-100 bokeh-light-scope" style="height: 80vh" id="progress-map-container">
-        {{ pp_map_div|safe }}
-      </div>
-  </div>
-  <div class="tab-pane fade" id="batterylife-map-tab" role="tabpanel">
+       <div class="tab-pane fade show active" id="progress-map-tab" role="tabpanel">
+            {{ pp_map_script|safe }}
+                   <div class="w-100 bokeh-light-scope" style="height: 80vh" id="progress-map-container">
+                         {{ pp_map_div|safe }}
+                   </div>
+       </div>
+       <div class="tab-pane fade" id="batterylife-map-tab" role="tabpanel">
       <div class="row">
           <button type="button"
                   id="bl-load-button"
@@ -83,46 +82,120 @@
 
       </div>
   </div>
-  <div class="tab-pane fade" id="batteryliferest-map-tab" role="tabpanel">
-      <div class="row">
+       <div class="tab-pane fade" id="batteryliferest-map-tab" role="tabpanel">
+             <div class="row align-items-center g-2">
 
-          <div class="input-group">
-               <button type="button"
-               class="btn btn-sm btn-warning me-3"
-               id="bl-load-button2"
-               data-url="{% url 'load_battery_rest_days_map' %}">
-               <i class="fas fa-image me-2"></i>
-               Load map
-          </button>
-               <span class="input-group-text" id="basic-addon1">MAX DAYS UNDER THE WATER</span>
-               <input type="number"
-                      class="form-control"
-                      min="1"
-                      max="200"
-                      step="1"
-                      name="max_days_in_water"
-                      id="max-days-in-water"
-                      value="130">
-          </div>
-           <div class="input-group">
-               <span class="input-group-text" id="basic-addon1">NUMBER OF GROUPS</span>
-               <input type="number"
-                      class="form-control"
-                      min="2"
-                      max="20"
-                      step="1"
-                      name="bins_number"
-                      id="bins-number"
-                      value="2">
+    <!-- Button -->
+    <div class="col-auto">
+        <button type="button"
+                class="btn btn-sm btn-warning"
+                id="bl-load-button2"
+                data-url="{% url 'load_battery_rest_days_map' %}">
+            <i class="fas fa-image me-2"></i>
+            Load map
+        </button>
+    </div>
+
+    <!-- Max Days -->
+    <div class="col-auto">
+        <div class="input-group input-group-sm">
+            <span class="input-group-text">
+                MAX DAYS UNDER THE WATER
+            </span>
+            <input type="number"
+                   class="form-control"
+                   min="1"
+                   max="200"
+                   step="1"
+                   name="max_days_in_water"
+                   id="max-days-in-water"
+                   value="130">
+        </div>
+    </div>
+
+    <!-- Number of Groups -->
+    <div class="col-auto">
+        <div class="input-group input-group-sm">
+            <span class="input-group-text">
+                NUMBER OF GROUPS
+            </span>
+            <input type="number"
+                   class="form-control"
+                   min="2"
+                   max="20"
+                   step="1"
+                   name="bins_number"
+                   id="bins-number"
+                   value="2">
+        </div>
+    </div>
+
+</div>
+            <div class="w-100 bokeh-light-scope" style="height: 100vh" id="bl2-map-container"></div>
+       </div>
+
+       <div class="tab-pane fade" id="dbd-prod-tab" role="tabpanel">
+           {{ d_dep_script|safe }}
+           <div class="w-100 bokeh-light-scope" style="height: 30vh" id="daily-dep-container">
+               {{ d_dep_div|safe }}
+           </div>
+           {{ d_rec_script|safe }}
+           <div class="w-100 bokeh-light-scope" style="height: 30vh" id="daily-rec-container">
+               {{ d_rec_div|safe }}
            </div>
 
-      </div>
+       </div>
+        <div class="tab-pane fade" id="prod-pie-tab" role="tabpanel">
+            <div class="row">
+                <div class="col-6 m-0 p-0" id="dep-pie-container">
+                    {{ deployment_pie |safe }}
+                </div>
+                <div class="col-6 m-0 p-0" id="rec-pie-container">
+                    {{ recovery_pie |safe }}
+                </div>
+            </div>
+        </div>
+       <div class="tab-pane fade" id="tabHist" role="tabpanel">
+           <div class="d-flex flex-wrap gap-2 align-items-end">
 
-       <div class="w-100 bokeh-light-scope" style="height: 100vh" id="bl2-map-container"></div>
-
-
+  <div>
+    <label class="form-label mb-1 small text-muted">Bins</label>
+    <input id="hist-bins" type="number" class="form-control form-control-sm"
+           value="40" min="5" max="300" step="1" style="width: 110px;">
   </div>
-   </div>
+
+  <div>
+    <label class="form-label mb-1 small text-muted">Max offset (radial)</label>
+    <input id="hist-max-offset" type="number" class="form-control form-control-sm"
+           value="150" min="1" max="100000" step="1" style="width: 160px;">
   </div>
-  <div class="tab-pane fade" id="tabHist" role="tabpanel">...</div>
+
+  <div class="form-check">
+    <input class="form-check-input" type="checkbox" id="hist-kde" checked>
+    <label class="form-check-label small" for="hist-kde">KDE</label>
+  </div>
+
+  <div class="form-check">
+    <input class="form-check-input" type="checkbox" id="hist-std" checked>
+    <label class="form-check-label small" for="hist-std">STD lines</label>
+  </div>
+
+  <div class="form-check">
+    <input class="form-check-input" type="checkbox" id="hist-show" checked>
+    <label class="form-check-label small" for="hist-show">Show plot</label>
+  </div>
+
+  <div>
+    <button type="button"
+            class="btn btn-sm btn-warning"
+            data-url="{% url 'load_dsr_historgram' %}"
+            id="load-dsr-hist-button">
+      <i class="fas fa-file-image me-2"></i>Load
+    </button>
+  </div>
+
+</div>
+
+            <div id="hist-container" class="w-100 mt-2" style="height: 100vh"></div>
+       </div>
 </div>

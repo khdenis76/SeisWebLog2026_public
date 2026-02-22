@@ -1,21 +1,28 @@
 from __future__ import annotations
 
+from datetime import datetime
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Tuple, Union
 
 import sqlite3
 import pandas as pd
+import numpy as np
 from bokeh.core.property.vectorization import value
+from bokeh.embed import json_item
 from bokeh.io import show
-from bokeh.layouts import row, column
+from bokeh.layouts import row, column, gridplot
+from bokeh.models import Span,Range1d
 from bokeh.palettes import Category10, Category20
 
 from bokeh.plotting import figure
-from bokeh.models import ColumnDataSource, HoverTool, Button, Spinner, CustomJS, LabelSet
+from bokeh.models import ColumnDataSource, Span, Range1d,Label, HoverTool, Button, Spinner, CustomJS, LabelSet, DatetimeTickFormatter, Div, \
+    DatetimeTicker
 from bokeh.models import WMTSTileSource
 import geopandas as gpd
-from bokeh.transform import factor_cmap
+from bokeh.transform import factor_cmap, cumsum
+import plotly.graph_objects as go
 from pyproj import Transformer
 import xyzservices.providers as xyz
 
@@ -65,6 +72,87 @@ class DSRMapPlots:
     # -------------------------
     # DB helpers
     # -------------------------
+    @staticmethod
+    def add_inline_xline_offsets(
+            dsr_df: pd.DataFrame,
+            rp_preplot_df: pd.DataFrame,
+            *,
+            from_xy=("PreplotEasting", "PreplotNorthing"),
+            to_xy=("PrimaryEasting", "PrimaryNorthing"),
+            bearing_col="LineBearing",
+            out_prefix="Pri",
+    ) -> pd.DataFrame:
+        """
+        Add Inline/Xline offset columns into dsr_df using a common line bearing
+        taken from first row of rp_preplot_df[bearing_col].
+
+        Offsets are computed as:
+          dx = to_x - from_x
+          dy = to_y - from_y
+
+        Bearing is assumed AZIMUTH clockwise from North:
+          0 = North, 90 = East
+
+        Inline axis points along the bearing direction.
+        Xline axis is +90° to the right of inline.
+
+        Output columns:
+          {out_prefix}OffE, {out_prefix}OffN, {out_prefix}OffInline, {out_prefix}OffXline
+        """
+
+        if dsr_df is None or dsr_df.empty:
+            return dsr_df
+
+        if rp_preplot_df is None or rp_preplot_df.empty:
+            raise ValueError("rp_preplot_df is empty; cannot read LineBearing.")
+
+        if bearing_col not in rp_preplot_df.columns:
+            raise ValueError(f"'{bearing_col}' not found in rp_preplot_df columns.")
+
+        # Take common bearing from first non-null value (safer than iloc[0])
+        bearing_series = pd.to_numeric(rp_preplot_df[bearing_col], errors="coerce").dropna()
+        if bearing_series.empty:
+            raise ValueError(f"'{bearing_col}' has no numeric values in rp_preplot_df.")
+        bearing_deg = float(bearing_series.iloc[0])
+
+        # Ensure required columns exist in dsr_df
+        fx, fy = from_xy
+        tx, ty = to_xy
+        for c in (fx, fy, tx, ty):
+            if c not in dsr_df.columns:
+                raise ValueError(f"'{c}' missing in dsr_df; cannot compute offsets.")
+
+        # numeric arrays (NaN-safe)
+        from_x = pd.to_numeric(dsr_df[fx], errors="coerce").to_numpy(dtype="float64")
+        from_y = pd.to_numeric(dsr_df[fy], errors="coerce").to_numpy(dtype="float64")
+        to_x = pd.to_numeric(dsr_df[tx], errors="coerce").to_numpy(dtype="float64")
+        to_y = pd.to_numeric(dsr_df[ty], errors="coerce").to_numpy(dtype="float64")
+
+        dx = to_x - from_x
+        dy = to_y - from_y
+
+        # Convert bearing (azimuth from North) to unit vectors
+        # inline unit vector (east, north) = (sinθ, cosθ)
+        th = np.deg2rad(bearing_deg)
+        uix, uiy = np.sin(th), np.cos(th)
+
+        # xline unit vector = rotate inline +90° (to the right)
+        # (east, north) = (cosθ, -sinθ)
+        ux, uy = np.cos(th), -np.sin(th)
+
+        inline_off = dx * uix + dy * uiy
+        xline_off = dx * ux + dy * uy
+
+        # Write outputs
+        dsr_df[f"{out_prefix}OffE"] = dx
+        dsr_df[f"{out_prefix}OffN"] = dy
+        dsr_df[f"{out_prefix}OffInline"] = inline_off
+        dsr_df[f"{out_prefix}OffXline"] = xline_off
+
+        # Optional: also total offset distance
+        dsr_df[f"{out_prefix}OffDist"] = np.sqrt(dx * dx + dy * dy)
+
+        return dsr_df
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.db_path)
         con.row_factory = sqlite3.Row
@@ -85,7 +173,230 @@ class DSRMapPlots:
         params = {f"{param_prefix}{i}": v for i, v in enumerate(values)}
         placeholders = ",".join([f":{k}" for k in params.keys()])
         return f"({placeholders})", params
+    #---------------------------------------------
+    #In case of any error  blank plot will be generated
+    #-------------------------------------------------------
+    def _error_layout(
+            self,
+            title: str,
+            message: str,
+            *,
+            details: str = "",
+            level: str = "error",  # "error" | "warning" | "info"
+            is_show: bool = False,
+            json_return: bool = False,
+            retry_js: str = "window.location.reload();",
+    ):
+        # Timestamp (no imports)
+        ts = str(pd.Timestamp.now().strftime("%d/%m/%Y %H:%M:%S"))
 
+        # Simple HTML escaping (avoid breaking layout if message has < > &)
+        def _esc(s):
+            if s is None:
+                return ""
+            s = str(s)
+            return (
+                s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+
+        icon_map = {
+            "error": "❌",
+            "warning": "⚠️",
+            "info": "ℹ️",
+        }
+        border_map = {
+            "error": "#ef4444",
+            "warning": "#f59e0b",
+            "info": "#3b82f6",
+        }
+        bg_map = {
+            "error": "#fff5f5",
+            "warning": "#fffbeb",
+            "info": "#eff6ff",
+        }
+
+        icon = icon_map.get(level, "❌")
+        border = border_map.get(level, "#ef4444")
+        bg = bg_map.get(level, "#fff5f5")
+
+        title_html = _esc(title)
+        msg_html = _esc(message)
+        details_html = _esc(details).replace("\n", "<br>")
+
+        panel = Div(
+            text=f"""
+            <div style="
+                border:1px solid {border};
+                border-left:6px solid {border};
+                background:{bg};
+                padding:12px 14px;
+                border-radius:10px;
+                font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+            ">
+              <div style="display:flex; gap:10px; align-items:flex-start;">
+                <div style="font-size:20px; line-height:1;">{icon}</div>
+                <div style="flex:1;">
+                  <div style="font-weight:700; font-size:14px; margin-bottom:2px;">
+                    {title_html}
+                  </div>
+                  <div style="font-size:13px; margin-bottom:6px;">
+                    {msg_html}
+                  </div>
+
+                  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                    <div style="font-size:12px; color:#6b7280;">
+                      <b>Time:</b> {ts}
+                    </div>
+                    <div style="font-size:12px; color:#6b7280;">
+                      <b>Level:</b> {_esc(level)}
+                    </div>
+                  </div>
+
+                  {"<div style='margin-top:8px; font-size:12px; color:#374151;'><b>Details:</b><div style='margin-top:4px;'>" + details_html + "</div></div>" if details_html else ""}
+                </div>
+              </div>
+            </div>
+            """,
+            sizing_mode="stretch_width",
+        )
+
+        retry_btn = Button(label="Retry", button_type="primary", width=90)
+        retry_btn.js_on_click(CustomJS(code=retry_js))
+
+        # Empty plot placeholder (keeps plot area consistent)
+        p = figure(
+            height=220,
+            toolbar_location=None,
+            x_axis_type="datetime",
+            title="",
+            width_policy="max",
+        )
+        p.xaxis.visible = False
+        p.yaxis.visible = False
+        p.xgrid.visible = False
+        p.ygrid.visible = False
+        p.outline_line_alpha = 0.25
+
+        layout = column(
+            panel,
+            row(retry_btn, sizing_mode="stretch_width"),
+            p,
+            sizing_mode="stretch_both",
+        )
+
+        if is_show:
+            show(layout)
+            return None
+
+        if json_return:
+            return json_item(layout)
+
+        return layout
+
+
+
+    def _plotly_error_html(
+            self,
+            title="Plot Error",
+            message="Something went wrong.",
+            details=None,
+            level="error",  # "error" | "warning" | "info"
+            retry_js=None,  # optional JS function name to call (no parentheses)
+            is_show=False,
+            json_return=False,
+    ):
+        """
+        Plotly-friendly error output.
+
+        - Default: returns HTML string for {{ plotly_plot|safe }}
+        - json_return=True: returns dict suitable for JsonResponse
+        - is_show=True: prints the HTML to console (useful in tests) and returns None
+        """
+
+        icon_map = {"error": "❌", "warning": "⚠", "info": "ℹ"}
+        color_map = {"error": "#f8d7da", "warning": "#fff3cd", "info": "#e7f1ff"}
+        border_map = {"error": "#dc3545", "warning": "#ffc107", "info": "#0d6efd"}
+
+        lvl = str(level or "error").strip().lower()
+        icon = icon_map.get(lvl, "❌")
+        bg = color_map.get(lvl, "#f8d7da")
+        border = border_map.get(lvl, "#dc3545")
+
+        # Robust timestamp (works even if datetime wasn't imported elsewhere)
+        try:
+            ts = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            ts = ""
+
+        # Avoid None and keep HTML safe-ish
+        title_txt = "" if title is None else str(title)
+        msg_txt = "" if message is None else str(message)
+
+        retry_button = ""
+        if retry_js:
+            fn = str(retry_js).strip()
+            # allow passing "reloadChart" or "reloadChart()"
+            onclick = fn if fn.endswith(")") else f"{fn}()"
+            retry_button = f"""
+            <button class="btn btn-sm btn-outline-dark mt-3" onclick="{onclick}">
+                Retry
+            </button>
+            """
+
+        details_block = ""
+        if details:
+            details_block = f"""
+            <div class="mt-2 small text-muted" style="white-space:pre-wrap;">
+                <b>Details:</b><br>{details}
+            </div>
+            """
+
+        html = f"""
+        <div style="
+            border: 1px solid {border};
+            background: {bg};
+            padding: 20px;
+            border-radius: 10px;
+            width: 100%;
+        ">
+            <div style="font-size:18px; font-weight:600;">
+                {icon} {title_txt}
+            </div>
+
+            <div class="mt-2">
+                {msg_txt}
+            </div>
+
+            {details_block}
+
+            <div class="mt-3 small text-muted">
+                Generated: {ts}
+            </div>
+
+            {retry_button}
+        </div>
+        """
+
+        if is_show:
+            # Plotly errors are HTML; showing in console is the safest "show"
+            print(html)
+            return None
+
+        if json_return:
+            # Good for Django JsonResponse({"ok": False, **result})
+            return {
+                "ok": False,
+                "level": lvl,
+                "title": title_txt,
+                "message": msg_txt,
+                "details": details,
+                "timestamp": ts,
+                "html": html,
+            }
+
+        return html
     # -------------------------
     # Readers
     # -------------------------
@@ -107,7 +418,7 @@ class DSRMapPlots:
                       Point,
                       LinePoint,
                       File_FK,
-                      X,Y 
+                      X,Y,LineBearing  
                   FROM RPPreplot
                   WHERE 1=1
         """
@@ -1297,3 +1608,2360 @@ class DSRMapPlots:
             + (f" Lines: {min(lines)}–{max(lines)}" if lines else "")
         )
         return self.make_map(rp_df=rp_df, dsr_df=dsr_df, title=ttl)
+
+    def day_by_day_deployment(self, is_show=False, json_return=False):
+
+        sql = """
+        SELECT
+            ProdDate,
+            ROV,
+            SUM(TotalNodes) AS CNT
+        FROM Daily_Deployment
+        GROUP BY ProdDate, ROV
+        ORDER BY ProdDate
+        """
+
+        # --------- DB read ----------
+        try:
+            with self._connect() as conn:
+                data = pd.read_sql(sql, conn)
+        except Exception as e:
+            return self._error_layout(
+                title="Deployment plot failed",
+                message="Database query error while reading Daily_Deployment view.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        if data is None or len(data) == 0:
+            return self._error_layout(
+                title="No deployment data",
+                message="Daily_Deployment view returned no rows.",
+                details="Check: DSR has TimeStamp and ROV filled; view Daily_Deployment exists and is populated.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        # --------- Normalize ----------
+        data["ProdDate"] = pd.to_datetime(data["ProdDate"], errors="coerce").dt.floor("D")
+        data["ROV"] = data["ROV"].astype(str).str.strip()
+        data["CNT"] = pd.to_numeric(data["CNT"], errors="coerce").fillna(0)
+
+        data = data[(data["ROV"] != "") & data["ProdDate"].notna()]
+        if len(data) == 0:
+            return self._error_layout(
+                title="No valid deployment rows",
+                message="All rows were filtered out after cleaning (missing ProdDate or empty ROV).",
+                details="Check Daily_Deployment.ProdDate and Daily_Deployment.ROV values.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        rovs = sorted(data["ROV"].unique().tolist())
+        if len(rovs) == 0:
+            return self._error_layout(
+                title="No ROVs found",
+                message="Daily_Deployment contains no valid ROV values after trimming.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        # --------- Prepare pivot ----------
+        try:
+            day_index = pd.date_range(data["ProdDate"].min(), data["ProdDate"].max(), freq="D")
+
+            pivot = (
+                data.pivot_table(index="ProdDate", columns="ROV", values="CNT", aggfunc="sum")
+                .reindex(day_index)
+                .fillna(0)
+            )
+
+            df = pd.DataFrame({"ProdDate": day_index})
+            for r in rovs:
+                df[r] = pd.to_numeric(pivot[r], errors="coerce").fillna(0).values if r in pivot.columns else 0
+
+            df["Total"] = df[rovs].sum(axis=1)
+            max_total = float(df["Total"].max()) if len(df) else 0.0
+        except Exception as e:
+            return self._error_layout(
+                title="Deployment plot failed",
+                message="Data preparation error while building pivot/day index.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        # --------- Plot ----------
+        try:
+            day_ms = 86_400_000
+            bar_w = day_ms * 0.9
+
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            colors = [palette[i % len(palette)] for i in range(len(rovs))]
+
+            p = figure(
+                title="Deployment Day by Day",
+                toolbar_location="left",
+                x_axis_type="datetime",
+                x_axis_label="Days",
+                y_axis_label="Total Nodes",
+                width_policy="max",
+                y_range=(0, max_total * 1.25 if max_total > 0 else 1),
+            )
+
+            num_days = int((df["ProdDate"].max() - df["ProdDate"].min()).days) + 1
+            p.xaxis[0].ticker.desired_num_ticks = max(2, num_days)
+
+            # Legend totals (fast)
+            totals = data.groupby("ROV")["CNT"].sum().to_dict()
+
+            bars = p.vbar_stack(
+                stackers=rovs,
+                x="ProdDate",
+                width=bar_w,
+                color=colors,
+                line_color="black",
+                source=df,
+                legend_label=[f"{r} {int(totals.get(r, 0))} nodes" for r in rovs],
+            )
+
+            # One HoverTool per stack (color-matched)
+            for renderer, rov, col in zip(bars, rovs, colors):
+                field = str(rov)
+                field_expr = f"@{{{field}}}{{0,0}}"
+
+                hover = HoverTool(
+                    renderers=[renderer],
+                    tooltips=f"""
+                    <div style="font-size:12px;">
+                        <div><b>Date:</b> @ProdDate{{%d/%m/%Y}}</div>
+                        <div>
+                            <span style="color:{col}; font-weight:bold;">{field}</span>
+                            : {field_expr}
+                        </div>
+                        <div><b>Total:</b> @Total{{0,0}}</div>
+                    </div>
+                    """,
+                    formatters={"@ProdDate": "datetime"},
+                    mode="mouse",
+                )
+                p.add_tools(hover)
+
+            p.legend.orientation = "horizontal"
+            p.legend.click_policy = "hide"
+
+            p.xaxis.formatter = DatetimeTickFormatter(
+                days="%d/%m/%Y",
+                months="%d/%m/%Y",
+                years="%d/%m/%Y",
+            )
+            p.xaxis.major_label_orientation = 1.5708
+            p.xaxis.ticker = DatetimeTicker(desired_num_ticks=15)
+            layout = column([p], sizing_mode="stretch_both")
+
+        except Exception as e:
+            return self._error_layout(
+                title="Deployment plot failed",
+                message="Bokeh rendering error while building stacked bars/hover.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        # --------- Output ----------
+        if is_show:
+            show(layout)
+            return None
+
+        if json_return:
+            return json_item(layout)
+
+        return layout
+
+    def day_by_day_recovery(self, is_show=False, json_return=False):
+
+        sql = """
+        SELECT
+            ProdDate,
+            ROV,
+            SUM(TotalNodes) AS CNT
+        FROM Daily_Recovery 
+        GROUP BY ProdDate, ROV
+        ORDER BY ProdDate
+        """
+
+        # --------- DB read ----------
+        try:
+            with self._connect() as conn:
+                data = pd.read_sql(sql, conn)
+        except Exception as e:
+            return self._error_layout(
+                title="Recovery plot failed",
+                message="Database query error while reading Daily_Recovery view.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        if data is None or len(data) == 0:
+            return self._error_layout(
+                title="No recovery data",
+                message="Daily_Recovery view returned no rows.",
+                details="Check: DSR has TimeStamp and ROV filled; view Daily_Recovery exists and is populated.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        # --------- Normalize ----------
+        data["ProdDate"] = pd.to_datetime(data["ProdDate"], errors="coerce").dt.floor("D")
+        data["ROV"] = data["ROV"].astype(str).str.strip()
+        data["CNT"] = pd.to_numeric(data["CNT"], errors="coerce").fillna(0)
+
+        data = data[(data["ROV"] != "") & data["ProdDate"].notna()]
+        if len(data) == 0:
+            return self._error_layout(
+                title="No valid recovery rows",
+                message="All rows were filtered out after cleaning (missing ProdDate or empty ROV).",
+                details="Check Daily_Recovery.ProdDate and Daily_Recovery.ROV values.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        rovs = sorted(data["ROV"].unique().tolist())
+        if len(rovs) == 0:
+            return self._error_layout(
+                title="No ROVs found",
+                message="Daily_Recovery contains no valid ROV values after trimming.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        # --------- Prepare pivot ----------
+        try:
+            day_index = pd.date_range(data["ProdDate"].min(), data["ProdDate"].max(), freq="D")
+
+            pivot = (
+                data.pivot_table(index="ProdDate", columns="ROV", values="CNT", aggfunc="sum")
+                .reindex(day_index)
+                .fillna(0)
+            )
+
+            df = pd.DataFrame({"ProdDate": day_index})
+            for r in rovs:
+                df[r] = pd.to_numeric(pivot[r], errors="coerce").fillna(0).values if r in pivot.columns else 0
+
+            df["Total"] = df[rovs].sum(axis=1)
+            max_total = float(df["Total"].max()) if len(df) else 0.0
+        except Exception as e:
+            return self._error_layout(
+                title="Recovery plot failed",
+                message="Data preparation error while building pivot/day index.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        # --------- Plot ----------
+        try:
+            day_ms = 86_400_000
+            bar_w = day_ms * 0.9
+
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            colors = [palette[i % len(palette)] for i in range(len(rovs))]
+
+            p = figure(
+                title="Recovery Day by Day",
+                toolbar_location="left",
+                x_axis_type="datetime",
+                x_axis_label="Days",
+                y_axis_label="Total Nodes",
+                width_policy="max",
+                y_range=(0, max_total * 1.25 if max_total > 0 else 1),
+            )
+
+            num_days = int((df["ProdDate"].max() - df["ProdDate"].min()).days) + 1
+            p.xaxis[0].ticker.desired_num_ticks = max(2, num_days)
+
+            # Legend totals (fast)
+            totals = data.groupby("ROV")["CNT"].sum().to_dict()
+
+            bars = p.vbar_stack(
+                stackers=rovs,
+                x="ProdDate",
+                width=bar_w,
+                color=colors,
+                line_color="black",
+                source=df,
+                legend_label=[f"{r} {int(totals.get(r, 0))} nodes" for r in rovs],
+            )
+
+            # One HoverTool per stack (color-matched)
+            for renderer, rov, col in zip(bars, rovs, colors):
+                field = str(rov)
+                field_expr = f"@{{{field}}}{{0,0}}"
+
+                hover = HoverTool(
+                    renderers=[renderer],
+                    tooltips=f"""
+                    <div style="font-size:12px;">
+                        <div><b>Date:</b> @ProdDate{{%d/%m/%Y}}</div>
+                        <div>
+                            <span style="color:{col}; font-weight:bold;">{field}</span>
+                            : {field_expr}
+                        </div>
+                        <div><b>Total:</b> @Total{{0,0}}</div>
+                    </div>
+                    """,
+                    formatters={"@ProdDate": "datetime"},
+                    mode="mouse",
+                )
+                p.add_tools(hover)
+
+            p.legend.orientation = "horizontal"
+            p.legend.click_policy = "hide"
+
+            p.xaxis.formatter = DatetimeTickFormatter(
+                days="%d/%m/%Y",
+                months="%d/%m/%Y",
+                years="%d/%m/%Y",
+            )
+            p.xaxis.major_label_orientation = 1.5708
+            p.xaxis.ticker = DatetimeTicker(desired_num_ticks=15)
+
+            layout = column([p], sizing_mode="stretch_both")
+
+        except Exception as e:
+            return self._error_layout(
+                title="Recovery plot failed",
+                message="Bokeh rendering error while building stacked bars/hover.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        # --------- Output ----------
+        if is_show:
+            show(layout)
+            return None
+
+        if json_return:
+            return json_item(layout)
+
+        return layout
+
+    def donut_rov_summary(self, metric="Stations", is_show=False, json_return=False):
+        """
+        One donut chart:
+          - each ROV is a sector
+          - value = DEPLOY_ROV_Summary.<metric> per ROV
+          - baseline (100%) = RPPreplot COUNT(*)
+          - remainder = baseline - SUM(ROV sectors) (clamped to >= 0)
+          - style: percent labels on wedges + 1 exploded (largest ROV) slice (like sample image)
+        """
+
+        allowed_metrics = {
+            "Lines", "Stations", "Nodes", "Days",
+            "RECLines", "RECStations", "RECNodes", "RECDays",
+            "ProcLines", "ProcStations", "ProcNodes", "ProcDays",
+            "SMDepLines", "SMDepStations", "SMDepNodes",
+            "SMColLine", "SMColStations", "SMColNodes",
+            "SMPULines", "SMPUStations", "SMPUNodes",
+        }
+        if metric not in allowed_metrics:
+            return self._error_layout(
+                title="Donut chart failed",
+                message=f"Unsupported metric: {metric}",
+                details=f"Allowed: {', '.join(sorted(allowed_metrics))}",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        sql_rov = f"""
+        SELECT
+            TRIM(Rov) AS Rov,
+            COALESCE({metric}, 0) AS Val
+        FROM DEPLOY_ROV_Summary
+        WHERE Rov IS NOT NULL
+          AND TRIM(Rov) <> ''
+          AND TRIM(Rov) <> 'Total'
+        ORDER BY Rov
+        """
+
+        sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
+
+        try:
+            if hasattr(self, "_connect") and callable(getattr(self, "_connect")):
+                with self._connect() as conn:
+                    df = pd.read_sql(sql_rov, conn)
+                    base_df = pd.read_sql(sql_base, conn)
+            else:
+                df = pd.read_sql(sql_rov, self.db)
+                base_df = pd.read_sql(sql_base, self.db)
+        except Exception as e:
+            return self._error_layout(
+                title="Donut chart failed",
+                message="Database query error while reading DEPLOY_ROV_Summary / RPPreplot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        if df is None or len(df) == 0:
+            return self._error_layout(
+                title="No donut data",
+                message="DEPLOY_ROV_Summary returned no ROV rows.",
+                details="Check DEPLOY_ROV_Summary view and ensure Rov rows exist (not only Total).",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        try:
+            baseline = int(base_df.iloc[0]["Total"]) if (base_df is not None and len(base_df) > 0) else 0
+        except Exception:
+            baseline = 0
+        baseline_disp = format(int(baseline), ",")  # safe even if baseline is numpy/int-like
+
+        if baseline <= 0:
+            return self._error_layout(
+                title="Donut chart failed",
+                message="Baseline is zero (RPPreplot COUNT(*) = 0).",
+                details="Load RPPreplot first to define 100% total nodes.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        try:
+            df["Rov"] = df["Rov"].astype(str).str.strip()
+            df["Val"] = pd.to_numeric(df["Val"], errors="coerce").fillna(0).astype("float64")
+            df = df[df["Rov"] != ""]
+            if len(df) == 0:
+                return self._error_layout(
+                    title="No donut data",
+                    message="ROV rows became empty after cleaning.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            df["Val"] = df["Val"].clip(lower=0)
+
+            rov_sum = float(df["Val"].sum())
+            remainder = float(max(0.0, baseline - rov_sum))
+
+            # Build final lists (ROVs + Remaining)
+            labels = df["Rov"].tolist()
+            values = df["Val"].tolist()
+
+            labels.append("Remaining")
+            values.append(remainder)
+
+            total_value = float(sum(values))
+            if total_value <= 0:
+                return self._error_layout(
+                    title="Donut chart failed",
+                    message="All donut values are zero.",
+                    details=f"Metric={metric}, baseline={baseline}",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+        except Exception as e:
+            return self._error_layout(
+                title="Donut chart failed",
+                message="Data preparation error.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        try:
+            # Colors (ROVs distinct, Remaining gray)
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            colors = [palette[i % len(palette)] for i in range(len(labels) - 1)] + ["#e5e7eb"]
+
+            # Explode largest ROV slice (ignore Remaining)
+            explode_idx = 0
+            max_val = -1
+            for i in range(len(values) - 1):
+                if values[i] > max_val:
+                    max_val = values[i]
+                    explode_idx = i
+
+            inner_r = 0.55
+            outer_r = 1.00
+            label_r = (inner_r + outer_r) / 2.0
+            explode_r = 0.12
+
+            start_angles = []
+            end_angles = []
+            xs = []
+            ys = []
+            lx = []
+            ly = []
+            pct_text = []
+            pct_num = []
+
+            angle = 0.0
+            for i, v in enumerate(values):
+                frac = float(v) / total_value
+                da = frac * (2.0 * math.pi)
+
+                start = angle
+                end = angle + da
+                mid = (start + end) / 2.0
+
+                off = explode_r if i == explode_idx else 0.0
+                x0 = off * math.cos(mid)
+                y0 = off * math.sin(mid)
+
+                tx = x0 + label_r * math.cos(mid)
+                ty = y0 + label_r * math.sin(mid)
+
+                start_angles.append(start)
+                end_angles.append(end)
+                xs.append(x0)
+                ys.append(y0)
+                lx.append(tx)
+                ly.append(ty)
+
+                pct = frac * 100.0
+                pct_num.append(pct)
+                pct_text.append(f"{pct:.1f}%" if pct >= 1.0 else f"{pct:.2f}%")
+
+                angle = end
+
+            src = ColumnDataSource(data=dict(
+                label=labels,
+                value=values,
+                color=colors,
+                start=start_angles,
+                end=end_angles,
+                x=xs,
+                y=ys,
+                lx=lx,
+                ly=ly,
+                pct_txt=pct_text,
+                pct=pct_num,
+                baseline=[baseline] * len(labels),
+            ))
+
+            p = figure(
+                height=360,
+                title="Deployment",
+                toolbar_location=None,
+                x_range=(-1.4, 1.4),
+                y_range=(-1.2, 1.2),
+                width_policy="max",
+            )
+
+            p.annular_wedge(
+                x="x", y="y",
+                inner_radius=inner_r,
+                outer_radius=outer_r,
+                start_angle="start",
+                end_angle="end",
+                line_color="white",
+                line_width=1,
+                fill_color="color",
+                source=src,
+            )
+
+            # Percent labels on wedges (like sample)
+            p.text(
+                x="lx", y="ly",
+                text="pct_txt",
+                text_align="center",
+                text_baseline="middle",
+                text_color="white",
+                text_font_size="10pt",
+                source=src,
+            )
+
+            p.add_tools(HoverTool(
+                tooltips=[
+                    ("Slice", "@label"),
+                    (metric, "@value{0,0}"),
+                    ("Percent", "@pct{0.0}%"),
+                    ("Baseline", "@baseline{0,0}"),
+                ]
+            ))
+
+            p.axis.visible = False
+            p.grid.visible = False
+            p.outline_line_color = None
+
+            layout = column([p], sizing_mode="stretch_both")
+
+        except Exception as e:
+            return self._error_layout(
+                title="Donut chart failed",
+                message="Bokeh rendering error while building donut chart.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        if is_show:
+            show(layout)
+            return None
+
+        if json_return:
+            return json_item(layout)
+
+        return layout
+
+    def donut_rov_summary_plotly(self, metric="Stations", is_show=False, json_return=False):
+        """
+        Plotly donut:
+          - sectors: each ROV + "Remaining"
+          - values: DEPLOY_ROV_Summary.<metric>
+          - baseline: RPPreplot COUNT(*)
+          - remainder: baseline - SUM(ROV)
+          - exploded: largest ROV slice
+
+        Returns:
+          - if is_show: shows figure and returns None
+          - if json_return: returns fig.to_json()
+          - else: returns plotly Figure
+        """
+
+        allowed_metrics = {
+            "Lines", "Stations", "Nodes", "Days",
+            "RECLines", "RECStations", "RECNodes", "RECDays",
+            "ProcLines", "ProcStations", "ProcNodes", "ProcDays",
+            "SMDepLines", "SMDepStations", "SMDepNodes",
+            "SMColLine", "SMColStations", "SMColNodes",
+            "SMPULines", "SMPUStations", "SMPUNodes",
+        }
+        if metric not in allowed_metrics:
+            # Plotly cannot use your _error_layout visually; return it as fallback if you're embedding Bokeh panels.
+            return self._error_layout(
+                title="Donut chart failed",
+                message=f"Unsupported metric: {metric}",
+                details=f"Allowed: {', '.join(sorted(allowed_metrics))}",
+                level="warning",
+                is_show=is_show,
+                json_return=False,  # Bokeh only
+            )
+
+        sql_rov = f"""
+        SELECT
+            TRIM(Rov) AS Rov,
+            COALESCE({metric}, 0) AS Val
+        FROM DEPLOY_ROV_Summary
+        WHERE Rov IS NOT NULL
+          AND TRIM(Rov) <> ''
+          AND TRIM(Rov) <> 'Total'
+        ORDER BY Rov
+        """
+
+        sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
+
+        try:
+            if hasattr(self, "_connect") and callable(getattr(self, "_connect")):
+                with self._connect() as conn:
+                    df = pd.read_sql(sql_rov, conn)
+                    base_df = pd.read_sql(sql_base, conn)
+            else:
+                df = pd.read_sql(sql_rov, self.db)
+                base_df = pd.read_sql(sql_base, self.db)
+        except Exception as e:
+            return self._error_layout(
+                title="Donut chart failed",
+                message="Database query error while reading DEPLOY_ROV_Summary / RPPreplot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if df is None or len(df) == 0:
+            return self._error_layout(
+                title="No donut data",
+                message="DEPLOY_ROV_Summary returned no ROV rows.",
+                details="Check DEPLOY_ROV_Summary view and ensure Rov rows exist (not only Total).",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            baseline = int(base_df.iloc[0]["Total"]) if (base_df is not None and len(base_df) > 0) else 0
+        except Exception:
+            baseline = 0
+        baseline = int(baseline) if baseline else 0
+        baseline_disp = format(baseline, ",")
+        if baseline <= 0:
+            return self._error_layout(
+                title="Donut chart failed",
+                message="Baseline is zero (RPPreplot COUNT(*) = 0).",
+                details="Load RPPreplot first to define 100% total nodes.",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            df["Rov"] = df["Rov"].astype(str).str.strip()
+            df["Val"] = pd.to_numeric(df["Val"], errors="coerce").fillna(0).astype("float64")
+            df = df[df["Rov"] != ""]
+            if len(df) == 0:
+                return self._error_layout(
+                    title="No donut data",
+                    message="ROV rows became empty after cleaning.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=False,
+                )
+
+            df["Val"] = df["Val"].clip(lower=0)
+
+            labels = df["Rov"].tolist()
+            values = df["Val"].tolist()
+
+            rov_sum = float(sum(values))
+            remainder = float(max(0.0, baseline - rov_sum))
+
+            labels.append("Remaining")
+            values.append(remainder)
+
+            total_value = float(sum(values))
+            if total_value <= 0:
+                return self._error_layout(
+                    title="Donut chart failed",
+                    message="All donut values are zero.",
+                    details=f"Metric={metric}, baseline={baseline}",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=False,
+                )
+
+            # percent for hover
+            perc = [(v / baseline * 100.0) if baseline else 0.0 for v in values]
+
+            # Pull out the biggest ROV slice (ignore Remaining)
+            explode = [0.0] * len(labels)
+            if len(values) > 1:
+                i_max = 0
+                max_v = -1
+                for i in range(len(values) - 1):
+                    if values[i] > max_v:
+                        max_v = values[i]
+                        i_max = i
+                explode[i_max] = 0.10  # 0..1
+
+            # Colors
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            colors = [palette[i % len(palette)] for i in range(len(labels) - 1)] + ["#e5e7eb"]
+
+        except Exception as e:
+            return self._error_layout(
+                title="Donut chart failed",
+                message="Data preparation error.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            # Plotly (assumes plotly.graph_objects as go is imported at module level)
+            fig = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=labels,
+                        values=values,
+                        hole=0.55,
+                        pull=explode,
+                        sort=False,
+                        marker=dict(colors=colors, line=dict(color="white", width=1)),
+                        textinfo="percent",
+                        textposition="inside",
+                        hovertemplate=(
+                                "<b>%{label}</b><br>"
+                                + f"{metric}: %{{value:,.0f}}<br>"
+                                + "Percent of baseline: %{customdata:.1f}%<br>"
+                                + f"Baseline: {baseline_disp}<extra></extra>"
+                        ),
+                        customdata=perc,
+                    )
+                ]
+            )
+
+            fig.update_layout(
+                title=dict(text="Deployment", x=0.02, xanchor="left"),
+                margin=dict(l=10, r=10, t=40, b=10),
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.05, xanchor="left", x=0),
+            )
+
+        except Exception as e:
+            return self._error_layout(
+                title="Donut chart failed",
+                message="Plotly rendering error while building donut chart.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if is_show:
+            fig.show()
+            return None
+
+        if json_return:
+            return fig.to_json()
+
+        return fig
+
+    def layer_donut_deployment_plotly(self, metric="Stations", is_show=False, json_return=False):
+        """
+        2-layer donut (Sunburst):
+          - inner ring: Deployed vs Remaining (baseline - deployed)
+          - outer ring: Deployed by ROV (children of Deployed)
+        Baseline = RPPreplot COUNT(*)
+        Deployed = SUM(DEPLOY_ROV_Summary.<metric> per ROV)
+        """
+
+        # protect against SQL injection + wrong field names
+        allowed_metrics = {
+            "Lines", "Stations", "Nodes", "Days",
+            "RECLines", "RECStations", "RECNodes", "RECDays",
+            "ProcLines", "ProcStations", "ProcNodes", "ProcDays",
+            "SMDepLines", "SMDepStations", "SMDepNodes",
+            "SMColLine", "SMColStations", "SMColNodes",
+            "SMPULines", "SMPUStations", "SMPUNodes",
+        }
+        if metric not in allowed_metrics:
+            return self._error_layout(
+                title="Layer donut failed",
+                message=f"Unsupported metric: {metric}",
+                details=f"Allowed: {', '.join(sorted(allowed_metrics))}",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        sql_rov = f"""
+        SELECT
+            TRIM(Rov) AS Rov,
+            COALESCE({metric}, 0) AS Val
+        FROM DEPLOY_ROV_Summary
+        WHERE Rov IS NOT NULL
+          AND TRIM(Rov) <> ''
+          AND TRIM(Rov) <> 'Total'
+        ORDER BY Rov
+        """
+
+        sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
+
+        try:
+            if hasattr(self, "_connect") and callable(getattr(self, "_connect")):
+                with self._connect() as conn:
+                    df = pd.read_sql(sql_rov, conn)
+                    base_df = pd.read_sql(sql_base, conn)
+            else:
+                df = pd.read_sql(sql_rov, self.db)
+                base_df = pd.read_sql(sql_base, self.db)
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Database query error while reading DEPLOY_ROV_Summary / RPPreplot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if df is None or len(df) == 0:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="DEPLOY_ROV_Summary returned no ROV rows.",
+                details="Check that DEPLOY_ROV_Summary exists and has Rov rows (not only Total).",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            baseline = int(base_df.iloc[0]["Total"]) if (base_df is not None and len(base_df) > 0) else 0
+            baseline = int(baseline) if baseline else 0
+        except Exception:
+            baseline = 0
+
+        if baseline <= 0:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Baseline is zero (RPPreplot COUNT(*) = 0).",
+                details="Load RPPreplot to define 100% total nodes.",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            df["Rov"] = df["Rov"].astype(str).str.strip()
+            df["Val"] = pd.to_numeric(df["Val"], errors="coerce").fillna(0).astype("float64")
+            df = df[df["Rov"] != ""]
+            df["Val"] = df["Val"].clip(lower=0)
+
+            rovs = df["Rov"].tolist()
+            rov_vals = df["Val"].tolist()
+
+            deployed = float(sum(rov_vals))
+            remaining = float(max(0.0, baseline - deployed))
+
+            # If deployed > baseline, we clamp remaining to 0 but still display (warn in title)
+            over = deployed > baseline
+
+            baseline_disp = format(int(baseline), ",")
+            deployed_disp = format(int(deployed), ",")
+            remaining_disp = format(int(remaining), ",")
+
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Data preparation error.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            # Sunburst hierarchy:
+            #   Baseline (root)
+            #     Deployed
+            #        ROV_A
+            #        ROV_B
+            #        ...
+            #     Remaining
+            labels = ["Baseline", "Deployed", "Remaining"] + rovs
+            parents = ["", "Baseline", "Baseline"] + (["Deployed"] * len(rovs))
+            values = [baseline, deployed, remaining] + rov_vals
+
+            # Colors (Remaining gray, Deployed darker, ROVs palette)
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            rov_colors = [palette[i % len(palette)] for i in range(len(rovs))]
+            colors = ["#0b1220", "#2563eb", "#e5e7eb"] + rov_colors  # baseline, deployed, remaining, rovs...
+
+            title = "Deployment"
+            if over:
+                title = "Deployment (Deployed > Baseline)"
+
+            fig = go.Figure(
+                go.Sunburst(
+                    labels=labels,
+                    parents=parents,
+                    values=values,
+                    branchvalues="total",
+                    marker=dict(colors=colors, line=dict(color="white", width=1)),
+                    maxdepth=2,
+                    insidetextorientation="radial",
+                    hovertemplate=(
+                            "<b>%{label}</b><br>"
+                            + f"{metric}: %{{value:,.0f}}<br>"
+                            + "Share of baseline: %{percentRoot:.1%}<extra></extra>"
+                    ),
+                )
+            )
+
+            fig.update_layout(
+                title=dict(text=title, x=0.02, xanchor="left"),
+                margin=dict(l=10, r=10, t=40, b=10),
+                uniformtext=dict(minsize=10, mode="hide"),
+                annotations=[
+                    dict(
+                        text=(
+                            f"<b>{metric}</b><br>"
+                            f"{deployed_disp} / {baseline_disp}<br>"
+                            f"Remaining: {remaining_disp}"
+                        ),
+                        x=0.5, y=0.5, showarrow=False,
+                        font=dict(size=12, color="#111827"),
+                        align="center",
+                    )
+                ],
+            )
+
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Plotly rendering error (Sunburst).",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if is_show:
+            fig.show()
+            return None
+
+        if json_return:
+            return fig.to_json()
+
+        return fig
+
+    def layer_donut_deploy_recovery_plotly(self, is_show=False, json_return=False):
+        """
+        4-ring Sunburst:
+          Ring 1: Baseline (RPPreplot COUNT(*))
+          Ring 2: Deployed (SUM Stations) vs Remaining baseline
+          Ring 3: Recovered (SUM RECStations) vs Still Deployed
+          Ring 4: Recovered by ROV (RECStations per Rov)
+
+        NOTE: This assumes Stations / RECStations are meaningful against RPPreplot COUNT(*).
+              If Stations != nodes, switch to Nodes/RECNodes (recommended).
+        """
+
+        sql = """
+        SELECT
+            TRIM(Rov) AS Rov,
+            COALESCE(Stations, 0)    AS Stations,
+            COALESCE(RECStations, 0) AS RECStations
+        FROM DEPLOY_ROV_Summary
+        WHERE Rov IS NOT NULL
+          AND TRIM(Rov) <> ''
+          AND TRIM(Rov) <> 'Total'
+        ORDER BY Rov
+        """
+
+        sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
+
+        try:
+            if hasattr(self, "_connect") and callable(getattr(self, "_connect")):
+                with self._connect() as conn:
+                    df = pd.read_sql(sql, conn)
+                    base_df = pd.read_sql(sql_base, conn)
+            else:
+                df = pd.read_sql(sql, self.db)
+                base_df = pd.read_sql(sql_base, self.db)
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Database query error while reading DEPLOY_ROV_Summary / RPPreplot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if df is None or len(df) == 0:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="DEPLOY_ROV_Summary returned no ROV rows.",
+                details="Check DEPLOY_ROV_Summary view and ensure Rov rows exist (not only Total).",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            baseline = int(base_df.iloc[0]["Total"]) if (base_df is not None and len(base_df) > 0) else 0
+            baseline = int(baseline) if baseline else 0
+        except Exception:
+            baseline = 0
+
+        if baseline <= 0:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Baseline is zero (RPPreplot COUNT(*) = 0).",
+                details="Load RPPreplot to define 100% baseline.",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            df["Rov"] = df["Rov"].astype(str).str.strip()
+            df["Stations"] = pd.to_numeric(df["Stations"], errors="coerce").fillna(0).astype("float64").clip(lower=0)
+            df["RECStations"] = pd.to_numeric(df["RECStations"], errors="coerce").fillna(0).astype("float64").clip(
+                lower=0)
+
+            df = df[df["Rov"] != ""]
+            if len(df) == 0:
+                return self._error_layout(
+                    title="Layer donut failed",
+                    message="ROV rows became empty after cleaning.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=False,
+                )
+
+            deployed_total = float(df["Stations"].sum())
+            recovered_total = float(df["RECStations"].sum())
+
+            # Clamp recovered so it can’t exceed deployed in the chart
+            recovered_total = min(recovered_total, deployed_total)
+
+            still_deployed = max(0.0, deployed_total - recovered_total)
+            remaining_baseline = max(0.0, float(baseline) - deployed_total)
+
+            # Per-ROV recovered values (also clamp each to its deployed value)
+            rovs = df["Rov"].tolist()
+            rec_by_rov = []
+            for _, r in df.iterrows():
+                rec_by_rov.append(float(min(r["RECStations"], r["Stations"])))
+
+            over_baseline = deployed_total > baseline
+
+            baseline_disp = format(int(baseline), ",")
+            dep_disp = format(int(deployed_total), ",")
+            rec_disp = format(int(recovered_total), ",")
+            rem_disp = format(int(remaining_baseline), ",")
+
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Data preparation error.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            # Hierarchy:
+            # Baseline
+            #   Deployed
+            #     Recovered
+            #       ROV_A
+            #       ROV_B ...
+            #     Still Deployed
+            #   Remaining
+            #
+            # This gives 4 rings:
+            # 1 Baseline, 2 Deployed/Remaining, 3 Recovered/StillDeployed, 4 ROVs under Recovered.
+
+            labels = (
+                    ["Baseline", "Deployed", "Remaining", "Recovered", "Still Deployed"]
+                    + rovs
+            )
+
+            parents = (
+                    ["", "Baseline", "Baseline", "Deployed", "Deployed"]
+                    + (["Recovered"] * len(rovs))
+            )
+
+            values = (
+                    [baseline, deployed_total, remaining_baseline, recovered_total, still_deployed]
+                    + rec_by_rov
+            )
+
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            rov_colors = [palette[i % len(palette)] for i in range(len(rovs))]
+
+            colors = (
+                    ["#0b1220", "#2563eb", "#e5e7eb", "#22c55e",
+                     "#f59e0b"]  # baseline, deployed, remaining, recovered, still
+                    + rov_colors
+            )
+
+            title = "Deployment / Recovery"
+            if over_baseline:
+                title = "Deployment / Recovery (Deployed > Baseline)"
+
+            fig = go.Figure(
+                go.Sunburst(
+                    labels=labels,
+                    parents=parents,
+                    values=values,
+                    branchvalues="total",
+                    maxdepth=4,
+                    marker=dict(colors=colors, line=dict(color="white", width=1)),
+                    insidetextorientation="radial",
+                    hovertemplate=(
+                            "<b>%{label}</b><br>"
+                            + "Value: %{value:,.0f}<br>"
+                            + "Share of baseline: %{percentRoot:.1%}<extra></extra>"
+                    ),
+                )
+            )
+
+            fig.update_layout(
+                title=dict(text=title, x=0.02, xanchor="left"),
+                margin=dict(l=10, r=10, t=45, b=10),
+                uniformtext=dict(minsize=10, mode="hide"),
+                annotations=[
+                    dict(
+                        text=(
+                            f"<b>Baseline</b><br>{baseline_disp}<br>"
+                            f"<b>Deployed</b><br>{dep_disp}<br>"
+                            f"<b>Recovered</b><br>{rec_disp}<br>"
+                            f"<b>Remaining</b><br>{rem_disp}"
+                        ),
+                        x=0.5, y=0.5, showarrow=False,
+                        align="center",
+                        font=dict(size=12, color="#111827"),
+                    )
+                ],
+            )
+
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Plotly rendering error (Sunburst).",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if is_show:
+            fig.show()
+            return None
+
+        if json_return:
+            return fig.to_json()
+
+        return fig
+
+    def layer_donut_deploy_recovery_by_rov_plotly(self, is_show=False, json_return=False):
+        """
+        5-ring Sunburst + legend:
+          Ring 1: Baseline (RPPreplot COUNT(*))
+          Ring 2: Deployed vs Remaining baseline
+          Ring 3: Deployed by ROV (Stations per ROV)
+          Ring 4: For each ROV -> Recovered vs Still Deployed
+          Ring 5: (implicit) already per ROV (Recovered/Still are children under each ROV)
+
+        Shows:
+          - labels + % of baseline in sectors
+          - hover: value + % baseline + % parent
+          - legend: ROV colors + recovered/still colors
+
+        NOTE: If baseline is nodes, better use Nodes/RECNodes instead of Stations/RECStations.
+        Requires module-level: import plotly.graph_objects as go
+        """
+
+        sql = """
+        SELECT
+            TRIM(Rov) AS Rov,
+            COALESCE(Stations, 0)    AS Stations,
+            COALESCE(RECStations, 0) AS RECStations
+        FROM DEPLOY_ROV_Summary
+        WHERE Rov IS NOT NULL
+          AND TRIM(Rov) <> ''
+          AND TRIM(Rov) <> 'Total'
+        ORDER BY Rov
+        """
+
+        sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
+
+        try:
+            if hasattr(self, "_connect") and callable(getattr(self, "_connect")):
+                with self._connect() as conn:
+                    df = pd.read_sql(sql, conn)
+                    base_df = pd.read_sql(sql_base, conn)
+            else:
+                df = pd.read_sql(sql, self.db)
+                base_df = pd.read_sql(sql_base, self.db)
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Database query error while reading DEPLOY_ROV_Summary / RPPreplot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if df is None or len(df) == 0:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="DEPLOY_ROV_Summary returned no ROV rows.",
+                details="Check DEPLOY_ROV_Summary view and ensure Rov rows exist (not only Total).",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            baseline = int(base_df.iloc[0]["Total"]) if (base_df is not None and len(base_df) > 0) else 0
+            baseline = int(baseline) if baseline else 0
+        except Exception:
+            baseline = 0
+
+        if baseline <= 0:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Baseline is zero (RPPreplot COUNT(*) = 0).",
+                details="Load RPPreplot to define 100% baseline.",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            df["Rov"] = df["Rov"].astype(str).str.strip()
+            df["Stations"] = pd.to_numeric(df["Stations"], errors="coerce").fillna(0).astype("float64").clip(lower=0)
+            df["RECStations"] = pd.to_numeric(df["RECStations"], errors="coerce").fillna(0).astype("float64").clip(
+                lower=0)
+
+            df = df[df["Rov"] != ""]
+            if len(df) == 0:
+                return self._error_layout(
+                    title="Layer donut failed",
+                    message="ROV rows became empty after cleaning.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=False,
+                )
+
+            # Clamp REC per ROV to not exceed deployed per ROV
+            df["RECStations"] = df[["RECStations", "Stations"]].min(axis=1)
+
+            deployed_total = float(df["Stations"].sum())
+            remaining_baseline = float(max(0.0, baseline - deployed_total))
+            over_baseline = deployed_total > baseline
+
+            rovs = df["Rov"].tolist()
+            dep_by_rov = [float(x) for x in df["Stations"].tolist()]
+            rec_by_rov = [float(x) for x in df["RECStations"].tolist()]
+            still_by_rov = [float(x) for x in (df["Stations"] - df["RECStations"]).tolist()]
+
+            baseline_disp = format(int(baseline), ",")
+            dep_disp = format(int(deployed_total), ",")
+            rem_disp = format(int(remaining_baseline), ",")
+
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Data preparation error.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        try:
+            labels = []
+            parents = []
+            values = []
+            colors = []
+
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            rov_colors = [palette[i % len(palette)] for i in range(len(rovs))]
+
+            # Ring 1
+            labels.append("Baseline")
+            parents.append("")
+            values.append(float(baseline))
+            colors.append("#0b1220")
+
+            # Ring 2
+            labels += ["Deployed", "Remaining"]
+            parents += ["Baseline", "Baseline"]
+            values += [float(deployed_total), float(remaining_baseline)]
+            colors += ["#2563eb", "#e5e7eb"]
+
+            # Ring 3 + 4 per ROV
+            for rov, dep, rec, still, c in zip(rovs, dep_by_rov, rec_by_rov, still_by_rov, rov_colors):
+                rov_node = f"{rov}"
+                labels.append(rov_node)
+                parents.append("Deployed")
+                values.append(float(dep))
+                colors.append(c)
+
+                labels.append(f"{rov}<br> • Rec.")
+                parents.append(rov_node)
+                values.append(float(rec))
+                colors.append("#22c55e")
+
+                labels.append(f"{rov}<br> • Dep.")
+                parents.append(rov_node)
+                values.append(float(still))
+                colors.append("#f59e0b")
+
+            title = "Deployment / Recovery by ROV"
+            if over_baseline:
+                title = "Deployment / Recovery by ROV (Deployed > Baseline)"
+
+            fig = go.Figure(
+                go.Sunburst(
+                    labels=labels,
+                    parents=parents,
+                    values=values,
+                    branchvalues="total",
+                    maxdepth=5,
+                    marker=dict(colors=colors, line=dict(color="white", width=1)),
+
+                    # Show label + % of baseline in sectors
+                    textinfo="label+percent root",
+                    insidetextorientation="radial",
+
+                    hovertemplate=(
+                            "<b>%{label}</b><br>"
+                            + "Value: %{value:,.0f}<br>"
+                            + "Percent of baseline: %{percentRoot:.1%}<br>"
+                            + "Percent of parent: %{percentParent:.1%}"
+                            + "<extra></extra>"
+                    ),
+                )
+            )
+
+            # Add a legend using invisible scatter traces
+            for rov, c in zip(rovs, rov_colors):
+                fig.add_trace(
+                    go.Scatter(
+                        x=[None],
+                        y=[None],
+                        mode="markers",
+                        marker=dict(size=10, color=c),
+                        name=rov,
+                        showlegend=True,
+                    )
+                )
+
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(size=10, color="#22c55e"),
+                name="Recovered",
+                showlegend=True
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(size=10, color="#f59e0b"),
+                name="Deployed",
+                showlegend=True
+            ))
+
+            fig.update_layout(
+                title=dict(text=title, x=0.02, xanchor="left"),
+                margin=dict(l=10, r=10, t=45, b=40),
+                uniformtext=dict(minsize=10, mode="show"),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.12,
+                    xanchor="left",
+                    x=0,
+                ),
+                annotations=[
+                    dict(
+                        text=(
+                            f"<b>Baseline</b><br>{baseline_disp}<br>"
+                            f"<b>Deployed</b><br>{dep_disp}<br>"
+                            f"<b>Remaining</b><br>{rem_disp}"
+                        ),
+                        x=0.5, y=0.5, showarrow=False,
+                        align="center",
+                        font=dict(size=12, color="#111827"),
+                    )
+                ],
+            )
+
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Plotly rendering error (Sunburst).",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if is_show:
+            fig.show()
+            return None
+
+        if json_return:
+            return fig.to_json()
+
+        return fig
+
+    def layer_donut_deploy_and_recovery_plotly(self, is_show=False, json_return=False):
+        """
+        5-ring Sunburst (as requested):
+
+          Ring 1: Baseline (RPPreplot COUNT(*))
+
+          Ring 2: Deployed vs RemainingBaseline
+                  Deployed = SUM(Stations)
+                  RemainingBaseline = baseline - SUM(Stations)
+
+          Ring 3: Deployed by ROV (Stations per Rov)
+
+          Ring 4: Under each ROV: Recovered vs Still (Recovered uses RECStations)
+                  RecoveredROV = RECStations (clamped <= Stations)
+                  StillROV = Stations - RECStations
+
+          Ring 5: Recovered by ROV (RECStations per Rov)
+                  (This is the "Recovered" child under each ROV; it is already per ROV)
+
+        NOTE: If your baseline is nodes, strongly consider switching Stations/RECStations to Nodes/RECNodes.
+        Requires module-level: import plotly.graph_objects as go
+        """
+
+        sql = """
+        SELECT
+            TRIM(Rov) AS Rov,
+            COALESCE(Stations, 0)    AS Stations,
+            COALESCE(RECStations, 0) AS RECStations
+        FROM DEPLOY_ROV_Summary
+        WHERE Rov IS NOT NULL
+          AND TRIM(Rov) <> ''
+          AND TRIM(Rov) <> 'Total'
+        ORDER BY Rov
+        """
+
+        sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
+
+        # ---- read
+        try:
+            if hasattr(self, "_connect") and callable(getattr(self, "_connect")):
+                with self._connect() as conn:
+                    df = pd.read_sql(sql, conn)
+                    base_df = pd.read_sql(sql_base, conn)
+            else:
+                df = pd.read_sql(sql, self.db)
+                base_df = pd.read_sql(sql_base, self.db)
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Database query error while reading DEPLOY_ROV_Summary / RPPreplot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if df is None or len(df) == 0:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="DEPLOY_ROV_Summary returned no ROV rows.",
+                details="Check DEPLOY_ROV_Summary view and ensure Rov rows exist (not only Total).",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        # ---- baseline
+        try:
+            baseline = int(base_df.iloc[0]["Total"]) if (base_df is not None and len(base_df) > 0) else 0
+            baseline = int(baseline) if baseline else 0
+        except Exception:
+            baseline = 0
+
+        if baseline <= 0:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Baseline is zero (RPPreplot COUNT(*) = 0).",
+                details="Load RPPreplot to define 100% baseline.",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        # ---- normalize + compute
+        try:
+            df["Rov"] = df["Rov"].astype(str).str.strip()
+            df["Stations"] = pd.to_numeric(df["Stations"], errors="coerce").fillna(0).astype("float64").clip(lower=0)
+            df["RECStations"] = pd.to_numeric(df["RECStations"], errors="coerce").fillna(0).astype("float64").clip(
+                lower=0)
+
+            df = df[df["Rov"] != ""]
+            if len(df) == 0:
+                return self._error_layout(
+                    title="Layer donut failed",
+                    message="ROV rows became empty after cleaning.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=False,
+                )
+
+            # Clamp recovered per ROV so it cannot exceed deployed per ROV
+            df["RECStations"] = df[["RECStations", "Stations"]].min(axis=1)
+            df["StillStations"] = (df["Stations"] - df["RECStations"]).clip(lower=0)
+
+            deployed_total = float(df["Stations"].sum())
+            remaining_baseline = float(max(0.0, baseline - deployed_total))
+            over_baseline = deployed_total > baseline
+
+            rovs = df["Rov"].tolist()
+            dep_by_rov = [float(x) for x in df["Stations"].tolist()]
+            rec_by_rov = [float(x) for x in df["RECStations"].tolist()]
+            still_by_rov = [float(x) for x in df["StillStations"].tolist()]
+
+            # (Optional) totals for center annotation
+            recovered_total = float(sum(rec_by_rov))
+            still_total = float(sum(still_by_rov))
+
+            baseline_disp = format(int(baseline), ",")
+            dep_disp = format(int(deployed_total), ",")
+            rem_disp = format(int(remaining_baseline), ",")
+            rec_disp = format(int(recovered_total), ",")
+            still_disp = format(int(still_total), ",")
+
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Data preparation error.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        # ---- build sunburst
+        try:
+            labels = []
+            parents = []
+            values = []
+            colors = []
+
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            rov_colors = [palette[i % len(palette)] for i in range(len(rovs))]
+
+            # Ring 1
+            labels.append("Baseline")
+            parents.append("")
+            values.append(float(baseline))
+            colors.append("#0b1220")
+
+            # Ring 2
+            labels += ["Deployed", "Remaining"]
+            parents += ["Baseline", "Baseline"]
+            values += [float(deployed_total), float(remaining_baseline)]
+            colors += ["#2563eb", "#e5e7eb"]
+
+            # Ring 3 + Ring 4/5 per ROV
+            for rov, dep, rec, still, c in zip(rovs, dep_by_rov, rec_by_rov, still_by_rov, rov_colors):
+                rov_node = f"{rov}"
+                labels.append(rov_node)
+                parents.append("Deployed")
+                values.append(float(dep))
+                colors.append(c)
+
+                # Ring 4 under each ROV
+                rec_node = f"{rov} • Recovered"
+                still_node = f"{rov} • Still"
+
+                labels.append(rec_node)
+                parents.append(rov_node)
+                values.append(float(rec))
+                colors.append("#22c55e")  # recovered green
+
+                labels.append(still_node)
+                parents.append(rov_node)
+                values.append(float(still))
+                colors.append("#f59e0b")  # still amber
+
+                # Ring 5 "Recovered by ROV" is already represented by rec_node (it is per ROV).
+                # If you want an extra 5th ring OUTSIDE recovered (needs another dimension),
+                # tell me what you want to split recovery by (day/line/vessel/etc.).
+
+            title = "Deployed / Recovered (by ROV)"
+            if over_baseline:
+                title = "Deployed / Recovered (by ROV) (Deployed > Baseline)"
+
+            fig = go.Figure(
+                go.Sunburst(
+                    labels=labels,
+                    parents=parents,
+                    values=values,
+                    branchvalues="total",
+                    maxdepth=5,
+                    marker=dict(colors=colors, line=dict(color="white", width=1)),
+                    insidetextorientation="radial",
+                    textinfo="label+percent root",
+                    hovertemplate=(
+                            "<b>%{label}</b><br>"
+                            + "Value: %{value:,.0f}<br>"
+                            + "Percent of baseline: %{percentRoot:.1%}<br>"
+                            + "Percent of parent: %{percentParent:.1%}"
+                            + "<extra></extra>"
+                    ),
+                )
+            )
+
+            # Legend workaround (Sunburst has no native legend)
+            for rov, c in zip(rovs, rov_colors):
+                fig.add_trace(
+                    go.Scatter(
+                        x=[None], y=[None],
+                        mode="markers",
+                        marker=dict(size=10, color=c),
+                        name=rov,
+                        showlegend=True,
+                    )
+                )
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(size=10, color="#22c55e"),
+                name="Recovered",
+                showlegend=True
+            ))
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(size=10, color="#f59e0b"),
+                name="Still Deployed",
+                showlegend=True
+            ))
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(size=10, color="#e5e7eb"),
+                name="Remaining baseline",
+                showlegend=True
+            ))
+
+            fig.update_layout(
+                title=dict(text=title, x=0.02, xanchor="left"),
+                margin=dict(l=10, r=10, t=45, b=50),
+                uniformtext=dict(minsize=10, mode="show"),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.18,
+                    xanchor="left",
+                    x=0,
+                ),
+                annotations=[
+                    dict(
+                        text=(
+                            f"<b>Baseline</b><br>{baseline_disp}<br>"
+                            f"<b>Deployed</b><br>{dep_disp}<br>"
+                            f"<b>Recovered</b><br>{rec_disp}<br>"
+                            f"<b>Still</b><br>{still_disp}<br>"
+                            f"<b>Remaining</b><br>{rem_disp}"
+                        ),
+                        x=0.5, y=0.5, showarrow=False,
+                        align="center",
+                        font=dict(size=12, color="#111827"),
+                    )
+                ],
+            )
+
+        except Exception as e:
+            return self._error_layout(
+                title="Layer donut failed",
+                message="Plotly rendering error (Sunburst).",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if is_show:
+            fig.show()
+            return None
+
+        if json_return:
+            return fig.to_json()
+
+        return fig
+
+    def sunburst_prod_3layers_plotly(
+            self,
+            metric="Stations",
+            title=None,
+            labels=None,
+            is_show=False,
+            json_return=False,
+    ):
+        """
+        Universal Sunburst (3 layers):
+          Ring 1: Baseline = RPPreplot COUNT(*)
+          Ring 2: Total(metric) vs Remaining = baseline - SUM(metric)
+          Ring 3: metric by ROV
+
+        Parameters
+        ----------
+        metric : str
+            Column name from DEPLOY_ROV_Summary (e.g. "Stations", "RECStations", "Nodes", "RECNodes", ...)
+        title : str | None
+            Optional plot title override. If None -> auto based on metric.
+        labels : dict | None
+            Optional label overrides:
+              {
+                "baseline": "Baseline",
+                "total": "Deployment",      # the ring-2 total label
+                "remaining": "Remaining",
+                "unit": "stations",         # used in hover (optional)
+              }
+            If None -> auto based on metric.
+        is_show : bool
+            If True -> fig.show() and returns None
+        json_return : bool
+            If True -> returns fig.to_json() (Plotly JSON)
+
+        Requires module-level: import plotly.graph_objects as go
+        """
+
+        allowed_metrics = {
+            "Lines", "Stations", "Nodes", "Days",
+            "RECLines", "RECStations", "RECNodes", "RECDays",
+            "ProcLines", "ProcStations", "ProcNodes", "ProcDays",
+            "SMDepLines", "SMDepStations", "SMDepNodes",
+            "SMColLine", "SMColStations", "SMColNodes",
+            "SMPULines", "SMPUStations", "SMPUNodes",
+        }
+        if metric not in allowed_metrics:
+            return self._plotly_error_html(
+                title="Sunburst failed",
+                message=f"Unsupported metric: {metric}",
+                details=f"Allowed: {', '.join(sorted(allowed_metrics))}",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        # ---- auto naming based on metric
+        m = str(metric).strip()
+        m_upper = m.upper()
+
+        # heuristics
+        is_recovery = m_upper.startswith("REC") or m_upper.endswith("REC") or "REC" in m_upper
+        is_processed = m_upper.startswith("PROC") or "PROC" in m_upper
+        is_sm = m_upper.startswith("SM")
+
+        if is_recovery:
+            default_total = "Recovery"
+        elif is_processed:
+            default_total = "Processed"
+        elif is_sm:
+            default_total = "SM"
+        else:
+            default_total = "Deployment"
+
+        default_title = f"{default_total} — {m}"
+
+        # defaults for labels
+        lbl = {
+            "baseline": "Baseline",
+            "total": default_total,
+            "remaining": "Remaining",
+            "unit": m,  # shown in hover
+        }
+        if isinstance(labels, dict):
+            lbl.update({k: v for k, v in labels.items() if v is not None})
+
+        if title is None:
+            title = default_title
+
+        sql_rov = f"""
+        SELECT
+            TRIM(Rov) AS Rov,
+            COALESCE({m}, 0) AS Val
+        FROM DEPLOY_ROV_Summary
+        WHERE Rov IS NOT NULL
+          AND TRIM(Rov) <> ''
+          AND TRIM(Rov) <> 'Total'
+        ORDER BY Rov
+        """
+
+        sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
+
+        # ---- read
+        try:
+            if hasattr(self, "_connect") and callable(getattr(self, "_connect")):
+                with self._connect() as conn:
+                    df = pd.read_sql(sql_rov, conn)
+                    base_df = pd.read_sql(sql_base, conn)
+            else:
+                df = pd.read_sql(sql_rov, self.db)
+                base_df = pd.read_sql(sql_base, self.db)
+        except Exception as e:
+            return self._plotly_error_html(
+                title="Sunburst failed",
+                message="Database query error while reading DEPLOY_ROV_Summary / RPPreplot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if df is None or len(df) == 0:
+            return self._plotly_error_html(
+                title="Sunburst failed",
+                message="DEPLOY_ROV_Summary returned no ROV rows.",
+                details="Check DEPLOY_ROV_Summary view and ensure Rov rows exist (not only Total).",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        # ---- baseline
+        try:
+            baseline = int(base_df.iloc[0]["Total"]) if (base_df is not None and len(base_df) > 0) else 0
+            baseline = int(baseline) if baseline else 0
+        except Exception:
+            baseline = 0
+
+        if baseline <= 0:
+            return self._plotly_error_html(
+                title="Sunburst failed",
+                message="Baseline is zero (RPPreplot COUNT(*) = 0).",
+                details="Load RPPreplot to define 100% baseline.",
+                level="warning",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        # ---- normalize + compute
+        try:
+            df["Rov"] = df["Rov"].astype(str).str.strip()
+            df["Val"] = pd.to_numeric(df["Val"], errors="coerce").fillna(0).astype("float64").clip(lower=0)
+            df = df[df["Rov"] != ""]
+            if len(df) == 0:
+                return self._plotly_error_html(
+                    title="Sunburst failed",
+                    message="ROV rows became empty after cleaning.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=False,
+                )
+
+            rovs = df["Rov"].tolist()
+            rov_vals = [float(v) for v in df["Val"].tolist()]
+
+            total_val = float(sum(rov_vals))
+            remaining_val = float(max(0.0, baseline - total_val))
+
+            over = total_val > baseline
+            if over:
+                remaining_val = 0.0
+
+            baseline_disp = format(int(baseline), ",")
+            total_disp = format(int(total_val), ",")
+            remaining_disp = format(int(remaining_val), ",")
+
+        except Exception as e:
+            return self._plotly_error_html(
+                title="Sunburst failed",
+                message="Data preparation error.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        # ---- build sunburst (3 layers)
+        try:
+            # Hierarchy:
+            # baseline
+            #   total
+            #     rovs...
+            #   remaining
+            labels_sb = [lbl["baseline"], lbl["total"], lbl["remaining"]] + rovs
+            parents_sb = ["", lbl["baseline"], lbl["baseline"]] + ([lbl["total"]] * len(rovs))
+            values_sb = [float(baseline), float(total_val), float(remaining_val)] + rov_vals
+
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                "#bcbd22", "#17becf"
+            ]
+            rov_colors = [palette[i % len(palette)] for i in range(len(rovs))]
+
+            # color for total depends on meaning (deployment/recovery/processed/etc.)
+            total_color_map = {
+                "Deployment": "#2563eb",
+                "Recovery": "#22c55e",
+                "Processed": "#a855f7",
+                "SM": "#f97316",
+            }
+            total_color = total_color_map.get(lbl["total"], "#2563eb")
+
+            colors_sb = [
+                            "#0b1220",  # baseline
+                            total_color,  # total
+                            "#e5e7eb",  # remaining
+                        ] + rov_colors
+
+            final_title = title
+            if over:
+                final_title = f"{title} (Total > Baseline)"
+
+            fig = go.Figure(
+                go.Sunburst(
+                    labels=labels_sb,
+                    parents=parents_sb,
+                    values=values_sb,
+                    branchvalues="total",
+                    maxdepth=3,
+                    marker=dict(colors=colors_sb, line=dict(color="white", width=1)),
+                    insidetextorientation="radial",
+                    textinfo="label+percent root",
+                    hovertemplate=(
+                            "<b>%{label}</b><br>"
+                            + f"{lbl['unit']}: %{{value:,.0f}}<br>"
+                            + "Percent of baseline: %{percentRoot:.1%}<br>"
+                            + "Percent of parent: %{percentParent:.1%}"
+                            + "<extra></extra>"
+                    ),
+                )
+            )
+
+            # Legend workaround (Sunburst has no native legend)
+            for rov, c in zip(rovs, rov_colors):
+                fig.add_trace(go.Scatter(
+                    x=[None], y=[None],
+                    mode="markers",
+                    marker=dict(size=10, color=c),
+                    name=rov,
+                    showlegend=True
+                ))
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(size=10, color=total_color),
+                name=lbl["total"],
+                showlegend=True
+            ))
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(size=10, color="#e5e7eb"),
+                name=lbl["remaining"],
+                showlegend=True
+            ))
+
+            fig.update_layout(
+                title=dict(text=final_title, x=0.02, xanchor="left"),
+                margin=dict(l=10, r=10, t=45, b=55),
+                uniformtext=dict(minsize=10, mode="show"),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.18,
+                    xanchor="left",
+                    x=0,
+                ),
+                annotations=[
+                    dict(
+                        text=(
+                            f"<b>{lbl['baseline']}</b><br>{baseline_disp}<br>"
+                            f"<b>{lbl['total']}</b><br>{total_disp}<br>"
+                            f"<b>{lbl['remaining']}</b><br>{remaining_disp}"
+                        ),
+                        x=0.5, y=0.5, showarrow=False,
+                        align="center",
+                        font=dict(size=12, color="#111827"),
+                    )
+                ],
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                template="plotly_dark",
+                paper_bgcolor="#111827",  # outer background
+                plot_bgcolor="#111827",  # inner background
+                font=dict(color="white"),
+            )
+
+        except Exception as e:
+            return self._plotly_error_html(
+                title="Sunburst failed",
+                message="Plotly rendering error (Sunburst).",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=False,
+            )
+
+        if is_show:
+            fig.show()
+            return None
+        elif json_return:
+            return fig.to_json()
+        else:
+            plot_html = fig.to_html(
+            full_html=False,
+            include_plotlyjs="cdn",
+            config={"responsive": True})
+            return plot_html
+
+    def build_offsets_histograms_by_rov(
+            self,
+            dsr_df,
+            *,
+            rov_col="ROV",
+            inline_col="PriOffInline",
+            xline_col="PriOffXline",
+            radial_col="PriOffDist",
+            bins=60,
+            title_prefix="Offsets",
+            show_mean_line=True,
+            show_std_lines=True,
+            std_k=1.0,
+            show_kde=True,
+            kde_points=300,
+            kde_bw="scott",
+            max_offset=None,  # <--- NEW (float). If set:
+            #      inline/xline: [-max_offset, +max_offset]
+            #      radial:       [0, max_offset]
+            is_show=False,
+            json_import=False,
+            target_id="dsr_offsets_hist",
+    ):
+        def _error_layout(msg, exc=None):
+            txt = f"<b>Offsets histograms error</b><br>{msg}"
+            if exc is not None:
+                txt += f"<br><pre>{str(exc)}</pre>"
+            return Div(text=txt, sizing_mode="stretch_both")
+
+        try:
+            if dsr_df is None or len(dsr_df) == 0:
+                layout = _error_layout("Empty dataframe.")
+                if json_import:
+                    return json_item(layout, target_id)
+                if is_show:
+                    show(layout)
+                return layout
+
+            for c in (rov_col, inline_col, xline_col, radial_col):
+                if c not in dsr_df.columns:
+                    raise ValueError(f"Missing column '{c}' in dsr_df")
+
+            df = dsr_df.copy()
+            df[inline_col] = pd.to_numeric(df[inline_col], errors="coerce")
+            df[xline_col] = pd.to_numeric(df[xline_col], errors="coerce")
+            df[radial_col] = pd.to_numeric(df[radial_col], errors="coerce")
+
+            df[rov_col] = df[rov_col].astype(str).fillna("")
+            df = df[df[rov_col].str.strip() != ""]
+            if len(df) == 0:
+                layout = _error_layout(f"Column '{rov_col}' is empty after filtering.")
+                if json_import:
+                    return json_item(layout, target_id)
+                if is_show:
+                    show(layout)
+                return layout
+
+            def _finite(v):
+                v = np.asarray(v, dtype="float64")
+                return v[np.isfinite(v)]
+
+            def _nonzero_bins_range(values, *, nbins, fallback_pad=1.0):
+                v = _finite(values)
+                if len(v) == 0:
+                    return (-fallback_pad, fallback_pad), None, None
+
+                lo = float(np.min(v))
+                hi = float(np.max(v))
+                if lo == hi:
+                    pad = fallback_pad if lo == 0 else abs(lo) * 0.05
+                    lo, hi = lo - pad, hi + pad
+
+                counts, edges = np.histogram(v, bins=nbins, range=(lo, hi))
+                nz = np.where(counts > 0)[0]
+                if nz.size == 0:
+                    return (lo, hi), edges, counts
+
+                i0 = int(nz[0])
+                i1 = int(nz[-1])
+                x_min = float(edges[i0])
+                x_max = float(edges[i1 + 1])
+
+                if x_min == x_max:
+                    pad = fallback_pad if x_min == 0 else abs(x_min) * 0.05
+                    x_min, x_max = x_min - pad, x_max + pad
+
+                return (x_min, x_max), edges, counts
+
+            # ---- shared X ranges per column
+            if max_offset is not None:
+                try:
+                    mo = float(max_offset)
+                except Exception:
+                    raise ValueError("max_offset must be a number or None")
+                if not np.isfinite(mo) or mo <= 0:
+                    raise ValueError("max_offset must be > 0")
+
+                inline_range = Range1d(-mo, +mo)
+                xline_range = Range1d(-mo, +mo)
+                radial_range = Range1d(0.0, mo)
+            else:
+                inline_x, _, _ = _nonzero_bins_range(df[inline_col].to_numpy(dtype="float64"), nbins=bins)
+                xline_x, _, _ = _nonzero_bins_range(df[xline_col].to_numpy(dtype="float64"), nbins=bins)
+                radial_x, _, _ = _nonzero_bins_range(df[radial_col].to_numpy(dtype="float64"), nbins=bins)
+
+                inline_range = Range1d(inline_x[0], inline_x[1])
+                xline_range = Range1d(xline_x[0], xline_x[1])
+                radial_range = Range1d(radial_x[0], radial_x[1])
+
+            # -------- KDE helper (no scipy)
+            def _kde_xy(values, x_min, x_max, n_points=300, bw="scott"):
+                v = _finite(values)
+                n = len(v)
+                if n < 2:
+                    return None
+
+                std = float(np.std(v, ddof=1))
+                if std <= 0:
+                    return None
+
+                if isinstance(bw, (int, float)) and bw > 0:
+                    h = float(bw)
+                else:
+                    h = std * (n ** (-0.2))  # Scott
+
+                if not np.isfinite(h) or h <= 0:
+                    return None
+
+                x = np.linspace(float(x_min), float(x_max), int(n_points))
+                z = (x[:, None] - v[None, :]) / h
+                density = np.mean(np.exp(-0.5 * z * z), axis=1) / (h * np.sqrt(2.0 * np.pi))
+                return x, density
+
+            def _hist_fig(values, title, shared_range):
+                values = _finite(values)
+
+                # clip to x-range so histogram/KDE reflect chosen max_offset window
+                x0 = float(shared_range.start)
+                x1 = float(shared_range.end)
+                if len(values) > 0:
+                    values = values[(values >= x0) & (values <= x1)]
+
+                p = figure(
+                    title=title,
+                    sizing_mode="stretch_both",
+                    x_range=shared_range,
+                    tools="pan,wheel_zoom,box_zoom,reset,save",
+                )
+                p.xaxis.axis_label = "Offset"
+                p.yaxis.axis_label = "Number of Nodes"
+
+                if len(values) == 0:
+                    return p
+
+                counts, edges = np.histogram(values, bins=bins, range=(x0, x1))
+
+                # remove zero bins (do not draw)
+                mask = counts > 0
+                if np.any(mask):
+                    left = edges[:-1][mask]
+                    right = edges[1:][mask]
+                    top = counts[mask]
+                    src = ColumnDataSource(dict(left=left, right=right, top=top))
+                    p.quad(left="left", right="right", bottom=0, top="top", source=src)
+
+                bin_w = float(edges[1] - edges[0]) if len(edges) > 1 else 1.0
+
+                m = float(np.mean(values))
+                s = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+
+                if show_mean_line and np.isfinite(m):
+                    p.add_layout(
+                        Span(
+                            location=m,
+                            dimension="height",
+                            line_color="red",
+                            line_width=2,
+                            line_dash="dashed",
+                        )
+                    )
+
+                if show_std_lines and np.isfinite(m) and np.isfinite(s) and s > 0:
+                    for loc in (m - std_k * s, m + std_k * s):
+                        p.add_layout(
+                            Span(
+                                location=float(loc),
+                                dimension="height",
+                                line_color="black",
+                                line_width=1,
+                                line_dash="dotdash",
+                            )
+                        )
+                    p.add_layout(
+                        Label(
+                            x=5,
+                            y=5,
+                            x_units="screen",
+                            y_units="screen",
+                            text=f"μ={m:.2f}  σ={s:.2f}",
+                            text_font_size="9pt",
+                        )
+                    )
+
+                if show_kde and len(values) >= 5:
+                    kde = _kde_xy(values, x0, x1, n_points=kde_points, bw=kde_bw)
+                    if kde is not None:
+                        xk, dk = kde
+                        yk = dk * float(len(values)) * bin_w
+                        p.line(xk, yk, line_width=2)
+
+                return p
+
+            rows = []
+            for rov, g in df.groupby(rov_col, sort=True):
+                p1 = _hist_fig(g[inline_col].to_numpy(dtype="float64"), f"{title_prefix} | {rov} | Inline",
+                               inline_range)
+                p2 = _hist_fig(g[xline_col].to_numpy(dtype="float64"), f"{title_prefix} | {rov} | Xline", xline_range)
+                p3 = _hist_fig(g[radial_col].to_numpy(dtype="float64"), f"{title_prefix} | {rov} | RadialOffset",
+                               radial_range)
+                rows.append([p1, p2, p3])
+
+            layout = gridplot(rows, sizing_mode="stretch_both", merge_tools=True) if rows else _error_layout(
+                "No groups found.")
+            if is_show:
+                show(layout)
+            if json_import:
+                return json_item(layout, target_id)
+            return layout
+
+        except Exception as e:
+            layout = _error_layout("Unhandled exception while building plots.", e)
+            if json_import:
+                return json_item(layout, target_id)
+            if is_show:
+                show(layout)
+            return layout

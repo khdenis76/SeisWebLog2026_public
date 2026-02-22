@@ -24,4 +24,5 @@ urlpatterns = [
     path("dsr/line.selected",dsr_line_onclick,name="dsr_line_onclick"),
     path("dsr/battery_life/",load_battery_life_map,name="load_battery_life_map"),
     path("dsr/battery_days_left",load_battery_rest_days_map,name="load_battery_rest_days_map"),
+    path("dsr/hist",load_dsr_historgram,name="load_dsr_historgram"),
 ]

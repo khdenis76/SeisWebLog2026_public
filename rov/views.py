@@ -88,8 +88,14 @@ def rov_main_view(request):
         show_shapes=True,
         show_tiles=True,  # if using mercator tiles
     )
-
+    d_dep = dsr_map_plot.day_by_day_deployment(json_return=False)
+    d_rec = dsr_map_plot.day_by_day_recovery(json_return=False)
+    d_dep_script, d_dep_div= components(d_dep)
+    d_rec_script, d_rec_div= components(d_rec)
     pp_map_script, pp_map_div = components(progress_map)
+    deployment_pie = dsr_map_plot.sunburst_prod_3layers_plotly(metric="Stations",title="Node Deployment", labels={"total": "Deployment"},json_return=False)
+    recovery_pie = dsr_map_plot.sunburst_prod_3layers_plotly(metric="RECStations", title="Node Recovery",
+                                                               labels={"total": "Recovery"}, json_return=False)
     dsr_lines_body = dsrdb.render_dsr_line_summary_body()
     bbox_fields_selectors = dsrdb.get_config_selector_table()
     bbox_config_list = dsrdb.get_bbox_configs_list()
@@ -110,6 +116,12 @@ def rov_main_view(request):
                    "dsr_statistics_table":dsr_statistics_table,
                    "pp_map_script":pp_map_script,
                    "pp_map_div":pp_map_div,
+                   "d_dep_script":d_dep_script,
+                   "d_dep_div":d_dep_div,
+                   "d_rec_div":d_rec_div,
+                   "d_rec_script":d_rec_script,
+                   "deployment_pie":deployment_pie,
+                   "recovery_pie":recovery_pie,
                    })
 @require_POST
 @login_required
@@ -1139,4 +1151,49 @@ def load_battery_rest_days_map(request):
     )
     bl_json_map = json_item(bl_map)
     return JsonResponse({"ok": True, "map": bl_json_map})
+@login_required
+@require_POST
+def load_dsr_historgram (request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    payload = json.loads(request.body.decode("utf-8"))
+    bins = int(payload.get("bins", 40))
+    max_offset = int(payload.get("max_offset", 150))
+    kde = bool(payload.get("kde", True))
+    std = bool(payload.get("std", True))
+    is_show = bool(payload.get("is_show", True))
 
+    pdb=ProjectDB(project.db_path)
+    dsr_plot = DSRMapPlots(project.db_path, default_epsg=pdb.get_main().epsg, use_tiles=True)
+    rp_data = dsr_plot.read_rp_preplot()
+    dsr_data = dsr_plot.read_dsr()
+    dsr_data = dsr_plot.add_inline_xline_offsets(
+        dsr_data, rp_data,
+        from_xy=("PreplotEasting", "PreplotNorthing"),
+        to_xy=("PrimaryEasting", "PrimaryNorthing"),
+        out_prefix="Pri"
+    )
+    dsr_data = dsr_plot.add_inline_xline_offsets(
+        dsr_data, rp_data,
+        from_xy=("PreplotEasting", "PreplotNorthing"),
+        to_xy=("SecondaryEasting", "SecondaryNorthing"),
+        out_prefix="Pri"
+    )
+    hist = dsr_plot.build_offsets_histograms_by_rov(
+        dsr_data,
+        rov_col="ROV",
+        inline_col="PriOffInline",
+        xline_col="PriOffXline",
+        radial_col="RangetoPrePlot",
+        bins=bins,
+        show_mean_line=True,
+        title_prefix="Offsets",
+        is_show=False,
+        json_import=False,
+        target_id="dsr_offsets_hist",
+        max_offset=max_offset,
+    )
+
+    return JsonResponse({"ok": True, "hist": json_item(hist)})

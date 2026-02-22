@@ -342,8 +342,8 @@ class ProjectDb:
             win = conn.execute(
                 """
                 SELECT
-                    MIN(datetime(Date1)) AS TMin,
-                    MAX(datetime(Date1)) AS TMax
+                    MIN(datetime(TimeStamp)) AS TMin,
+                    MAX(datetime(TimeStamp)) AS TMax
                 FROM DSR
                 WHERE Line = ?
                   AND Date1 IS NOT NULL

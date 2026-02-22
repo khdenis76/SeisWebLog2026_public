@@ -11,6 +11,53 @@ project_db_path="D:\\04_TEST_DATA\\AW1\\data\\project.sqlite3"
 dsr_plot = DSRMapPlots(project_db_path,default_epsg=32615,use_tiles=True)
 rp_data = dsr_plot.read_rp_preplot()
 dsr_data = dsr_plot.read_dsr()
+dsr_data = dsr_plot.add_inline_xline_offsets(
+    dsr_data,rp_data,
+    from_xy=("PreplotEasting", "PreplotNorthing"),
+    to_xy=("PrimaryEasting", "PrimaryNorthing"),
+    out_prefix="Pri"
+)
+dsr_data = dsr_plot.add_inline_xline_offsets(
+    dsr_data,rp_data,
+    from_xy=("PreplotEasting", "PreplotNorthing"),
+    to_xy=("SecondaryEasting", "SecondaryNorthing"),
+    out_prefix="Pri"
+)
+dsr_plot.build_offsets_histograms_by_rov(
+            dsr_data,
+            rov_col="ROV",
+            inline_col="PriOffInline",
+            xline_col="PriOffXline",
+            radial_col="RangetoPrePlot",
+            bins=40,
+            show_mean_line=True,
+            title_prefix="Offsets",
+            is_show=True,
+            json_import=False,
+            target_id="dsr_offsets_hist",
+            max_offset=25,
+    )
+"""
+dsr_plot.sunburst_prod_3layers_plotly(
+            metric="RECStations",
+            title="Recovery",
+            labels="Rec",
+            is_show=True,
+            json_return=False,
+    )
+"""
+
+
+#dsr_plot.layer_donut_deploy_and_recovery_plotly(is_show=True)
+
+
+#dsr_plot.layer_donut_deploy_recovery_plotly(is_show=True, json_return=False)
+#dsr_plot.donut_rov_summary_plotly(metric="Stations", is_show=True, json_return=False)
+#dsr_plot.day_by_day_recovery(is_show =True)
+
+"""
+rp_data = dsr_plot.read_rp_preplot()
+dsr_data = dsr_plot.read_dsr()
 rec_db_data = dsr_plot.read_recdb()
 #dsr_plot.make_map(rp_df=rp_data,dsr_df=dsr_data, is_show=True)
 layers = [
@@ -85,3 +132,4 @@ layout = dsr_plot.make_map_multi_layers(
     show_tiles=True,          # if using mercator tiles
     is_show=True
 )
+"""

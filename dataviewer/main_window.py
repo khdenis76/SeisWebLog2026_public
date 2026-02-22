@@ -382,10 +382,39 @@ class MainWindow(QtWidgets.QMainWindow):
                 y_label="Sigma",
                 title=f"Sigma vs Station — Line {line}",
             )
+            # ----------- DEPTH WINDOW -----------
+            key2 = "radial_offset_vs_station"
+            w2 = self.plot_manager.get_or_create(key2, title="Radial Offset", seq=3)
+
+            w2.show()
+            w2.raise_()
+            w2.activateWindow()
+
+            # IMPORTANT: tag window with current line (for red-line updates)
+            w2.state["current_line"] = int(line)
+            w2.state["on_station_selected"] = lambda st: self.on_dsr_station_clicked(line, st)
+
+            # OPTIONAL (uncomment if you want red line cleared when line changes)
+            # prev_line = w.state.get("prev_line")
+            # if prev_line is not None and int(prev_line) != int(line):
+            #     w.state.pop("selected_station", None)
+            #     if "sel_line" in w.items:
+            #         w.items["sel_line"].setVisible(False)
+            # w.state["prev_line"] = int(line)
+
+            PlotFactory.build_two_series_vs_station(
+                w2,
+                depth_df,
+                station_col="Station",  # <-- force Station on X axis (if you want)
+                series1_col="DeltaEprimarytosecondary",
+                series2_col="DeltaNprimarytosecondary",
+                y_label="Radial Offset",
+                title=f"Radial Offset — Line {line}",
+            )
 
             # ✅ Sync X zoom/pan
             w1.plot.setXLink(w.plot)
-
+            w2.plot.setXLink(w.plot)
             # 3) plot primary + secondary on map
             self.plot_dsr_primary_secondary(self.dsr_line_df)
 
@@ -505,7 +534,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # 1) Update red vertical line in BOTH windows
-        for key in ("depth_vs_station", "sigmas_vs_station"):
+        for key in ("depth_vs_station", "sigmas_vs_station","radial_offset_vs_station"):
             w = self.plot_manager.windows.get(key)
             if not w or not hasattr(w, "items"):
                 continue
@@ -564,7 +593,10 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             raise ValueError("Neither Station nor LinePoint found")
         out = (
-            dsr_line_df.groupby(st_col, as_index=False)[["PrimaryElevation", "SecondaryElevation", "Sigma1","Sigma2"]]
+            dsr_line_df.groupby(st_col, as_index=False)[["PrimaryElevation", "SecondaryElevation",
+                                                         "Sigma1","Sigma2",
+                                                         "DeltaEprimarytosecondary","DeltaNprimarytosecondary",
+                                                         "Rangeprimarytosecondary","RangetoPrePlot"]]
             .mean(numeric_only=True)
             .sort_values(st_col)
         )

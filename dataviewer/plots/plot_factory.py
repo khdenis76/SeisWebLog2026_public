@@ -309,23 +309,62 @@ class PlotFactory:
 
         # Create plot items only once
         if "curve1" not in w.items:
-            w.items["curve1"] = pg.PlotDataItem(pen=pg.mkPen(width=2))
-            w.items["curve2"] = pg.PlotDataItem(
-                pen=pg.mkPen(width=2, style=QtCore.Qt.PenStyle.DashLine)
-            )
 
-            w.items["scatter1"] = pg.ScatterPlotItem(size=7, pxMode=True, pen=None)
-            w.items["scatter2"] = pg.ScatterPlotItem(size=7, pxMode=True, pen=None, symbol="t")
+            # --- colors ---
+            red_pen = pg.mkPen((220, 50, 50), width=2)
+            blue_pen = pg.mkPen((50, 120, 220), width=2, style=QtCore.Qt.PenStyle.DashLine)
+
+            red_brush = pg.mkBrush(220, 50, 50)
+            blue_brush = pg.mkBrush(50, 120, 220)
+
+            # Real plotted curves (no symbols here)
+            w.items["curve1"] = pg.PlotDataItem(pen=red_pen)
+            w.items["curve2"] = pg.PlotDataItem(pen=blue_pen)
+
+            # Real clickable scatters
+            w.items["scatter1"] = pg.ScatterPlotItem(size=7, pxMode=True, pen=None, brush=red_brush, symbol="o")
+            w.items["scatter2"] = pg.ScatterPlotItem(size=7, pxMode=True, pen=None, brush=blue_brush, symbol="t")
 
             w.items["sel_line"] = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("red", width=2))
             w.items["sel_line"].setVisible(False)
             w.items["sel_line"].setZValue(10_000)
 
+            # --- legend (once) ---
+            if w.plot.plotItem.legend is None:
+                w.plot.addLegend(offset=(10, 10))
+
+            # Legend-only dummy items to show "line + marker" combined
+            # (do NOT add these to the plot)
+            w.items["legend1"] = pg.PlotDataItem(
+                pen=red_pen,
+                symbol="o",
+                symbolSize=9,
+                symbolBrush=red_brush,
+                symbolPen=None,
+            )
+            w.items["legend2"] = pg.PlotDataItem(
+                pen=blue_pen,
+                symbol="t",
+                symbolSize=9,
+                symbolBrush=blue_brush,
+                symbolPen=None,
+            )
+
+            # Add real items to plot
             w.plot.addItem(w.items["curve1"])
             w.plot.addItem(w.items["curve2"])
             w.plot.addItem(w.items["scatter1"])
             w.plot.addItem(w.items["scatter2"])
             w.plot.addItem(w.items["sel_line"])
+
+            # Fill legend with combined samples
+            try:
+                leg = w.plot.plotItem.legend
+                leg.clear()
+                leg.addItem(w.items["legend1"], series1_name)
+                leg.addItem(w.items["legend2"], series2_name)
+            except Exception:
+                pass
 
             def on_clicked(scatter, points):
                 if not points:
@@ -348,6 +387,17 @@ class PlotFactory:
 
             w.items["scatter1"].sigClicked.connect(on_clicked)
             w.items["scatter2"].sigClicked.connect(on_clicked)
+
+        else:
+            # Update legend labels if names change between calls
+            try:
+                leg = w.plot.plotItem.legend
+                if leg is not None and "legend1" in w.items and "legend2" in w.items:
+                    leg.clear()
+                    leg.addItem(w.items["legend1"], series1_name)
+                    leg.addItem(w.items["legend2"], series2_name)
+            except Exception:
+                pass
 
         # Update data
         if df is None or df.empty:
@@ -388,7 +438,6 @@ class PlotFactory:
         if st is not None:
             try:
                 stf = float(st)
-                # show only if station is in current X-range
                 if len(x) and (x.min() <= stf <= x.max()):
                     w.items["sel_line"].setPos(stf)
                     w.items["sel_line"].setVisible(True)
