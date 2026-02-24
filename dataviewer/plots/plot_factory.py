@@ -71,7 +71,11 @@ class PlotFactory:
 
             connect_points=True,  # enable/disable line drawing
             max_points=1_000_000,
+
+            meta_cols=None,
+            meta_mode="tuple",  # "tuple" | "dict" | "index"
     ):
+        meta_cols = meta_cols or []
         if df is None or df.empty:
             return {
                 "scatter": None,
@@ -90,6 +94,9 @@ class PlotFactory:
         if group_col and group_col not in d.columns:
             raise ValueError(f"Missing group column: {group_col}")
 
+        # Keep only meta columns that exist
+        meta_cols = [c for c in meta_cols if c in d.columns]
+
         # Sorting
         if group_col and order_col and order_col in d.columns:
             d[order_col] = d[order_col].astype(float)
@@ -97,34 +104,44 @@ class PlotFactory:
         elif order_col and order_col in d.columns:
             d = d.sort_values(order_col)
 
-        xs_line = []
-        ys_line = []
-
-        xs_points = []
-        ys_points = []
+        xs_line, ys_line = [], []
+        spots = []  # scatter points with metadata
 
         last_group = None
+        n = 0
 
-        for r in d.itertuples(index=False):
+        # Use itertuples for speed
+        for r in d.itertuples(index=True, name="Row"):
             x = float(getattr(r, x_col))
             y = float(getattr(r, y_col))
 
+            # group breaks for line
             if group_col:
                 group_val = getattr(r, group_col)
-
                 if last_group is not None and group_val != last_group:
                     xs_line.append(float("nan"))
                     ys_line.append(float("nan"))
-
                 last_group = group_val
 
             xs_line.append(x)
             ys_line.append(y)
 
-            xs_points.append(x)
-            ys_points.append(y)
+            # Build metadata payload
+            if meta_mode == "index":
+                payload = int(r.Index)  # original dataframe index
+            elif meta_mode == "dict":
+                payload = {c: getattr(r, c) for c in meta_cols}
+            else:
+                # tuple mode: (colnames stored once on scatter)
+                payload = tuple(getattr(r, c) for c in meta_cols)
 
-            if max_points and len(xs_points) >= max_points:
+            spots.append({
+                "pos": (x, y),
+                "data": payload,
+            })
+
+            n += 1
+            if max_points and n >= max_points:
                 break
 
         # ----- Line -----
@@ -136,21 +153,23 @@ class PlotFactory:
 
             pen = pg.mkPen(**pen_kwargs)
             curve = pg.PlotCurveItem(xs_line, ys_line, pen=pen)
-
             curve.plot_name = plot_name
             curve.plot_id = plot_id
 
         # ----- Scatter -----
         scatter = pg.ScatterPlotItem(
-            x=xs_points,
-            y=ys_points,
             size=point_size,
             symbol=point_shape,
             brush=pg.mkBrush(point_color),
             pen=None,
             pxMode=True,
-            name =plot_name,
+            name=plot_name,
         )
+        scatter.addPoints(spots)
+
+        # store meta schema once (useful for tuple mode)
+        scatter.meta_cols = meta_cols
+        scatter.meta_mode = meta_mode
 
         scatter.plot_name = plot_name
         scatter.plot_id = plot_id

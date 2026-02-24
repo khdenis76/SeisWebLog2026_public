@@ -14,7 +14,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         screen = self.screen() or QtWidgets.QApplication.primaryScreen()
         geo = screen.availableGeometry()
 
-        w = int(geo.width() * 0.30)  # 30% of screen width
+        w = int(geo.width() * 0.45)  # 45% of screen width
         h = int(geo.height() * 0.25)  # 25% of screen height
         self.resize(w, h)
 

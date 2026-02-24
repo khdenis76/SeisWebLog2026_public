@@ -3,7 +3,9 @@ from PySide6 import QtCore, QtWidgets, QtGui
 
 
 class LeftPanel(QtWidgets.QFrame):
+    rpRadiusChanged = QtCore.Signal(float)  # <-- add this
     projectChanged = QtCore.Signal(str)
+    plotsSettingsChanged = QtCore.Signal(dict)
     reloadProjectsClicked = QtCore.Signal()
     dsrLineClicked = QtCore.Signal(int)  # row click -> show details
     dsrSelectionChanged = QtCore.Signal(list)  # checkbox selection -> list of lines
@@ -143,14 +145,134 @@ class LeftPanel(QtWidgets.QFrame):
         tab = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tab)
 
+        # ---------- General ----------
+        general_box = QtWidgets.QGroupBox("General")
+        g = QtWidgets.QVBoxLayout(general_box)
+
         self.chk_dark_mode = QtWidgets.QCheckBox("Dark Mode")
         self.chk_auto_load = QtWidgets.QCheckBox("Auto-load last project")
+        g.addWidget(self.chk_dark_mode)
+        g.addWidget(self.chk_auto_load)
 
-        layout.addWidget(self.chk_dark_mode)
-        layout.addWidget(self.chk_auto_load)
+        # ---------- RP panel ----------
+        rp_box = QtWidgets.QGroupBox("RP")
+        rp = QtWidgets.QFormLayout(rp_box)
+        rp.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        self.spn_rp_radius = QtWidgets.QDoubleSpinBox()
+        self.spn_rp_radius.setRange(0.0, 100000.0)
+        self.spn_rp_radius.setDecimals(1)
+        self.spn_rp_radius.setSingleStep(5.0)
+        self.spn_rp_radius.setValue(25.0)
+
+        self.spn_rp_point_size = QtWidgets.QSpinBox()
+        self.spn_rp_point_size.setRange(1, 50)
+        self.spn_rp_point_size.setSingleStep(1)
+        self.spn_rp_point_size.setValue(6)  # your current RPPreplot size
+
+        rp.addRow("Circle radius (m):", self.spn_rp_radius)
+        rp.addRow("RPPreplot point size:", self.spn_rp_point_size)
+
+        # ---------- DSR panel ----------
+        dsr_box = QtWidgets.QGroupBox("DSR")
+        dsr = QtWidgets.QFormLayout(dsr_box)
+        dsr.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        # plot enable/disable
+        self.chk_dsr_depth = QtWidgets.QCheckBox("Depth window")
+        self.chk_dsr_sigmas = QtWidgets.QCheckBox("Sigmas window")
+        self.chk_dsr_radial = QtWidgets.QCheckBox("Radial Offset window")
+        self.chk_dsr_depth.setChecked(True)
+        self.chk_dsr_sigmas.setChecked(True)
+        self.chk_dsr_radial.setChecked(True)
+
+        # point sizes for map scatters
+        self.spn_dsr_primary_size = QtWidgets.QSpinBox()
+        self.spn_dsr_primary_size.setRange(1, 50)
+        self.spn_dsr_primary_size.setValue(6)
+
+        self.spn_dsr_secondary_size = QtWidgets.QSpinBox()
+        self.spn_dsr_secondary_size.setRange(1, 50)
+        self.spn_dsr_secondary_size.setValue(6)
+
+        dsr.addRow(self.chk_dsr_depth)
+        dsr.addRow(self.chk_dsr_sigmas)
+        dsr.addRow(self.chk_dsr_radial)
+        dsr.addRow("DSR Primary point size:", self.spn_dsr_primary_size)
+        dsr.addRow("DSR Secondary point size:", self.spn_dsr_secondary_size)
+
+        # ---------- BlackBox panel ----------
+        bb_box = QtWidgets.QGroupBox("BlackBox tracks")
+        bb = QtWidgets.QVBoxLayout(bb_box)
+
+        self.chk_bb_vessel = QtWidgets.QCheckBox("Vessel")
+        self.chk_bb_rov1_ins = QtWidgets.QCheckBox("ROV1 INS")
+        self.chk_bb_rov2_ins = QtWidgets.QCheckBox("ROV2 INS")
+        self.chk_bb_rov1_usbl = QtWidgets.QCheckBox("ROV1 USBL")
+        self.chk_bb_rov2_usbl = QtWidgets.QCheckBox("ROV2 USBL")
+
+        for cb in (self.chk_bb_vessel, self.chk_bb_rov1_ins, self.chk_bb_rov2_ins,
+                   self.chk_bb_rov1_usbl, self.chk_bb_rov2_usbl):
+            cb.setChecked(True)
+            bb.addWidget(cb)
+
+        # ---------- Assemble ----------
+        layout.addWidget(general_box)
+        layout.addWidget(rp_box)
+        layout.addWidget(dsr_box)
+        layout.addWidget(bb_box)
         layout.addStretch(1)
 
         self.tabs.addTab(tab, "Settings")
+
+        # ---- wiring
+        self.spn_rp_radius.valueChanged.connect(self.rpRadiusChanged.emit)
+
+        # emit unified settings dict on any change
+        widgets_to_watch = [
+            self.spn_rp_point_size,
+            self.spn_dsr_primary_size,
+            self.spn_dsr_secondary_size,
+            self.chk_dsr_depth, self.chk_dsr_sigmas, self.chk_dsr_radial,
+            self.chk_bb_vessel, self.chk_bb_rov1_ins, self.chk_bb_rov2_ins,
+            self.chk_bb_rov1_usbl, self.chk_bb_rov2_usbl,
+        ]
+        for w in widgets_to_watch:
+            if hasattr(w, "valueChanged"):
+                w.valueChanged.connect(self._emit_plot_settings)
+            if hasattr(w, "toggled"):
+                w.toggled.connect(self._emit_plot_settings)
+
+        QtCore.QTimer.singleShot(0, self._emit_plot_settings)
+
+    def _emit_plot_settings(self):
+        settings = {
+            "rp": {
+                "point_size": int(self.spn_rp_point_size.value()),
+            },
+            "dsr": {
+                "depth": self.chk_dsr_depth.isChecked(),
+                "sigmas": self.chk_dsr_sigmas.isChecked(),
+                "radial": self.chk_dsr_radial.isChecked(),
+                "primary_point_size": int(self.spn_dsr_primary_size.value()),
+                "secondary_point_size": int(self.spn_dsr_secondary_size.value()),
+            },
+            "bb": {
+                "bb_vessel": self.chk_bb_vessel.isChecked(),
+                "bb_rov1_ins": self.chk_bb_rov1_ins.isChecked(),
+                "bb_rov2_ins": self.chk_bb_rov2_ins.isChecked(),
+                "bb_rov1_usbl": self.chk_bb_rov1_usbl.isChecked(),
+                "bb_rov2_usbl": self.chk_bb_rov2_usbl.isChecked(),
+            }
+        }
+        self.plotsSettingsChanged.emit(settings)
+
+    def set_rp_radius(self, value: float):
+        if not hasattr(self, "spn_rp_radius"):
+            return
+        self.spn_rp_radius.blockSignals(True)
+        self.spn_rp_radius.setValue(float(value))
+        self.spn_rp_radius.blockSignals(False)
 
     # ----------------------------------
     # Helpers
@@ -404,6 +526,8 @@ class LeftPanel(QtWidgets.QFrame):
             return
 
         self.dsrStationClicked.emit(line, station)
+
+
 
 
 class StationTableWidget(QtWidgets.QTableWidget):

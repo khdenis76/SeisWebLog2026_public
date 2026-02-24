@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="54.9995 59.9996 110 568.079" width="124.649px" height="1050.83px">
+  <path fill="#fff" stroke="#111" stroke-width="4" stroke-linejoin="round" d="M -174.04 289.039 L -115.47 289.039 L 276.909 289.039 C 323.761 289.039 367.684 306.039 394.039 344.039 C 367.684 382.039 323.761 399.039 276.909 399.039 L -115.47 399.039 L -174.04 399.039 L -174.04 289.039 Z" style="stroke-width: 4; transform-origin: 110px 344.039px;" transform="matrix(0, -1, 1, 0, -0.00004578, 0.00003052)"/>
+  <path fill="none" stroke="#666" stroke-width="2" stroke-dasharray="8 6" d="M -155.51 335.513 L 375.513 335.513" style="stroke-width: 2; transform-origin: 110.001px 335.513px;" transform="matrix(9e-8, -1.00000055, 1.0000011, 0, 0, -0.00014031)"/>
+  <rect fill="#fff" stroke="#111" stroke-width="3" x="95.128" y="74.899" width="140.188" height="69.905" rx="8" transform="matrix(-0.0518909990787506, -0.9986529946327208, 1.0013489723205566, 0, 8.573606491088839, 667.921630859375)" style="stroke-width: 3;"/>
+  <path fill="none" stroke="#111" stroke-width="2.5" d="M 94.079 542.922 L 88.362 432.922" style="stroke-width: 2.5; transform-origin: 92px 487.921px;"/>
+  <path fill="none" stroke="#111" stroke-width="2.5" d="M 112.078 542.922 L 106.363 432.922" style="stroke-width: 2.5; transform-origin: 110px 487.921px;"/>
+  <path fill="none" stroke="#111" stroke-width="2.5" d="M 130.079 542.922 L 124.362 432.922" style="stroke-width: 2.5; transform-origin: 128px 487.921px;"/>
+  <path fill="none" stroke="#111" stroke-width="2.5" d="M 76.363 432.922 L 136.363 432.922" style="stroke-width: 2.5;" transform="matrix(0.9999999999999999, 0, 0, 0.9999999999999999, -2.842170943040401e-14, 0)"/>
+  <rect fill="#fff" stroke="#111" stroke-width="3" x="700" y="70" width="190" height="80" rx="24" transform="matrix(0, -0.9999999999999999, 0.9999999999999999, 0, -2.842170943040401e-14, 1099.9999999999998)" style="stroke-width: 3;"/>
+  <circle fill="none" stroke="#111" stroke-width="2.5" cx="795" cy="110" r="26" transform="matrix(0, -0.9999999999999999, 0.9999999999999999, 0, -2.842170943040401e-14, 1099.9999999999998)" style="stroke-width: 2.5;"/>
+  <path fill="none" stroke="#111" stroke-width="2.5" d="M 109.995 305.002 L 109.995 325.002" style="stroke-width: 2.5; transform-origin: 109.995px 315.002px;" transform="matrix(0, -1, 1.00000136, -6e-8, -0.00052387, -0.00004366)"/>
+  <path fill="none" stroke="#111" stroke-width="2.5" d="M 110 285.003 L 110 305.003" style="stroke-width: 2.5; transform-origin: 110px 295.003px;" transform="matrix(0, -0.99999682, 1, -1e-8, 0.00029104, -0.00011642)"/>
+  <path fill="none" stroke="#111" stroke-width="2.5" d="M 100 304.997 L 120 304.997" style="stroke-width: 2.5; transform-origin: 110px 304.997px;" transform="matrix(0.00000168, -0.99999955, 0.99999864, 0, 0.00011642, 0.00040745)"/>
+  <rect fill="#fff" stroke="#111" stroke-width="3" x="965" y="98" width="34" height="24" rx="4" transform="matrix(0, -0.9999999999999999, 0.9999999999999999, 0, -2.842170943040401e-14, 1099.9999999999998)" style="stroke-width: 3;"/>
+</svg>
