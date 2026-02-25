@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib import request
+import pickle
 
 from bokeh.embed import json_item, components
 from bokeh.layouts import column, gridplot
@@ -24,6 +25,13 @@ from rov.bbox_graphics import BlackBoxGraphics
 
 
 
+
+
+from django.core.cache import cache
+
+
+
+
 # Create your views here.
 @login_required
 def rov_main_view(request):
@@ -35,8 +43,10 @@ def rov_main_view(request):
     if not project.can_edit(request.user):
         raise PermissionDenied
     dsrdb = DSRDB(project.db_path)
+    pdb=ProjectDB(project.db_path)
     dsrdb.pdb.update_days_in_water()
     dsr_map_plot = DSRMapPlots(project.db_path,default_epsg=dsrdb.pdb.get_main().epsg,use_tiles=True)
+    plotly_template="plotly_dark" if pdb.get_main().color_scheme == "dark" else "plotly_white"
     rp_data = dsr_map_plot.read_rp_preplot()
     dsr_data = dsr_map_plot.read_dsr()
     rec_db_data = dsr_map_plot.read_recdb()
@@ -93,9 +103,16 @@ def rov_main_view(request):
     d_dep_script, d_dep_div= components(d_dep)
     d_rec_script, d_rec_div= components(d_rec)
     pp_map_script, pp_map_div = components(progress_map)
-    deployment_pie = dsr_map_plot.sunburst_prod_3layers_plotly(metric="Stations",title="Node Deployment", labels={"total": "Deployment"},json_return=False)
-    recovery_pie = dsr_map_plot.sunburst_prod_3layers_plotly(metric="RECStations", title="Node Recovery",
-                                                               labels={"total": "Recovery"}, json_return=False)
+    deployment_pie = dsr_map_plot.sunburst_prod_3layers_plotly(metric="Stations",
+                                                               title="Node Deployment",
+                                                               labels={"total": "Deployment"},
+                                                               json_return=False,
+                                                               template=plotly_template)
+    recovery_pie = dsr_map_plot.sunburst_prod_3layers_plotly(metric="RECStations",
+                                                             title="Node Recovery",
+                                                             labels={"total": "Recovery"},
+                                                             json_return=False,
+                                                             template=plotly_template)
     dsr_lines_body = dsrdb.render_dsr_line_summary_body()
     bbox_fields_selectors = dsrdb.get_config_selector_table()
     bbox_config_list = dsrdb.get_bbox_configs_list()
@@ -1197,3 +1214,87 @@ def load_dsr_historgram (request):
     )
 
     return JsonResponse({"ok": True, "hist": json_item(hist)})
+@require_POST
+@login_required
+def load_min_max_line_qc(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+       return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    pdb=ProjectDB(project.db_path)
+    pdb.update_days_in_water()
+
+    map_plot = DSRMapPlots(project.db_path,default_epsg=pdb.get_main().epsg)
+    line_sum = map_plot.read_line_summary()
+    line_qc_plot = map_plot.build_line_summary_qc_grid(df=line_sum,json_export=False,is_show=False)
+    return JsonResponse({"ok": True, "line_qc_plot": json_item(line_qc_plot)})
+
+@require_POST
+def bbox_plot_item(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    try:
+        payload = json.loads(request.body or "{}")
+
+        file_id = int(payload.get("file_id") or 0)
+        file_name = (payload.get("file_name") or "").strip()
+        plot_key = (payload.get("plot_key") or "").strip()
+
+        if not plot_key:
+            return JsonResponse({"ok": False, "error": "Missing plot_key"}, status=400)
+
+        if not file_id and not file_name:
+            return JsonResponse({"ok": False, "error": "No file_id / file_name"}, status=400)
+
+        bbgr = BlackBoxGraphics(project.db_path)
+
+        # light meta (optional per request)
+        file_details = bbgr.get_bbox_config_names_by_filename(file_name) if file_name else {}
+
+        # ---- OPTIONAL: cache the heavy dataframe so 5 plot calls don't re-load it 5 times
+        # If you don't want cache yet, just call bbgr.load_bbox_data(...) directly.
+        cache_key = f"bbox_df:{project.id}:{file_name or file_id}"
+        data = cache.get(cache_key)
+        if data is None:
+            data = bbgr.load_bbox_data(
+                file_name=file_name if file_name else None,
+                file_ids=[file_id] if (not file_name and file_id) else None,
+            )
+            # store pickled df in cache (works well with filesystem/redis cache)
+            cache.set(cache_key, pickle.dumps(data), timeout=15 * 60)
+        else:
+            data = pickle.loads(data)
+
+        # ---- build ONLY requested plot
+        if plot_key == "gnss_qc":
+            fig = bbgr.bokeh_gnss_qc_timeseries(
+                title="GNSS QC",
+                gnss1_label=file_details.get("gnss1_name"),
+                gnss2_label=file_details.get("gnss2_name"),
+                is_show=False,
+                data=data,
+            )
+        elif plot_key == "rovs_depths":
+            fig = bbgr.bokeh_bbox_depth12_diff_timeseries(
+                df=data, diff_threshold=10, plot_kind="vbar", is_show=False
+            )
+        elif plot_key == "vessel_sog":
+            fig = bbgr.bokeh_bbox_sog_timeseries(df=data, plot_kind="line", is_show=False)
+        elif plot_key == "hdop":
+            fig = bbgr.bokeh_bbox_gnss_hdop_timeseries(df=data, is_show=False, return_json=False)
+        elif plot_key == "cog_vs_hdg":
+            fig = bbgr.boke_cog_hdg_timeseries_all(df=data, is_show=False)
+        else:
+            return JsonResponse({"ok": False, "error": f"Unknown plot_key: {plot_key}"}, status=400)
+
+        return JsonResponse({
+            "ok": True,
+            "plot_key": plot_key,
+            "item": json_item(fig),
+        })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)

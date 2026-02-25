@@ -13,7 +13,7 @@ urlpatterns = [
     path('bbox_config/set_default',set_default_bbox_config,name='set_default_bbox_config'),
     path('dsr/delete_line',delete_selected_dsr_lines,name="delete_selected_dsr_lines"),
     path('delete/bbox',delete_bbox_files,name="delete_bbox_files"),
-    path('bbox/file_selected',bbox_file_selected,name='bbox_file_selected'),
+    #path('bbox/file_selected',bbox_file_selected,name='bbox_file_selected'),
     path("rov/bbox/configs/", bbox_configs_list, name="bbox_configs_list"),
     path("rov/bbox/config/<int:config_id>/", bbox_config_detail, name="bbox_config_detail"),
     path("rov/bbox/read-headers/",read_bbox_headers,name="csv_headers",),
@@ -25,4 +25,6 @@ urlpatterns = [
     path("dsr/battery_life/",load_battery_life_map,name="load_battery_life_map"),
     path("dsr/battery_days_left",load_battery_rest_days_map,name="load_battery_rest_days_map"),
     path("dsr/hist",load_dsr_historgram,name="load_dsr_historgram"),
+    path("dsr/line_qc_plot",load_min_max_line_qc,name="load_min_max_line_qc"),
+    path("bbox/plot/item/", bbox_plot_item, name="bbox_plot_item"),
 ]

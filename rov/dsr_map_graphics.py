@@ -13,7 +13,7 @@ from bokeh.core.property.vectorization import value
 from bokeh.embed import json_item
 from bokeh.io import show
 from bokeh.layouts import row, column, gridplot
-from bokeh.models import Span,Range1d
+from bokeh.models import Span, Range1d, FactorRange, Legend, LegendItem
 from bokeh.palettes import Category10, Category20
 
 from bokeh.plotting import figure
@@ -471,6 +471,28 @@ class DSRMapPlots:
         for c in ("Line", "Point"):
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
+        return df
+
+    def read_line_summary(self, parse_dates: bool = True):
+        """
+        Read all rows from V_DSR_LineSummary view
+        and return as pandas DataFrame.
+        """
+
+        with self._connect() as conn:
+            df = pd.read_sql_query(
+                "SELECT * FROM V_DSR_LineSummary",
+                conn
+            )
+
+        if df.empty:
+            return df
+
+        if parse_dates:
+            for col in df.columns:
+                if "Time" in col or "Date" in col:
+                    df[col] = pd.to_datetime(df[col], errors="coerce")
+
         return df
     def select_all_except(
             self,
@@ -3417,6 +3439,7 @@ class DSRMapPlots:
             labels=None,
             is_show=False,
             json_return=False,
+            template="plotly_dark",
     ):
         """
         Universal Sunburst (3 layers):
@@ -3675,6 +3698,14 @@ class DSRMapPlots:
                 name=lbl["remaining"],
                 showlegend=True
             ))
+            if template =="plotly_dark":
+                paper_bgcolor:str = "#111827"  # outer background
+                plot_bgcolor:str = "#111827"  # inner background
+                text_color:str="white"
+            else:
+                paper_bgcolor:str = "white"
+                plot_bgcolor:str = "white"
+                text_color:str = "black"
 
             fig.update_layout(
                 title=dict(text=final_title, x=0.02, xanchor="left"),
@@ -3701,10 +3732,10 @@ class DSRMapPlots:
                 ],
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                template="plotly_dark",
-                paper_bgcolor="#111827",  # outer background
-                plot_bgcolor="#111827",  # inner background
-                font=dict(color="white"),
+                template=template,
+                paper_bgcolor=paper_bgcolor,  # outer background
+                plot_bgcolor=plot_bgcolor,  # inner background
+                font=dict(color=text_color),
             )
 
         except Exception as e:
@@ -3965,3 +3996,260 @@ class DSRMapPlots:
             if is_show:
                 show(layout)
             return layout
+
+    from bokeh.models import (
+        ColumnDataSource,
+        FactorRange,
+        HoverTool,
+        CustomJS,
+        Legend,
+        LegendItem,
+    )
+
+
+    def build_line_summary_qc_grid(self, df, json_export: bool = True, is_show: bool = True, ncols: int = 2):
+        """
+        Build Bokeh QC grid from V_DSR_LineSummary dataframe.
+
+        Requirements:
+          - df must contain column: Line
+          - metric columns should exist for each group (Avg*, Min*, Max*)
+
+        Plots:
+          - One plot per metric group
+          - Max = red vbar (back)
+          - Avg = green line + green points (both toggle together)
+          - Min = blue vbar (front)
+          - One GLOBAL legend at top (Max/Avg/Min). Clicking hides/shows across ALL plots.
+          - Shared X axis (Line) for all plots
+          - sizing_mode="stretch_both"
+          - Y axis label everywhere: "Meters"
+
+        Returns:
+          - json_item(layout, "dsr_line_summary_qc") if json_export else layout
+        """
+
+        if df is None or getattr(df, "empty", True):
+            layout = column(sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout, "dsr_line_summary_qc") if json_export else layout
+
+        if "Line" not in df.columns:
+            raise ValueError("DataFrame must contain 'Line' column.")
+
+        d = df.copy()
+
+        # X factors
+        d["Line"] = d["Line"].astype(str)
+
+        # Sort by numeric Line if possible
+        try:
+            d["_LineNum"] = d["Line"].astype(float)
+            d = d.sort_values("_LineNum")
+        except Exception:
+            d = d.sort_values("Line")
+
+        x_factors = d["Line"].tolist()
+        x_range = FactorRange(*x_factors)
+        source = ColumnDataSource(d)
+
+        # Each group (title, avg, min, max)
+        groups = [
+            ("DeltaE", "AvgDeltaE", "MinDeltaE", "MaxDeltaE"),
+            ("DeltaN", "AvgDeltaN", "MinDeltaN", "MaxDeltaN"),
+            ("DeltaE1", "AvgDeltaE1", "MinDeltaE1", "MaxDeltaE1"),
+            ("DeltaN1", "AvgDeltaN1", "MinDeltaN1", "MaxDeltaN1"),
+            ("Sigma", "AvgSigma", "MinSigma", "MaxSigma"),
+            ("Sigma1", "AvgSigma1", "MinSigma1", "MaxSigma1"),
+            ("Sigma2", "AvgSigma2", "MinSigma2", "MaxSigma2"),
+            ("Sigma3", "AvgSigma3", "MinSigma3", "MaxSigma3"),
+            ("Radial Offset", "AvgRadOffset", "MinRadOffset", "MaxRadOffset"),
+            ("Range Prim→Sec", "AvgRangePrimToSec", "MinRangePrimToSec", "MaxRangePrimToSec"),
+        ]
+
+        # --- Collect renderers across all plots so global legend can toggle them ---
+        max_renderers = []
+        min_renderers = []
+        avg_line_renderers = []
+        avg_point_renderers = []
+
+        def _make_triplet_plot(title, avg_col, min_col, max_col):
+            # Skip if none of the columns exist
+            if avg_col not in d.columns and min_col not in d.columns and max_col not in d.columns:
+                return None
+
+            p = figure(
+                title=title,
+                x_range=x_range,
+                sizing_mode="stretch_both",
+                toolbar_location="above",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+
+            p.xaxis.axis_label = "Line"
+            p.yaxis.axis_label = "Meters"
+            p.xaxis.major_label_orientation = 1.0
+            p.xgrid.grid_line_alpha = 0.15
+            p.ygrid.grid_line_alpha = 0.15
+
+            # Hover shows all three values
+            p.add_tools(
+                HoverTool(
+                    tooltips=[
+                        ("Line", "@Line"),
+                        ("Min", f"@{{{min_col}}}{{0.00}}" if min_col in d.columns else ""),
+                        ("Avg", f"@{{{avg_col}}}{{0.00}}" if avg_col in d.columns else ""),
+                        ("Max", f"@{{{max_col}}}{{0.00}}" if max_col in d.columns else ""),
+                    ]
+                )
+            )
+
+            # Max (red) behind
+            if max_col in d.columns:
+                r_max = p.vbar(
+                    x="Line",
+                    top=max_col,
+                    source=source,
+                    width=0.82,
+                    alpha=0.25,
+                    line_alpha=0.0,
+                    color="red",
+                )
+                max_renderers.append(r_max)
+
+            # Min (blue) in front
+            if min_col in d.columns:
+                r_min = p.vbar(
+                    x="Line",
+                    top=min_col,
+                    source=source,
+                    width=0.55,
+                    alpha=0.65,
+                    line_alpha=0.0,
+                    color="blue",
+                )
+                min_renderers.append(r_min)
+
+            # Avg (green) line + points
+            if avg_col in d.columns:
+                r_avg_line = p.line(
+                    x="Line",
+                    y=avg_col,
+                    source=source,
+                    line_width=2,
+                    color="green",
+                )
+                r_avg_pts = p.circle(
+                    x="Line",
+                    y=avg_col,
+                    source=source,
+                    size=6,
+                    color="green",
+                )
+                avg_line_renderers.append(r_avg_line)
+                avg_point_renderers.append(r_avg_pts)
+
+            # No per-plot legend (we use a global legend at the top)
+            p.legend.visible = False
+
+            return p
+
+        plots = []
+        for title, avg_c, min_c, max_c in groups:
+            p = _make_triplet_plot(title, avg_c, min_c, max_c)
+            if p is not None:
+                plots.append(p)
+
+        if not plots:
+            layout = column(sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout, "dsr_line_summary_qc") if json_export else layout
+
+        # -----------------------------
+        # Global legend (top)
+        # -----------------------------
+        # We create a tiny "legend-only" figure with dummy renderers.
+        # Clicking legend hides those dummy renderers, and CustomJS propagates
+        # the visibility to ALL actual renderers in all plots.
+        legend_fig = figure(
+            height=60,
+            sizing_mode="stretch_width",
+            toolbar_location=None,
+            x_range=(0, 1),
+            y_range=(0, 1),
+        )
+        legend_fig.outline_line_alpha = 0
+        legend_fig.grid.visible = False
+        legend_fig.axis.visible = False
+
+        # Dummy renderers (invisible by being off-canvas-ish + minimal)
+        dummy_max = legend_fig.line([0, 0.001], [0, 0], line_width=6, color="red")
+        dummy_avg_line = legend_fig.line([0, 0.001], [0.2, 0.2], line_width=3, color="green")
+        dummy_avg_pts = legend_fig.circle([0], [0.2], size=8, color="green")
+        dummy_min = legend_fig.line([0, 0.001], [0.4, 0.4], line_width=6, color="blue")
+
+        # Legend items: Avg should toggle BOTH line+points together => use both dummy renderers
+        legend = Legend(
+            items=[
+                LegendItem(label="Max", renderers=[dummy_max]),
+                LegendItem(label="Avg", renderers=[dummy_avg_line, dummy_avg_pts]),
+                LegendItem(label="Min", renderers=[dummy_min]),
+            ],
+            orientation="horizontal",
+            location="center",
+            click_policy="hide",
+        )
+        legend_fig.add_layout(legend, "center")
+
+        # Propagate toggles to all plots when dummy renderer visibility changes
+        # Max
+        dummy_max.js_on_change(
+            "visible",
+            CustomJS(
+                args=dict(renderers=max_renderers, dummy=dummy_max),
+                code="for (const r of renderers) { r.visible = dummy.visible; }",
+            ),
+        )
+        # Min
+        dummy_min.js_on_change(
+            "visible",
+            CustomJS(
+                args=dict(renderers=min_renderers, dummy=dummy_min),
+                code="for (const r of renderers) { r.visible = dummy.visible; }",
+            ),
+        )
+        # Avg (line + points)
+        dummy_avg_line.js_on_change(
+            "visible",
+            CustomJS(
+                args=dict(lines=avg_line_renderers, pts=avg_point_renderers, dummy=dummy_avg_line),
+                code="""
+                    for (const r of lines) { r.visible = dummy.visible; }
+                    for (const r of pts)   { r.visible = dummy.visible; }
+                """,
+            ),
+        )
+        dummy_avg_pts.js_on_change(
+            "visible",
+            CustomJS(
+                args=dict(lines=avg_line_renderers, pts=avg_point_renderers, dummy=dummy_avg_pts),
+                code="""
+                    for (const r of lines) { r.visible = dummy.visible; }
+                    for (const r of pts)   { r.visible = dummy.visible; }
+                """,
+            ),
+        )
+
+        # -----------------------------
+        # Grid layout + global legend on top
+        # -----------------------------
+        grid = gridplot(plots, ncols=ncols, sizing_mode="stretch_both", toolbar_location="above", merge_tools=True)
+        layout = column(legend_fig, grid, sizing_mode="stretch_both")
+
+        if is_show:
+            show(layout)
+
+        return json_item(layout, "dsr_line_summary_qc") if json_export else layout

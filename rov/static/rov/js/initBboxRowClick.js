@@ -3,143 +3,94 @@ import { getCSRFToken } from "../../baseproject/js/csrf.js";
 import { renderBokehInto } from "../../baseproject/js/renderBokeh.js";
 
 export function initBboxPlotClick() {
-  // Event delegation (works even if tbody is replaced later)
-  document.addEventListener("click", async (e) => {
+  let currentController = null;
+
+  document.addEventListener("click", (e) => {
     const tbody = document.getElementById("bbox-list-tbody");
     if (!tbody) return;
-
-    // Only handle clicks inside the bbox tbody
     if (!tbody.contains(e.target)) return;
-
-    // Ignore checkbox clicks
     if (e.target.closest(".bbox-file-checkbox")) return;
 
     const tr = e.target.closest("tr[data-file-id][data-file-name]");
     if (!tr) return;
 
-    const url = tbody.dataset.plotUrl;
+    const url = tbody.dataset.plotItemUrl; // NEW data attribute (see HTML below)
     if (!url) {
-      console.warn("Missing data-plot-url on #bbox-list-tbody");
+      console.warn("Missing data-plot-item-url on #bbox-list-tbody");
       return;
     }
 
     const fileId = tr.dataset.fileId;
     const fileName = tr.dataset.fileName;
 
-    if (!fileId && !fileName) {
-      console.warn("Row has neither file_id nor file_name");
-      return;
+    // highlight
+    tbody.querySelectorAll("tr.table-active").forEach(r => r.classList.remove("table-active"));
+    tr.classList.add("table-active");
+
+    // cancel previous batch
+    if (currentController) currentController.abort();
+    currentController = new AbortController();
+
+    const plots = [
+      { key: "gnss_qc",     divId: "gnss-qc-plot" },
+      { key: "rovs_depths", divId: "rov-depth-qc-plot" },
+      { key: "vessel_sog",  divId: "vessel-sog-plot" },
+      { key: "hdop",        divId: "gnss-hdop-plot" },
+      { key: "cog_vs_hdg",  divId: "hdg-cog-plot" },
+    ];
+
+    // placeholders
+    for (const p of plots) {
+      const el = document.getElementById(p.divId);
+      if (el) el.innerHTML = `<div class="text-muted p-2">Loading ${p.key}…</div>`;
     }
 
-    // ✅ Send BOTH
-    const payload = {
+    // common payload
+    const basePayload = {
       file_id: fileId ? Number(fileId) : null,
       file_name: fileName || null,
     };
 
-    // Highlight selected row
-    tbody.querySelectorAll("tr.table-active")
-         .forEach(r => r.classList.remove("table-active"));
-    tr.classList.add("table-active");
+    // load sequentially (true "step by step")
+    (async () => {
+      for (const p of plots) {
+        const el = document.getElementById(p.divId);
+        if (!el) continue;
 
-    // Loading indicator
-    const plotDivId = "gnss-qc-plot";
-    const plotDiv = document.getElementById(plotDivId);
-    if (plotDiv) {
-      plotDiv.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
-    }
-    const plotDivId2 = "rov-depth-qc-plot";
-    const plotDiv2 = document.getElementById(plotDivId2);
-    const plotSOGId = 'vessel-sog-plot'
-    const plotSOG = document.getElementById(plotSOGId)
-    const plotHDOPId="gnss-hdop-plot"
-    const plotHDOP =document.getElementById(plotHDOPId)
-    const plotHDGId="hdg-cog-plot"
-    const plotHDG =document.getElementById(plotHDGId)
+        try {
+          const resp = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": getCSRFToken(),
+            },
+            body: JSON.stringify({ ...basePayload, plot_key: p.key }),
+            signal: currentController.signal,
+          });
 
-    if (plotDiv2) {
-      plotDiv2.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
-    }
-    if (plotSOG) {
-      plotSOG.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
-    }
-    if (plotHDOP) {
-      plotHDOP.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
-    }
-    if (plotHDG) {
-      plotHDG.innerHTML = `<div class="text-muted p-2">Loading plot…</div>`;
-    }
+          const data = await resp.json();
 
-    try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRFToken": getCSRFToken(),
-        },
-        body: JSON.stringify(payload),
-      });
+          if (!resp.ok || !data.ok) {
+            el.innerHTML = "";
+            console.error(data.error || "Failed to load plot", p.key);
+            continue; // keep going for other plots
+          }
 
-      const data = await resp.json();
+          if (!data.item) {
+            el.innerHTML = "";
+            console.error("Server did not return json_item", p.key);
+            continue;
+          }
 
-      if (!resp.ok || !data.ok) {
-        if (plotDiv) plotDiv.innerHTML = "";
-        alert(data.error || "Failed to load plot");
-        return;
-        if (plotDiv2) plotDiv2.innerHTML = "";
-        alert(data.error || "Failed to load plot");
-        return;
-        if (plotSOG) plotSOG.innerHTML = "";
-        alert(data.error || "Failed to load plot");
-        return;
-        if (plotHDOP) plotHDOP.innerHTML = "";
-        alert(data.error || "Failed to load plot");
-        return;
-        if (plotHDG) plotHDG.innerHTML = "";
-        alert(data.error || "Failed to load plot");
-        return;
+          renderBokehInto(p.divId, data.item);
+
+        } catch (err) {
+          // aborted -> stop quietly
+          if (err?.name === "AbortError") return;
+          console.error(err);
+          el.innerHTML = "";
+        }
       }
-
-      if (!data.gnss_qc_plot) {
-        if (plotDiv) plotDiv.innerHTML = "";
-        alert("Server did not return json_item");
-        return;
-      }
-      // Render using your helper
-      renderBokehInto(plotDivId, data.gnss_qc_plot);
-      if (!data.rovs_depths_plot) {
-        if (plotDiv2) plotDiv2.innerHTML = "";
-        alert("Server did not return json_item");
-        return;
-      }
-      // Render using your helper
-      renderBokehInto(plotDivId2, data.rovs_depths_plot);
-      if (!data.vessel_sog) {
-        if (plotSOG) plotSOG.innerHTML = "";
-        alert("Server did not return json_item");
-        return;
-      }
-      // Render using your helper
-      renderBokehInto(plotSOGId, data.vessel_sog);
-      if (!data.hdop_plot) {
-        if (plotHDOP) plotHDOP.innerHTML = "";
-        alert("Server did not return json_item");
-        return;
-      }
-      // Render using your helper
-      renderBokehInto(plotHDOPId, data.hdop_plot);
-       if (!data.cog_vs_hdg_plot) {
-        if (plotHDG) plotHDG.innerHTML = "";
-        alert("Server did not return json_item");
-        return;
-      }
-      // Render using your helper
-      renderBokehInto(plotHDGId, data.cog_vs_hdg_plot);
-
-    } catch (err) {
-      console.error(err);
-      if (plotDiv) plotDiv.innerHTML = "";
-      alert("Network error while loading plot");
-    }
+    })();
   });
 }

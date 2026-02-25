@@ -11,6 +11,9 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django import forms
+from django.http import JsonResponse
+from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_protect
 
 from .models import Project, ProjectMember, UserSettings
 from .projectdb import (
@@ -374,3 +377,27 @@ def project_settings_view(request):
             "folders":folders_qc
         },
     )
+
+@require_POST
+@login_required
+@csrf_protect
+def set_theme_view(request):
+    mode = (request.POST.get("theme") or "").strip().lower()
+    if mode not in ("dark", "light"):
+        return JsonResponse({"ok": False, "error": "Invalid theme"}, status=400)
+
+    settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_edit(request.user):
+        return JsonResponse({"ok": False, "error": "No permission"}, status=403)
+
+    pdb = ProjectDB(project.db_path)
+    main = pdb.get_main()
+
+    # write theme into your project sqlite main settings
+    main.color_scheme = mode
+    pdb.update_main(main)
+    return JsonResponse({"ok": True, "theme": mode})

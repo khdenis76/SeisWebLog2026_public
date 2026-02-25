@@ -1,10 +1,113 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<ul class="nav qc-tabs gap-1 mb-2" id="qcTabs" role="tablist">
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-water active"
+            id="tab-water" data-bs-toggle="tab" data-bs-target="#pane-water"
+            type="button" role="tab" aria-controls="pane-water" aria-selected="true">
+      <i class="fa-solid fa-water"></i><span>Water Depth</span>
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-primsec"
+            id="tab-primsec" data-bs-toggle="tab" data-bs-target="#pane-primsec"
+            type="button" role="tab" aria-controls="pane-primsec" aria-selected="false">
+      <i class="fa-solid fa-scale-balanced"></i><span>Prim vs Sec</span>
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-deplpre"
+            id="tab-deplpre" data-bs-toggle="tab" data-bs-target="#pane-deplpre"
+            type="button" role="tab" aria-controls="pane-deplpre" aria-selected="false">
+      <i class="fa-solid fa-right-left"></i><span>Depl vs Preplot</span>
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-lineinfo"
+            id="tab-lineinfo" data-bs-toggle="tab" data-bs-target="#pane-lineinfo"
+            type="button" role="tab" aria-controls="pane-lineinfo" aria-selected="false">
+      <i class="fa-solid fa-circle-info"></i><span>Line Info</span>
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-map"
+            id="tab-map" data-bs-toggle="tab" data-bs-target="#pane-map"
+            type="button" role="tab" aria-controls="pane-map" aria-selected="false">
+      <i class="fa-solid fa-map-location-dot"></i><span>Map</span>
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-delta"
+            id="tab-delta" data-bs-toggle="tab" data-bs-target="#pane-delta"
+            type="button" role="tab" aria-controls="pane-delta" aria-selected="false">
+      <span class="delta">Δ</span><span> X vs Y</span>
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-xline"
+            id="tab-xline" data-bs-toggle="tab" data-bs-target="#pane-xline"
+            type="button" role="tab" aria-controls="pane-xline" aria-selected="false">
+      <i class="fa-solid fa-grip-lines"></i><span>X-Line vs In-Line</span>
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-timing"
+            id="tab-timing" data-bs-toggle="tab" data-bs-target="#pane-timing"
+            type="button" role="tab" aria-controls="pane-timing" aria-selected="false">
+      <i class="fa-solid fa-clock"></i><span>Timing</span>
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-3d"
+            id="tab-3d" data-bs-toggle="tab" data-bs-target="#pane-3d"
+            type="button" role="tab" aria-controls="pane-3d" aria-selected="false">
+      <i class="fa-solid fa-cubes"></i><span>3D View</span>
+    </button>
+  </li>
+
+</ul>
+
+<div class="tab-content border rounded-3 p-2" id="qcTabsContent">
+  <div class="tab-pane fade show active" id="pane-water" role="tabpanel" aria-labelledby="tab-water">
+    <div id="plot-water" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-primsec" role="tabpanel" aria-labelledby="tab-primsec">
+    <div id="plot-primsec" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-deplpre" role="tabpanel" aria-labelledby="tab-deplpre">
+    <div id="plot-deplpre" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-lineinfo" role="tabpanel" aria-labelledby="tab-lineinfo">
+    <div id="plot-lineinfo" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-map" role="tabpanel" aria-labelledby="tab-map">
+    <div id="plot-map" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-delta" role="tabpanel" aria-labelledby="tab-delta">
+    <div id="plot-delta" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-xline" role="tabpanel" aria-labelledby="tab-xline">
+    <div id="plot-xline" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-timing" role="tabpanel" aria-labelledby="tab-timing">
+    <div id="plot-timing" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-3d" role="tabpanel" aria-labelledby="tab-3d">
+    <div id="plot-3d" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+</div>

@@ -25,6 +25,8 @@ import {initExportSpsModal} from "./initExportSpsModal.js";
 import {initDsrLineClick} from "./initDSRLineClick.js";
 import {initBatteryLifeMap,initBatteryLifeRestMap} from "./initBatteryLifeButton.js";
 import {initDSRHistogram} from "./initDSRHistogram.js";
+import {initDSRLineSort} from "./initDSRLineSort.js";
+import {initLineMinMaxQc} from "./initLineMinMaxQCBtn.js";
 
 
 
@@ -54,6 +56,8 @@ export function initAllJSForRovUpload() {
   initBatteryLifeMap();
   initBatteryLifeRestMap();
   initDSRHistogram();
+  initDSRLineSort();
+  initLineMinMaxQc();
 
 
     // GNSS QC

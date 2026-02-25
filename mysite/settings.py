@@ -28,10 +28,14 @@ TEMPLATES = [{
         'django.template.context_processors.request',
         'django.contrib.auth.context_processors.auth',
         'django.contrib.messages.context_processors.messages',
+        "core.context_processors.theme_context",
     ]},
+# ...
+
 }]
 TEMPLATES[0]["OPTIONS"]["context_processors"] += [
     "core.context_processors.app_version",
+    "core.context_processors.version_info",
 ]
 
 WSGI_APPLICATION = 'mysite.wsgi.application'

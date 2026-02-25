@@ -2,10 +2,30 @@
 {% for r in lines %}
 <tr data-line="{{ r.Line }}"
     class="dsr-line"
-    data-day="{{ r.FirstDeployTime|default_if_none:''|slice:":10" }}"
+    data-day="{{ r.FirstDeployTime|default_if_none:''|slice:':10' }}"
     data-depstart="{{ r.FirstDeployTime|default_if_none:'' }}"
-    data-depend="{{ r.LastDeployTime|default_if_none:'' }}">
-  <td class="text-center sticky-col sticky-col-1">
+    data-depend="{{ r.LastDeployTime|default_if_none:'' }}"
+    data-preplot-nodes="{{ r.PlannedPoints|default_if_none:0 }}"
+    data-completely-deployed="{% if r.Stations == r.PlannedPoints %}1{% else %}0{% endif %}"
+    data-completely-recovered="{% if r.RetrievedCount == r.PlannedPoints %}1{% else %}0{% endif %}"
+    data-sm-loaded="{% if r.SMCount == r.Stations %}1{% else %}0{% endif %}"
+    data-smr-loaded="{% if r.SMRCount == r.RetrievedCount %}1{% else %}0{% endif %}"
+    data-deployment-hours="{{ r.DeploymentHours|default_if_none:0 }}"
+    data-retrieval-hours="{{ r.RetrievalHours|default_if_none:0 }}"
+    data-total-hours="{{ r.TotalOperationHours|default_if_none:0 }}"
+>
+    <!-- Line recovered 1 or not 0    data-completely-recovered="1"
+         Survey manager loaded 1 or not 0 data-sm-loaded="1"
+         Survey manager for recovery loaded 1 or not 0 data-smr-loaded="1"
+         Line deployed 1 or not 0 data-completely-deployed="1"
+         Line recovered 1 or not 0 data-completely-recovered=1
+         Survey manager loaded 1 or not 0 data-sm-loaded="1"
+         Survey manager for recovery loaded 1 or not 0 data-smr-loaded="1"
+     -->
+
+
+  <td class="text-center sticky-col sticky-col-1
+      {% if r.isLineClicked == 1 %} bg-success {% endif %}">
     <input type="checkbox" class="dsr-line-checkbox" value="{{ r.Line }}">
   </td>
 
@@ -19,14 +39,22 @@
   <td>{{ r.MaxStation }}</td>
   <td>{{ r.DeployedCount }}</td>
   <td>{{ r.RetrievedCount }}</td>
-  <td>{{ r.SMCount }}</td>
-  <td>{{ r.SMRCount }}</td>
+ <td {% if r.SMCount == r.Stations %}class="text-success fw-bold"{% endif %}
+     {% if r.SMCount != r.Stations and r.SMCount != 0 %}class="bg-warning text-white fw-bold"{% endif %}
+     {% if r.SMCount == 0 and r.Stations > 0 %}class="bg-danger fw-bold"{% endif %}
+ >
+
+
+    {{ r.SMCount }}</td>
+
+  <td {% if r.SMRCount == r.RetrievedCount %}class="text-success fw-bold"{% else %}{% endif %}>
+      {{ r.SMRCount }}</td>
   <td>{{ r.ProcessedCount }}</td>
 
   {# Dep % conditional #}
   <td class="
       {% if r.DeployedPct is not None and r.DeployedPct < 90 %}
-        bg-danger text-white
+        fw-bold text-warning
       {% endif %}
     ">
     {{ r.DeployedPct|floatformat:1 }}
@@ -35,11 +63,11 @@
   <td>{{ r.RetrievedPct|floatformat:1 }}</td>
   <td>{{ r.ProcessedPct|floatformat:1 }}</td>
 
-  <td>{{ r.FirstDeployTime|default_if_none:"" }}</td>
-  <td>{{ r.LastDeployTime|default_if_none:"" }}</td>
+  <td class="dsr-datetime bg-primary text-white">{{ r.FirstDeployTime|default_if_none:"" }}</td>
+  <td class="dsr-datetime bg-success text-white">{{ r.LastDeployTime|default_if_none:"" }}</td>
   <td>{{ r.DeploymentHours|floatformat:2 }}</td>
-  <td>{{ r.FirstRetrieveTime|default_if_none:"" }}</td>
-  <td>{{ r.LastRetrieveTime|default_if_none:"" }}</td>
+  <td class="dsr-datetime text-primary fw-bold">{{ r.FirstRetrieveTime|default_if_none:"" }}</td>
+  <td class="dsr-datetime text-success fw-bold">{{ r.LastRetrieveTime|default_if_none:"" }}</td>
   <td>{{ r.RetrievalHours|floatformat:2 }}</td>
   <td>{{ r.TotalOperationHours|floatformat:2 }}</td>
 

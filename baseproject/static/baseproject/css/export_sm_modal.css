@@ -1,0 +1,98 @@
+/* Gradient header */
+#dsrExportSmModal .sm-modal-header{
+  border:0;
+  color:#fff;
+  background: linear-gradient(135deg, #0d6efd 0%, #6610f2 55%, #20c997 100%);
+}
+
+#dsrExportSmModal .sm-modal-header .sm-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:.45rem;
+  background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.22);
+  padding: .22rem .6rem;
+  border-radius:999px;
+  font-size:.75rem;
+  color: rgba(255,255,255,.95);
+}
+
+#dsrExportSmModal .btn-close.btn-close-white{
+  filter: invert(1) grayscale(100%);
+}
+
+/* Section cards */
+#dsrExportSmModal .sm-section{
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background: var(--bs-body-bg);
+  box-shadow: 0 10px 26px rgba(0,0,0,.10);
+  overflow:hidden;
+  margin-bottom: 1rem;
+}
+
+#dsrExportSmModal .sm-section .sm-section-head{
+  padding:.75rem 1rem;
+  border-bottom:1px solid rgba(255,255,255,.10);
+  background: linear-gradient(135deg, rgba(13,110,253,.10), rgba(32,201,151,.10));
+}
+
+#dsrExportSmModal .sm-section .sm-section-body{
+  padding:1rem;
+}
+
+#dsrExportSmModal .sm-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:.5rem;
+  font-weight:800;
+}
+
+#dsrExportSmModal .sm-dot{
+  width:12px;height:12px;border-radius:50%;
+  background: linear-gradient(135deg,#20c997,#198754);
+  box-shadow:0 0 0 4px rgba(32,201,151,.18);
+}
+
+/* Inputs */
+#dsrExportSmModal .form-control,
+#dsrExportSmModal .form-select{
+  border-radius:12px;
+}
+
+#dsrExportSmModal .form-check-input:checked{
+  background-color:#20c997;
+  border-color:#20c997;
+}
+
+/* ROV list box */
+#dsrExportSmModal .sm-rov-box{
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background: var(--bs-body-bg);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.05);
+}
+
+/* Footer */
+#dsrExportSmModal .sm-modal-footer{
+  border:0;
+  background: linear-gradient(135deg, rgba(13,110,253,.08), rgba(102,16,242,.08));
+}
+
+#dsrExportSmModal .btn-sm-export{
+  border:0;
+  border-radius:12px;
+  padding:.75rem 1rem;
+  font-weight:800;
+  color:#fff;
+  background: linear-gradient(135deg,#0d6efd,#6610f2);
+  box-shadow: 0 12px 26px rgba(13,110,253,.25);
+}
+
+#dsrExportSmModal .btn-sm-export:hover{
+  filter: brightness(1.04);
+}
+
+#dsrExportSmModal .btn-sm-close{
+  border-radius:12px;
+}

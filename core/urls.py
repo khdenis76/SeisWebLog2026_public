@@ -1,4 +1,5 @@
 from django.urls import path
+from .views_version import version_status
 from .views import (
     dashboard_view,
     project_list_view,
@@ -10,6 +11,7 @@ from .views import (
     project_settings_view,
     signup_view,
     logout_view,
+    set_theme_view,
 )
 
 urlpatterns = [
@@ -23,4 +25,6 @@ urlpatterns = [
     path("project/settings/", project_settings_view, name="project_settings"),
     path("signup/", signup_view, name="signup"),
     path("logout/", logout_view, name="logout"),
+    path("ui/theme/", set_theme_view, name="set_theme"),
+    path("api/version/", version_status, name="api_version"),
 ]

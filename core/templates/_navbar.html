@@ -28,7 +28,27 @@
           </a>
         </li>
       </ul>
-
+      <!-- VERSION CONTROL -->
+      {% if NEW_VERSION_AVAILABLE %}
+          <div class="alert alert-warning text-center m-0 py-1 rounded-0">
+                   🚀 New version available: <b>{{ REMOTE_VERSION }}</b>
+                  <span class="ms-2 text-muted">(you have {{ LOCAL_VERSION }})</span>
+                     <a class="btn btn-sm btn-dark ms-3"
+                              href="{{ VERSION_DOWNLOAD_URL }}"
+                              target="_blank" rel="noopener">
+                              Download ZIP
+                     </a>
+          </div>
+      {% endif %}
+      <button
+          id="themeToggle"
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          title="Toggle theme"
+          aria-label="Toggle theme"
+          data-theme="{{ theme_mode|default:'dark' }}">
+            <span class="theme-icon">{% if theme_mode == 'dark' %}☀️{% else %}🌙{% endif %}</span>
+      </button>
       <ul class="navbar-nav">
 
         {% if user.is_authenticated %}

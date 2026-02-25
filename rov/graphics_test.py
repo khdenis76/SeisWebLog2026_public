@@ -1,18 +1,42 @@
 from bokeh.io import show
 from bokeh.layouts import gridplot
-
 from dsr_line_graphics import DSRLineGraphics
 from bbox_graphics import BlackBoxGraphics
-from dsr_map_graphics import DSRMapPlots
 
-project_db_path="D:\\04_TEST_DATA\\AW1\\data\\project.sqlite3"
 
-dsr_plot = DSRMapPlots(project_db_path)
-rp_data = dsr_plot.read_rp_preplot()
-dsr_data = dsr_plot.read_dsr()
-dsr_plot.make_map(rp_df=rp_data,dsr_data=dsr_data, is_show=True)
 
-#plgr=DSRLineGraphics(project_db_path)
+
+project_db_path="D:\\313311_AW1-APEX\\16_SWL_DATA\\AW1\\data\\project.sqlite3"
+plgr=DSRLineGraphics(project_db_path)
+line_df = plgr.read_dsr_for_line(13513)
+plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
+                                           rov_col="ROV",
+                                           is_show=True,
+                                           json_return=False,
+                                           reverse_y_if_negative=False,
+                                           y1_col="DeltaEprimarytosecondary",
+                                           y2_col="DeltaNprimarytosecondary",
+                                           y3_col="Rangeprimarytosecondary")
+
+"""
+plgr.bokeh_one_series_vbar_vs_station_by_category(df=line_df,
+                                              y_col="DeltaEprimarytosecondary",
+                                              rov_col="ROV",
+                                              is_show=True,
+                                              json_return=False,
+                                              reverse_y_if_negative=False
+                                              )
+
+plgr.bokeh_two_series_vs_station(df=line_df,
+                                 series1_col="PrimaryElevation",
+                                 series2_col="SecondaryElevation",
+                                 series1_label="PRIMARY DEPTH",
+                                 series2_label="SECONDARY DEPTH",
+                                 rov_col="ROV",
+                                 is_show=True,
+                                 json_item=False,
+                                 reverse_y_if_negative=False)
+"""
 #bbr=BlackBoxGraphics(project_db_path)
 #rows=plgr.get_sigmas_deltas(14233)
 #plgr.plot_dep_deltas(14233,rows,True)

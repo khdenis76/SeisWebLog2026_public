@@ -1,6 +1,6 @@
 {% load static %}
 <!doctype html>
-<html lang="en" data-bs-theme="dark">
+<html lang="en" data-bs-theme="{{ theme_mode|default:'dark' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,13 +14,18 @@
   <link rel="stylesheet" href="{% static 'baseproject/css/rov_upload_modal.css' %}">
   <link rel="stylesheet" href="{% static 'baseproject/css/side_bar_menu.css' %}">
   <link rel="stylesheet" href="{% static 'baseproject/css/sv_map_pills.css' %}">
+  <link rel="stylesheet" href="{% static 'baseproject/css/dsr_line_filter_modal.css' %}">
+  <link rel="stylesheet" href="{% static 'baseproject/css/export_sps_modal.css' %}"> 
+  <link rel="stylesheet" href="{% static 'baseproject/css/export_sm_modal.css' %}">
+  <link rel="stylesheet" href="{% static 'baseproject/css/bbox_qc_tab.css' %}"> 
+  <link rel="stylesheet" href="{% static 'baseproject/css/selected_dsr_qc_tab.css' %}">
   
 
   <link href="https://cdn.bokeh.org/bokeh/release/bokeh-3.8.2.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'baseproject/css/bokeh_dark_mode.css' %}?v=3">
   {% block extra_head %}{% endblock %}
 </head>
-<body class="bg-dark">
+<body class="{% if theme_mode == 'dark' %}bg-dark{% else %}bg-light{% endif %}">
 
   {% include "_navbar.html" %}
 
@@ -36,6 +41,7 @@
      style="z-index: 1100;">
 </div>
   {% include "partials/toast_ok.html" %}
+  {% include "partials/toast_version_control.html" %}
   <footer class="text-center text-muted py-4">
     <small>&copy; {{ now|date:"Y" }} SeisWebLog Demo</small>
   </footer>
@@ -59,5 +65,15 @@
   </script>
   {% block extra_js %}{% endblock %}
 <script type="module" src="{% static 'baseproject/js/app.js' %}"></script>
+<div id="versionToastContainer"
+     class="toast-container position-fixed bottom-0 end-0 p-3">
+</div>
+<script src="{% static 'baseproject/js/version_check.js' %}"></script>
+<script>
+    VersionChecker.init({
+        endpoint: "/api/version/",
+        toastDelay: 12000
+    });
+</script>
 </body>
 </html>

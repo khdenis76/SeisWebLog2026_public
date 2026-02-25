@@ -948,9 +948,6 @@ SELECT
 DROP VIEW IF EXISTS V_DSR_LineSummary;
 CREATE VIEW IF NOT EXISTS V_DSR_LineSummary AS
 WITH
--- Aggregate REC_DB by Line using the RLPreplot point id relation:
--- DSR.RLPreplot_FK == RLPreplot.ID
--- REC_DB.Preplot_FK == RLPreplot.ID
 rec_by_line AS (
     SELECT
         rl.Line AS Line,
@@ -1049,8 +1046,25 @@ dsr_by_line AS (
 
         AVG(d.Sigma3) AS AvgSigma3,
         MIN(d.Sigma3) AS MinSigma3,
-        MAX(d.Sigma3) AS MaxSigma3
+        MAX(d.Sigma3) AS MaxSigma3,
 
+        -- NEW: Radial Offset (RangeToPreplot) statistics
+        AVG(d.RangetoPrePlot) AS AvgRadOffset,
+        MIN(d.RangetoPrePlot) AS MinRadOffset,
+        MAX(d.RangetoPrePlot) AS MaxRadOffset,
+
+        -- NEW: Range Primary to Secondary statistics
+        AVG(d.Rangeprimarytosecondary) AS AvgRangePrimToSec,
+        MIN(d.Rangeprimarytosecondary) AS MinRangePrimToSec,
+        MAX(d.Rangeprimarytosecondary) AS MaxRangePrimToSec,
+
+        AVG(d.PrimaryElevation) AS AvgPrimaryElevation,
+        MIN(d.PrimaryElevation) AS MinPrimaryElevation,
+        MAX(d.PrimaryElevation) AS MaxPrimaryElevation,
+
+		AVG(d.SecondaryElevation) AS AvgPrimaryElevation,
+        MIN(d.SecondaryElevation) AS MinPrimaryElevation,
+        MAX(d.SecondaryElevation) AS MaxPrimaryElevation
     FROM DSR d
     LEFT JOIN RLPreplot rl
       ON rl.Line = d.Line
@@ -1077,7 +1091,6 @@ SELECT
     s.SMCount,
     s.SMRCount,
 
-    -- Processed points from REC_DB (NOT from DSR)
     COALESCE(r.ProcessedCount, 0) AS ProcessedCount,
 
     s.FirstDeployTime,
@@ -1090,7 +1103,6 @@ SELECT
 
     s.TotalOperationHours,
 
-    -- Percentages vs planned
     ROUND(100.0 * s.DeployedCount / NULLIF(s.PlannedPoints, 0), 1) AS DeployedPct,
     ROUND(100.0 * s.RetrievedCount / NULLIF(s.PlannedPoints, 0), 1) AS RetrievedPct,
     ROUND(100.0 * COALESCE(r.ProcessedCount, 0) / NULLIF(s.PlannedPoints, 0), 1) AS ProcessedPct,
@@ -1110,7 +1122,11 @@ SELECT
     s.AvgSigma,  s.MinSigma,  s.MaxSigma,
     s.AvgSigma1, s.MinSigma1, s.MaxSigma1,
     s.AvgSigma2, s.MinSigma2, s.MaxSigma2,
-    s.AvgSigma3, s.MinSigma3, s.MaxSigma3
+    s.AvgSigma3, s.MinSigma3, s.MaxSigma3,
+
+    -- NEW outputs
+    s.AvgRadOffset, s.MinRadOffset, s.MaxRadOffset,
+    s.AvgRangePrimToSec, s.MinRangePrimToSec, s.MaxRangePrimToSec
 
 FROM dsr_by_line s
 LEFT JOIN rec_by_line r

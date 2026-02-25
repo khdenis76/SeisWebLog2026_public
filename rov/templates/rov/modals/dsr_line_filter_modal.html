@@ -1,54 +1,204 @@
 <div class="modal fade" id="dsrFilterModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
 
-      <div class="modal-header">
-        <h5 class="modal-title">
-          <i class="fas fa-filter me-2"></i> Filter DSR Lines
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      <!-- Header -->
+      <div class="modal-header dsr-modal-header">
+        <div class="w-100">
+          <div class="d-flex align-items-center justify-content-between">
+            <h5 class="modal-title fw-semibold mb-0">
+              <i class="fas fa-filter me-2"></i>Filter DSR Lines
+            </h5>
+
+            <span class="dsr-chip">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Smart Filters
+            </span>
+          </div>
+
+          <small class="opacity-75 d-block mt-1">
+            Combine status + day + time + line range (all filters work together).
+          </small>
+        </div>
+
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
 
       <div class="modal-body">
-        <!-- Day -->
-        <div class="mb-3">
-          <label class="form-label">Day</label>
-          <input type="date" class="form-control" id="dsrFilterDay">
-          <div class="form-text">Matches FirstDeployTime date (YYYY-MM-DD)</div>
+
+        <!-- Section: Status -->
+        <div class="dsr-section">
+          <div class="dsr-section-head">
+            <span class="dsr-badge">
+              <span class="dsr-dot"></span>Status filters
+            </span>
+            <span class="text-muted small">Any / Yes / No</span>
+          </div>
+
+          <div class="dsr-section-body">
+
+            <div class="row g-2">
+              <div class="col-md-6">
+                <div class="dsr-status-card">
+                  <div class="dsr-status-title">
+                    <span class="dsr-ico dsr-ico-blue"><i class="fa-solid fa-flag-checkered"></i></span>
+                    Completely Deployed
+                  </div>
+
+                  <div class="btn-group w-100 dsr-tri" role="group" data-filter="deployed">
+                    <button type="button" class="btn btn-sm dsr-any active" data-value="any">Any</button>
+                    <button type="button" class="btn btn-sm dsr-yes" data-value="1">
+                      <i class="fa-solid fa-check me-1"></i>Yes
+                    </button>
+                    <button type="button" class="btn btn-sm dsr-no" data-value="0">
+                      <i class="fa-solid fa-xmark me-1"></i>No
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="dsr-status-card">
+                  <div class="dsr-status-title">
+                    <span class="dsr-ico dsr-ico-green"><i class="fa-solid fa-anchor"></i></span>
+                    Completely Recovered
+                  </div>
+
+                  <div class="btn-group w-100 dsr-tri" role="group" data-filter="recovered">
+                    <button type="button" class="btn btn-sm dsr-any active" data-value="any">Any</button>
+                    <button type="button" class="btn btn-sm dsr-yes" data-value="1">
+                      <i class="fa-solid fa-check me-1"></i>Yes
+                    </button>
+                    <button type="button" class="btn btn-sm dsr-no" data-value="0">
+                      <i class="fa-solid fa-xmark me-1"></i>No
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="dsr-status-card">
+                  <div class="dsr-status-title">
+                    <span class="dsr-ico dsr-ico-amber"><i class="fa-solid fa-file-circle-check"></i></span>
+                    SM Loaded (Deploy)
+                  </div>
+
+                  <div class="btn-group w-100 dsr-tri" role="group" data-filter="sm">
+                    <button type="button" class="btn btn-sm dsr-any active" data-value="any">Any</button>
+                    <button type="button" class="btn btn-sm dsr-yes" data-value="1">
+                      <i class="fa-solid fa-check me-1"></i>Yes
+                    </button>
+                    <button type="button" class="btn btn-sm dsr-no" data-value="0">
+                      <i class="fa-solid fa-xmark me-1"></i>No
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="dsr-status-card">
+                  <div class="dsr-status-title">
+                    <span class="dsr-ico dsr-ico-purple"><i class="fa-solid fa-file-shield"></i></span>
+                    SM Loaded (Recovery)
+                  </div>
+
+                  <div class="btn-group w-100 dsr-tri" role="group" data-filter="smr">
+                    <button type="button" class="btn btn-sm dsr-any active" data-value="any">Any</button>
+                    <button type="button" class="btn btn-sm dsr-yes" data-value="1">
+                      <i class="fa-solid fa-check me-1"></i>Yes
+                    </button>
+                    <button type="button" class="btn btn-sm dsr-no" data-value="0">
+                      <i class="fa-solid fa-xmark me-1"></i>No
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-text mt-2">
+              Example: Recovered = <b>No</b> and Deployed = <b>Yes</b> → lines deployed but not fully recovered.
+            </div>
+
+          </div>
         </div>
 
-        <!-- Time range -->
-        <div class="row g-2 mb-3">
-          <div class="col-6">
-            <label class="form-label">Time from</label>
-            <input type="time" class="form-control" id="dsrFilterTimeFrom">
+        <!-- Section: Date/Time -->
+        <div class="dsr-section">
+          <div class="dsr-section-head">
+            <span class="dsr-badge">
+              <span class="dsr-dot" style="background:linear-gradient(135deg,#0dcaf0,#0d6efd); box-shadow:0 0 0 4px rgba(13,202,240,.18);"></span>
+              Date & Time
+            </span>
+            <span class="text-muted small">optional</span>
           </div>
-          <div class="col-6">
-            <label class="form-label">Time to</label>
-            <input type="time" class="form-control" id="dsrFilterTimeTo">
+
+          <div class="dsr-section-body">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Day</label>
+              <input type="date" class="form-control" id="dsrFilterDay">
+              <div class="form-text">Matches <code>data-day</code> (FirstDeployTime date)</div>
+            </div>
+
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label fw-semibold">Time from</label>
+                <input type="time" class="form-control" id="dsrFilterTimeFrom">
+              </div>
+              <div class="col-6">
+                <label class="form-label fw-semibold">Time to</label>
+                <input type="time" class="form-control" id="dsrFilterTimeTo">
+              </div>
+              <div class="form-text">Filters by FirstDeployTime time-of-day (<code>data-depstart</code>)</div>
+            </div>
           </div>
-          <div class="form-text">Filters by FirstDeployTime time-of-day.</div>
         </div>
 
-        <!-- Line range -->
-        <div class="row g-2">
-          <div class="col-6">
-            <label class="form-label">Line min</label>
-            <input type="number" class="form-control" id="dsrFilterLineMin" placeholder="e.g. 100">
+        <!-- Section: Line range -->
+        <div class="dsr-section">
+          <div class="dsr-section-head">
+            <span class="dsr-badge">
+              <span class="dsr-dot" style="background:linear-gradient(135deg,#ffc107,#fd7e14); box-shadow:0 0 0 4px rgba(255,193,7,.18);"></span>
+              Line range
+            </span>
+            <span class="text-muted small">select or type</span>
           </div>
-          <div class="col-6">
-            <label class="form-label">Line max</label>
-            <input type="number" class="form-control" id="dsrFilterLineMax" placeholder="e.g. 250">
+
+          <div class="dsr-section-body">
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label fw-semibold">Line min</label>
+                <div class="input-group">
+                  <select class="form-select" id="dsrFilterLineMinSelect">
+                    <option value="">— select —</option>
+                  </select>
+                  <input type="number" class="form-control" id="dsrFilterLineMin" placeholder="or type">
+                </div>
+                <div class="form-text">Select from list or type manually</div>
+              </div>
+
+              <div class="col-6">
+                <label class="form-label fw-semibold">Line max</label>
+                <div class="input-group">
+                  <select class="form-select" id="dsrFilterLineMaxSelect">
+                    <option value="">— select —</option>
+                  </select>
+                  <input type="number" class="form-control" id="dsrFilterLineMax" placeholder="or type">
+                </div>
+                <div class="form-text">Select from list or type manually</div>
+              </div>
+            </div>
           </div>
         </div>
+
       </div>
 
-      <div class="modal-footer">
-        <button class="btn btn-outline-secondary" type="button" id="dsrFilterResetBtn">
-          Reset
+      <!-- Footer -->
+      <div class="modal-footer dsr-modal-footer">
+        <button class="btn btn-outline-secondary btn-dsr-cancel" type="button" id="dsrFilterResetBtn">
+          <i class="fa-solid fa-rotate-left me-2"></i>Reset
         </button>
-        <button class="btn btn-primary" type="button" id="dsrFilterApplyBtn">
-          Apply
+
+        <button class="btn btn-dsr-apply" type="button" id="dsrFilterApplyBtn">
+          <i class="fa-solid fa-check me-2"></i>Apply
         </button>
       </div>
 

@@ -32,9 +32,8 @@
         <div class="tab-content mt-0" id="pills-tabContent">
                <div class="tab-pane fade show active" id="pills-dsr" role="tabpanel" aria-labelledby="pills-dsr-tab" tabindex="0">
                      <div class="clearfix mb-1">
-                               <button type="button" class="btn btn-outline-primary btn-sm float-end" id="btnOpenDsrFilter" title="Filter">
-                                <i class="fas fa-filter me-1"></i>
-                                </button>
+
+                                {% include "rov/partials/dsr_sort_button.html" %}
                            </div>
                      {% include "rov/partials/dsr_line_table.html" %}
                       <div class="clearfix mt-2">

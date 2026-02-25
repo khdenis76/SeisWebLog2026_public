@@ -14,6 +14,7 @@ import {initProjectLayersAutoSave} from "./autoSaveLayers.js";
 import {initDeleteLayersBtn} from "./deleteCSVLayer.js";
 import {initRLLineClick} from "./rlLineClick.js";
 import {initSLLineClick} from "./slLineClick.js";
+import {initThemeToggle} from "./initThemeToggle.js";
 
 export function initAllJSForBaseproject() {
     initRLCheckboxes();
@@ -34,6 +35,7 @@ export function initAllJSForBaseproject() {
   initDeleteLayersBtn();
   initRLLineClick();
   initSLLineClick();
+  initThemeToggle();
 
   initDeletePreplot([
     {

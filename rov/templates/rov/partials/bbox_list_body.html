@@ -1,5 +1,5 @@
 <tbody id="bbox-list-tbody"
-       data-plot-url="{% url 'bbox_file_selected' %}">
+       data-plot-item-url="{% url 'bbox_plot_item' %}">
 {% if bbox_file_list %}
 {% for f in bbox_file_list %}
     <tr data-file-id ="{{ f.ID}}"

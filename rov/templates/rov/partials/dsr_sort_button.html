@@ -1,10 +1,47 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="d-flex align-items-center gap-2">
+  <button class="btn btn-sm btn-primary" id="btnOpenDsrFilter">
+    <i class="fa-solid fa-filter me-1"></i> Filter
+  </button>
+
+  <div class="dropdown">
+    <button class="btn btn-sm btn-outline-secondary dropdown-toggle"
+            type="button"
+            id="dsrSortBtn"
+            data-bs-toggle="dropdown"
+            aria-expanded="false">
+      <i class="fa-solid fa-arrow-down-a-z me-1"></i> Sort
+    </button>
+
+    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="dsrSortBtn">
+      <li><button class="dropdown-item" type="button" data-sort="line" data-dir="asc">Line ↑</button></li>
+      <li><button class="dropdown-item" type="button" data-sort="line" data-dir="desc">Line ↓</button></li>
+      <li><hr class="dropdown-divider"></li>
+      <li><button class="dropdown-item" type="button" data-sort="daymax" data-dir="desc">Day max (latest first)</button></li>
+      <li><button class="dropdown-item" type="button" data-sort="daymax" data-dir="asc">Day max (oldest first)</button></li>
+      <li><hr class="dropdown-divider"></li>
+      <li><button class="dropdown-item" type="button" data-sort="preplot" data-dir="desc">Preplot nodes (high → low)</button></li>
+      <li><button class="dropdown-item" type="button" data-sort="preplot" data-dir="asc">Preplot nodes (low → high)</button></li>
+     <li><hr class="dropdown-divider"></li>
+     <li><button class="dropdown-item" type="button" data-sort="deployment" data-dir="desc">
+       Deployment Hours (high → low)
+     </button></li>
+     <li><button class="dropdown-item" type="button" data-sort="deployment" data-dir="asc">
+       Deployment Hours (low → high)
+     </button></li>
+
+     <li><button class="dropdown-item" type="button" data-sort="retrieval" data-dir="desc">
+       Retrieval Hours (high → low)
+     </button></li>
+     <li><button class="dropdown-item" type="button" data-sort="retrieval" data-dir="asc">
+       Retrieval Hours (low → high)
+     </button></li>
+
+     <li><button class="dropdown-item" type="button" data-sort="total" data-dir="desc">
+       Total Operation Hours (high → low)
+     </button></li>
+     <li><button class="dropdown-item" type="button" data-sort="total" data-dir="asc">
+       Total Operation Hours (low → high)
+     </button></li>
+    </ul>
+  </div>
+</div>

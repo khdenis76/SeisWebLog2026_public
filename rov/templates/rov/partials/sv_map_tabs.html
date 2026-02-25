@@ -59,6 +59,16 @@
           <i class="fa-solid fa-chart-column me-1"></i> Histogram
         </button>
       </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link pill-hist"
+                data-bs-toggle="pill"
+                data-bs-target="#min-max-line-qc-tab"
+                type="button"
+                role="tab"
+                aria-selected="false">
+          <i class="fa-solid fa-chart-column me-1"></i> MIN/MAX/AVG
+        </button>
+      </li>
 </ul>
 
 <div class="tab-content mt-3">
@@ -197,5 +207,19 @@
 </div>
 
             <div id="hist-container" class="w-100 mt-2" style="height: 100vh"></div>
+       </div>
+       <div class="tab-pane fade" id="min-max-line-qc-tab" role="tabpanel">
+             <div class="row">
+                 <button type="button"
+                         id="line-qc-load-button"
+                         class="btn btn-warning btn-sm"
+                         data-url="{% url 'load_min_max_line_qc' %}">
+                     <i class="fas fa-image me-2"></i>
+                     Load map
+                 </button>
+             </div>
+             <div class="w-100" style="height: 120vh" id="lines-min-max-qc-container">
+
+             </div>
        </div>
 </div>

@@ -14,7 +14,8 @@ from django.utils.html import escape
 from django.template.loader import render_to_string
 
 from core.projectdb import ProjectDB
-
+class ProjectDbError(Exception):
+    pass
 
 class DSRDB:
     def __init__(self, db_path: str):
@@ -1502,11 +1503,15 @@ class DSRDB:
             "preplot_fk_rule": "Preplot_FK = RLPreplot.ID where RLPreplot.Line = REC_DB.Line (first ID picked if duplicates)",
         }
 
-    def export_dsr_to_csv(self, file_name: str = "", table_name: str = "DSR",sql:str = '') -> str:
+    def export_dsr_to_csv(
+            self,
+            file_name: str = "",
+            table_name: str = "DSR",
+            sql: str = ""
+    ) -> str:
         """
-        Export SQLite table to CSV file.
-
-        Returns the full path to the created CSV.
+        Export SQLite table or custom SQL query to CSV file.
+        Returns full path to created CSV.
         """
 
         # choose output file
@@ -1520,22 +1525,24 @@ class DSRDB:
 
         with self._connect() as conn, out_path.open("w", newline="", encoding="utf-8") as f:
             cur = conn.cursor()
-            # verify table exists
-            if sql == '':
-               cur.execute(f'SELECT * FROM "{table_name}"')
+
+            if not sql:
+                cur.execute(f'SELECT * FROM "{table_name}"')
             else:
                 cur.execute(sql)
-            if not cur.fetchone():
-                print(f"Warning: table '{table_name}' is empty.")
-                return []
 
+            rows = cur.fetchall()
+
+            if not rows:
+                print(f"Warning: table '{table_name}' is empty.")
+                return ""
 
             cols = [d[0] for d in cur.description]
 
             w = csv.writer(f)
             w.writerow(cols)
-            for row in cur:
-                w.writerow(row)
+            w.writerows(rows)
+
         return str(out_path)
 
     def build_dsr_export_sql(self):
@@ -2406,6 +2413,7 @@ WHERE Area IS NOT NULL
         """
         with self._connect() as conn:
             return pd.read_sql_query(sql, conn, params=tuple(selected_lines))
+
 
 
 

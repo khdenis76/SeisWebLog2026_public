@@ -1,10 +1,87 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<ul class="nav gap-1 mb-2" id="bboxPlotsTabs" role="tablist">
+
+  <li class="nav-item" role="presentation">
+    <button class="qc-tab-btn active qc-gnss"
+            data-bs-toggle="tab"
+            data-bs-target="#pane-gnss"
+            type="button">
+      GNSS
+    </button>
+  </li>
+
+  <li class="nav-item">
+    <button class="qc-tab-btn qc-hdop"
+            data-bs-toggle="tab"
+            data-bs-target="#pane-hdop"
+            type="button">
+      HDOP
+    </button>
+  </li>
+
+  <li class="nav-item">
+    <button class="qc-tab-btn qc-depths"
+            data-bs-toggle="tab"
+            data-bs-target="#pane-depths"
+            type="button">
+      DEPTH
+    </button>
+  </li>
+
+  <li class="nav-item">
+    <button class="qc-tab-btn qc-sog"
+            data-bs-toggle="tab"
+            data-bs-target="#pane-sog"
+            type="button">
+      SOG
+    </button>
+  </li>
+
+  <li class="nav-item">
+    <button class="qc-tab-btn qc-hdg"
+            data-bs-toggle="tab"
+            data-bs-target="#pane-hdg"
+            type="button">
+      HDG
+    </button>
+  </li>
+
+  <li class="nav-item">
+    <button class="qc-tab-btn qc-drift"
+            data-bs-toggle="tab"
+            data-bs-target="#pane-drift"
+            type="button">
+      DRIFT
+    </button>
+  </li>
+
+</ul>
+
+<div class="tab-content border border-top-0 p-2 rounded-bottom" id="bboxPlotsTabsContent">
+  <div class="tab-pane fade show active" id="pane-gnss" role="tabpanel" aria-labelledby="tab-gnss">
+    <div id="gnss-qc-plot" style="height: 70vh" class="w-100 bbox-plot-slot text-muted p-2">Select file…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-hdop" role="tabpanel" aria-labelledby="tab-hdop">
+    <div id="gnss-hdop-plot" class="w-100 bbox-plot-slot text-muted p-2" style="height: 70vh" >Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-depths" role="tabpanel" aria-labelledby="tab-depths">
+    <div id="rov-depth-qc-plot" class="w-100 bbox-plot-slot text-muted p-2" style="height: 70vh">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-sog" role="tabpanel" aria-labelledby="tab-sog">
+    <div id="vessel-sog-plot" class="w-100 bbox-plot-slot text-muted p-2" style="height: 70vh">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-hdg" role="tabpanel" aria-labelledby="tab-hdg">
+    <div id="hdg-cog-plot" class="w-100 bbox-plot-slot text-muted p-2" style="height: 70vh">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-drift" role="tabpanel" aria-labelledby="tab-drift">
+    <div id="drift-plot" class="w-100 bbox-plot-slot text-muted p-2" style="height: 70vh">Open tab to load…</div>
+  </div>
+</div>
+
+<!-- put this near your bbox list -->
+<tbody id="bbox-list-tbody"
+       data-plot-item-url="{% url 'bbox_plot_item' %}">

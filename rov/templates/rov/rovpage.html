@@ -45,19 +45,6 @@
             <div class="d-flex align-items-center mb-2">
                 <!-- Left spacer -->
                 <div class="flex-grow-1"></div>
-                <div>
-                    <button class="btn btn-primary"
-                            data-bs-toggle="collapse"
-                            data-bs-target="#dsr-lines-card"
-                            aria-expanded="true"
-                            aria-controls="dsr-lines-card">
-                        DSR
-                    </button>
-                    <button class="btn btn-primary">Two</button>
-                    <button class="btn btn-primary">Three</button>
-                    <button class="btn btn-primary">For</button>
-                    <button class="btn btn-success" id="collapse-all-card"><i class="fas fa-eye me-2"></i> All</button>
-                </div>
                 <div class="flex-grow-1 text-end">
                       <button type="button"
                                    class="btn btn-sm float-end"
@@ -101,6 +88,7 @@
                                         aria-selected="true">
                                     <i class="fas fa-anchor me-2"></i>BLACK BOX LOG
                                 </button>
+                                <!--
                                 <div id="hoverDiv1" class="hover-content">
                                            <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="gnss-qc-card">GNSS</button>
                                            <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="hdop-qc-card">PDOP</button>
@@ -108,6 +96,7 @@
                                            <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="vessel-sog-card"> SOG</button>
                                            <button class="btn btn-sm btn-primary qc-window-button" data-card-target ="drift-qc-card">DRIFT</button>
                                 </div>
+                                -->
                               </div>
                            </li>
                            <li class="nav-item" role="presentation">
@@ -137,14 +126,11 @@
                         {% include "rov/partials/sv_map_tabs.html" %}
                   </div>
                   <div class="tab-pane fade" id="pills-bbox" role="tabpanel" aria-labelledby="pills-bbox-tab">
-                      {% include "rov/cards/gnss_qc_card.html" %}
-                      {% include "rov/cards/hdop_pdop_vdop_card.html" %}
-                      {% include "rov/cards/rov_depths_qc_card.html" %}
-                      {% include "rov/cards/vessel_sog_card.html" %}
-                      {% include "rov/cards/cog_hdg_qc_card.html" %}
-                      {% include "rov/cards/drift_qc_card.html" %}
+                      {% include "rov/partials/bbox_file_selected_plots.html" %}
                   </div>
-                  <div class="tab-pane fade" id="pills-line" role="tabpanel" aria-labelledby="pills-line-tab">...</div>
+                  <div class="tab-pane fade" id="pills-line" role="tabpanel" aria-labelledby="pills-line-tab">
+                      {% include "rov/partials/selected_line_qc_tabs.html" %}
+                  </div>
             </div>
         </div><!--End of right col-->
     </div><!--End of row-->

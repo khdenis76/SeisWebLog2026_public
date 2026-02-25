@@ -1,0 +1,53 @@
+/* container spacing */
+.qc-tabs { flex-wrap: wrap; }
+
+/* ultra-compact button */
+.qc-btn{
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .68rem;          /* small text */
+  padding: 2px 8px;           /* small size */
+  line-height: 1.15;
+  border-radius: 7px;
+  border: 1px solid rgba(0,0,0,.08);
+  background: #f3f4f6;
+  color: #111827;
+  font-weight: 600;
+  transition: transform .12s ease, opacity .12s ease, box-shadow .12s ease;
+  user-select: none;
+}
+
+.qc-btn i { font-size: .72rem; opacity: .9; }
+.qc-btn span { white-space: nowrap; }
+
+/* hover */
+.qc-btn:hover { transform: translateY(-1px); opacity: .92; }
+
+/* active */
+.qc-btn.active{
+  color: #fff;
+  border-color: rgba(0,0,0,.18);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.12) inset;
+}
+
+/* plot area */
+.qc-plot-slot { min-height: 420px; }
+
+/* Delta symbol */
+.delta{
+  font-weight: 900;
+  font-size: .82rem;
+  margin-right: .05rem;
+}
+
+/* Per-tab colors (active only) */
+.qc-water.active   { background: #0d6efd; } /* blue */
+.qc-primsec.active { background: #6f42c1; } /* purple */
+.qc-deplpre.active { background: #20c997; } /* teal */
+.qc-lineinfo.active{ background: #495057; } /* gray */
+.qc-map.active     { background: #198754; } /* green */
+.qc-delta.active   { background: #fd7e14; } /* orange */
+.qc-xline.active   { background: #0dcaf0; } /* cyan */
+.qc-timing.active  { background: #dc3545; } /* red */
+.qc-3d.active      { background: #111827; } /* near-black */
