@@ -1,11 +1,12 @@
 import math
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 from bokeh.embed import json_item
 from bokeh.layouts import column, gridplot, row
-from bokeh.models import ColumnDataSource, HoverTool, Range1d, Button, CustomJS, FactorRange, LegendItem, Legend
+from bokeh.models import ColumnDataSource, HoverTool, Range1d, Button, CustomJS, FactorRange, LegendItem, Legend, Div
 from bokeh.palettes import Category10, Turbo256, Category20
 from bokeh.plotting import figure, show
 import numpy as np
@@ -305,6 +306,228 @@ class DSRLineGraphics(object):
 
         return layout
 
+    def _error_layout(
+            self,
+            title: str,
+            message: str,
+            *,
+            details: str = "",
+            level: str = "error",  # "error" | "warning" | "info"
+            is_show: bool = False,
+            json_return: bool = False,
+            retry_js: str = "window.location.reload();",
+    ):
+        # Timestamp (no imports)
+        ts = str(pd.Timestamp.now().strftime("%d/%m/%Y %H:%M:%S"))
+
+        # Simple HTML escaping (avoid breaking layout if message has < > &)
+        def _esc(s):
+            if s is None:
+                return ""
+            s = str(s)
+            return (
+                s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+
+        icon_map = {
+            "error": "❌",
+            "warning": "⚠️",
+            "info": "ℹ️",
+        }
+        border_map = {
+            "error": "#ef4444",
+            "warning": "#f59e0b",
+            "info": "#3b82f6",
+        }
+        bg_map = {
+            "error": "#fff5f5",
+            "warning": "#fffbeb",
+            "info": "#eff6ff",
+        }
+
+        icon = icon_map.get(level, "❌")
+        border = border_map.get(level, "#ef4444")
+        bg = bg_map.get(level, "#fff5f5")
+
+        title_html = _esc(title)
+        msg_html = _esc(message)
+        details_html = _esc(details).replace("\n", "<br>")
+
+        panel = Div(
+            text=f"""
+            <div style="
+                border:1px solid {border};
+                border-left:6px solid {border};
+                background:{bg};
+                padding:12px 14px;
+                border-radius:10px;
+                font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+            ">
+              <div style="display:flex; gap:10px; align-items:flex-start;">
+                <div style="font-size:20px; line-height:1;">{icon}</div>
+                <div style="flex:1;">
+                  <div style="font-weight:700; font-size:14px; margin-bottom:2px;">
+                    {title_html}
+                  </div>
+                  <div style="font-size:13px; margin-bottom:6px;">
+                    {msg_html}
+                  </div>
+
+                  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                    <div style="font-size:12px; color:#6b7280;">
+                      <b>Time:</b> {ts}
+                    </div>
+                    <div style="font-size:12px; color:#6b7280;">
+                      <b>Level:</b> {_esc(level)}
+                    </div>
+                  </div>
+
+                  {"<div style='margin-top:8px; font-size:12px; color:#374151;'><b>Details:</b><div style='margin-top:4px;'>" + details_html + "</div></div>" if details_html else ""}
+                </div>
+              </div>
+            </div>
+            """,
+            sizing_mode="stretch_width",
+        )
+
+        retry_btn = Button(label="Retry", button_type="primary", width=90)
+        retry_btn.js_on_click(CustomJS(code=retry_js))
+
+        # Empty plot placeholder (keeps plot area consistent)
+        p = figure(
+            height=220,
+            toolbar_location=None,
+            x_axis_type="datetime",
+            title="",
+            width_policy="max",
+        )
+        p.xaxis.visible = False
+        p.yaxis.visible = False
+        p.xgrid.visible = False
+        p.ygrid.visible = False
+        p.outline_line_alpha = 0.25
+
+        layout = column(
+            panel,
+            row(retry_btn, sizing_mode="stretch_width"),
+            p,
+            sizing_mode="stretch_both",
+        )
+
+        if is_show:
+            show(layout)
+            return None
+
+        if json_return:
+            return json_item(layout)
+
+        return layout
+
+
+
+    def _plotly_error_html(
+            self,
+            title="Plot Error",
+            message="Something went wrong.",
+            details=None,
+            level="error",  # "error" | "warning" | "info"
+            retry_js=None,  # optional JS function name to call (no parentheses)
+            is_show=False,
+            json_return=False,
+    ):
+        """
+        Plotly-friendly error output.
+
+        - Default: returns HTML string for {{ plotly_plot|safe }}
+        - json_return=True: returns dict suitable for JsonResponse
+        - is_show=True: prints the HTML to console (useful in tests) and returns None
+        """
+
+        icon_map = {"error": "❌", "warning": "⚠", "info": "ℹ"}
+        color_map = {"error": "#f8d7da", "warning": "#fff3cd", "info": "#e7f1ff"}
+        border_map = {"error": "#dc3545", "warning": "#ffc107", "info": "#0d6efd"}
+
+        lvl = str(level or "error").strip().lower()
+        icon = icon_map.get(lvl, "❌")
+        bg = color_map.get(lvl, "#f8d7da")
+        border = border_map.get(lvl, "#dc3545")
+
+        # Robust timestamp (works even if datetime wasn't imported elsewhere)
+        try:
+            ts = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            ts = ""
+
+        # Avoid None and keep HTML safe-ish
+        title_txt = "" if title is None else str(title)
+        msg_txt = "" if message is None else str(message)
+
+        retry_button = ""
+        if retry_js:
+            fn = str(retry_js).strip()
+            # allow passing "reloadChart" or "reloadChart()"
+            onclick = fn if fn.endswith(")") else f"{fn}()"
+            retry_button = f"""
+            <button class="btn btn-sm btn-outline-dark mt-3" onclick="{onclick}">
+                Retry
+            </button>
+            """
+
+        details_block = ""
+        if details:
+            details_block = f"""
+            <div class="mt-2 small text-muted" style="white-space:pre-wrap;">
+                <b>Details:</b><br>{details}
+            </div>
+            """
+
+        html = f"""
+        <div style="
+            border: 1px solid {border};
+            background: {bg};
+            padding: 20px;
+            border-radius: 10px;
+            width: 100%;
+        ">
+            <div style="font-size:18px; font-weight:600;">
+                {icon} {title_txt}
+            </div>
+
+            <div class="mt-2">
+                {msg_txt}
+            </div>
+
+            {details_block}
+
+            <div class="mt-3 small text-muted">
+                Generated: {ts}
+            </div>
+
+            {retry_button}
+        </div>
+        """
+
+        if is_show:
+            # Plotly errors are HTML; showing in console is the safest "show"
+            print(html)
+            return None
+
+        if json_return:
+            # Good for Django JsonResponse({"ok": False, **result})
+            return {
+                "ok": False,
+                "level": lvl,
+                "title": title_txt,
+                "message": msg_txt,
+                "details": details,
+                "timestamp": ts,
+                "html": html,
+            }
+
+        return html
+
     @staticmethod
     def add_inline_xline_offsets(
             dsr_df: pd.DataFrame,
@@ -591,22 +814,7 @@ class DSRLineGraphics(object):
             False -> return layout object
         """
 
-        import numpy as np
-        import pandas as pd
 
-        from bokeh.layouts import column, row
-        from bokeh.models import (
-            ColumnDataSource,
-            HoverTool,
-            Range1d,
-            CustomJS,
-            Button,
-            FactorRange,
-        )
-        from bokeh.plotting import figure, show
-        from bokeh.embed import json_item
-        from bokeh.transform import dodge, factor_cmap
-        from bokeh.palettes import Category10, Category20, Turbo256
 
         # ---------------- Empty safety ----------------
         if df is None or len(df) == 0:
@@ -988,83 +1196,120 @@ class DSRLineGraphics(object):
             y2_label=None,
             y3_label=None,
             y_axis_label="Water depth",
-            category_col="ROV",  # e.g. "ROV"
+            category_col="ROV",
             line_col="Line",
-            point_col="Point",
+            point_col=None,
             rov_col="ROV",
             ts_col="TimeStamp",
             require_category=True,
             reverse_y_if_negative=True,
             legend_title="Legend",
+            x_tick_step=5,  # show each N label (others blank)
+            x_tick_font_size="8pt",
             json_return=False,
             is_show=False,
     ):
         """
-        3 stacked vbar plots:
+        3 stacked vbar plots (shared categorical x):
           - shared X (Stations) via shared FactorRange
           - merged toolbar for all plots (gridplot merge_tools=True)
-          - one legend above the stack (Legend added to top plot 'above')
-          - each plot: one series (y_col) with separate renderer per category (ROV)
+          - one legend above the stack (attached to top plot 'above')
+          - per plot: one numeric series (y_col) with separate renderer per category_col (e.g. ROV)
+          - X labels vertical and not dense: only each `x_tick_step` label is shown (others blank)
 
         Returns:
-          layout (default) OR json_item(layout) if json_return=True
+          layout OR json_item(layout) if json_return=True
         """
 
-        # ---------- empty safety
-        if df is None or len(df) == 0:
-            p = figure(title="No data", sizing_mode="stretch_both")
-            layout = column(p, sizing_mode="stretch_both")
-            if is_show and not json_return:
-                show(layout)
-            return json_item(layout) if json_return else layout
+        # ---------- unified error return (uses your self._error_layout)
+        def _err(msg: str):
+            try:
+                return self._error_layout(msg, json_return=json_return, is_show=is_show)
+            except TypeError:
+                # fallback if your _error_layout has different signature
+                return self._error_layout(msg)
+
+        # ---------- df checks
+        if df is None:
+            return _err("No dataframe provided.")
+        if not hasattr(df, "columns"):
+            return _err("Input must be a pandas DataFrame.")
+        if len(df) == 0:
+            return _err("No data to plot (dataframe is empty).")
 
         d = df.copy()
 
-        # ---------- numeric conversion
-        if x_col in d.columns:
-            d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
+        # ---------- required columns
+        if x_col not in d.columns:
+            return _err(f"Missing required x column: '{x_col}'.")
 
-        for yc in (y1_col, y2_col, y3_col):
-            if yc in d.columns:
-                d[yc] = pd.to_numeric(d[yc], errors="coerce")
+        # At least one Y must exist
+        if (y1_col not in d.columns) and (y2_col not in d.columns) and (y3_col not in d.columns):
+            return _err(f"None of y-columns exist in df: '{y1_col}', '{y2_col}', '{y3_col}'.")
 
-        d = d.dropna(subset=[x_col])
-        if len(d) == 0:
-            p = figure(title="No stations", sizing_mode="stretch_both")
-            layout = column(p, sizing_mode="stretch_both")
-            if is_show and not json_return:
-                show(layout)
-            return json_item(layout) if json_return else layout
-
-        # ---------- categories
+        # ---------- category
         if category_col not in d.columns:
             d[category_col] = ""
         else:
             d[category_col] = d[category_col].astype(str).fillna("")
 
+        # ---------- numeric conversion
+        d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
+
+        for yc in (y1_col, y2_col, y3_col):
+            if yc in d.columns:
+                d[yc] = pd.to_numeric(d[yc], errors="coerce")
+
+        # ---------- drop invalid x
+        d = d.dropna(subset=[x_col])
+        if len(d) == 0:
+            return _err(f"No valid '{x_col}' values after numeric conversion.")
+
+        # ---------- require category
         if require_category:
             d = d[d[category_col].astype(str).str.strip().ne("")]
+            if len(d) == 0:
+                return _err(f"No rows with non-empty '{category_col}' after filtering.")
 
-        if len(d) == 0:
-            p = figure(title=f"No {category_col}", sizing_mode="stretch_both")
-            layout = column(p, sizing_mode="stretch_both")
-            if is_show and not json_return:
-                show(layout)
-            return json_item(layout) if json_return else layout
+        # ---------- ensure at least some finite y exists
+        def _finite_count(col: str) -> int:
+            if col not in d.columns:
+                return 0
+            arr = pd.to_numeric(d[col], errors="coerce").to_numpy(dtype=float)
+            return int(np.isfinite(arr).sum())
+
+        if (_finite_count(y1_col) + _finite_count(y2_col) + _finite_count(y3_col)) == 0:
+            return _err("No numeric Y values available to plot (all Y columns are empty/NaN).")
 
         # ---------- sort
         d = d.sort_values(by=[x_col])
 
-        # ---------- station factors (shared)
-        stations = d[x_col].to_numpy()
+        # ---------- station factors (categorical)
+        stations = d[x_col].to_numpy(dtype=float)
         station_factors = [str(int(s)) if float(s).is_integer() else str(s) for s in stations]
         d["_station_factor"] = station_factors
 
-        # Keep unique stations in order of appearance
         x_factors = d["_station_factor"].drop_duplicates().tolist()
+        if not x_factors:
+            return _err("No stations available after processing.")
+
         shared_x = FactorRange(*x_factors)
 
-        # ---------- y-range helper (optionally reversed if negative)
+        # ---------- x label density (categorical-safe)
+        try:
+            step = int(x_tick_step)
+            if step < 1:
+                step = 1
+        except Exception:
+            step = 1
+
+        # Only show each Nth label; others become ""
+        x_label_overrides = {
+            f: (f if (i % step == 0) else "")
+            for i, f in enumerate(x_factors)
+        }
+
+        # ---------- y-range helper
         def _make_y_range(dframe, y_col):
             if y_col not in dframe.columns:
                 return Range1d(start=-1, end=1)
@@ -1072,26 +1317,50 @@ class DSRLineGraphics(object):
             arr = pd.to_numeric(dframe[y_col], errors="coerce").to_numpy(dtype=float)
             arr = arr[np.isfinite(arr)]
             if arr.size == 0:
-                y_min, y_max = -1.0, 1.0
-            else:
-                y_min, y_max = float(np.min(arr)), float(np.max(arr))
+                return Range1d(start=-1, end=1)
 
+            y_min, y_max = float(np.min(arr)), float(np.max(arr))
             pad = (y_max - y_min) * 0.05 if (y_max - y_min) > 0 else (abs(y_min) * 0.05 + 1.0)
 
             if reverse_y_if_negative and y_min < 0:
-                # reversed axis
-                return Range1d(start=y_max + pad, end=y_min - pad)
+                return Range1d(start=y_max + pad, end=y_min - pad)  # reversed
             return Range1d(start=y_min - pad, end=y_max + pad)
 
-        # ---------- palette (repeats if many categories)
+        # ---------- palette (repeats)
         base_palette = [
             "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
             "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
         ]
+
         categories = sorted(d[category_col].unique().tolist())
+        if not categories:
+            categories = [""]
 
         # ---------- build one plot
         def _build_one_plot(plot_title, y_col, y_label_text):
+            # If missing or empty series -> create a “soft” plot with note (not a hard error)
+            if y_col not in d.columns:
+                p = figure(
+                    title=f"{plot_title} (missing '{y_col}')",
+                    x_range=shared_x,
+                    sizing_mode="stretch_both",
+                    tools="pan,wheel_zoom,box_zoom,reset,save",
+                    active_scroll="wheel_zoom",
+                    min_border_right=35,
+                )
+                return p, []
+
+            if _finite_count(y_col) == 0:
+                p = figure(
+                    title=f"{plot_title} (no numeric values in '{y_col}')",
+                    x_range=shared_x,
+                    sizing_mode="stretch_both",
+                    tools="pan,wheel_zoom,box_zoom,reset,save",
+                    active_scroll="wheel_zoom",
+                    min_border_right=35,
+                )
+                return p, []
+
             p = figure(
                 title=plot_title,
                 x_range=shared_x,
@@ -1101,15 +1370,22 @@ class DSRLineGraphics(object):
                 tools="pan,wheel_zoom,box_zoom,reset,save",
                 active_scroll="wheel_zoom",
                 sizing_mode="stretch_both",
+                min_border_right=35,
             )
+
             p.xgrid.grid_line_alpha = 0.15
             p.ygrid.grid_line_alpha = 0.15
+
+            # X axis style: vertical + not dense (categorical-safe)
+            p.xaxis.major_label_orientation = 1.5708  # 90 degrees
+            p.xaxis.major_label_text_font_size = x_tick_font_size
+            p.xaxis.major_label_standoff = 6
+            p.xaxis.major_label_overrides = x_label_overrides
 
             hover = HoverTool(
                 mode="mouse",
                 tooltips=[
                     ("Line", "@line"),
-                    ("Point", "@point"),
                     ("ROV", "@rov"),
                     ("TimeStamp", "@ts"),
                     ("Station", "@station"),
@@ -1121,25 +1397,25 @@ class DSRLineGraphics(object):
             renderers = []
             legend_items = []
 
-            # Create one renderer per category (legend item per category for this y series)
             for i, cat in enumerate(categories):
                 sub = d[d[category_col] == cat]
                 if len(sub) == 0:
                     continue
 
+                y_arr = pd.to_numeric(sub[y_col], errors="coerce").to_numpy(dtype=float)
+
                 src = ColumnDataSource(
                     data=dict(
                         station=sub["_station_factor"].to_numpy(),
-                        y=pd.to_numeric(sub[y_col], errors="coerce").to_numpy() if y_col in sub.columns else np.full(
-                            len(sub), np.nan),
-                        rov=sub[rov_col].astype(str).fillna("").to_numpy() if rov_col in sub.columns else np.array(
-                            [""] * len(sub)),
-                        ts=sub[ts_col].astype(str).fillna("").to_numpy() if ts_col in sub.columns else np.array(
-                            [""] * len(sub)),
-                        line=sub[line_col].astype(str).fillna("").to_numpy() if line_col in sub.columns else np.array(
-                            [""] * len(sub)),
-                        point=sub[point_col].astype(str).fillna(
-                            "").to_numpy() if point_col in sub.columns else np.array([""] * len(sub)),
+                        y=y_arr,
+                        rov=(sub[rov_col].astype(str).fillna("").to_numpy()
+                             if rov_col in sub.columns else np.array([""] * len(sub))),
+                        ts=(sub[ts_col].astype(str).fillna("").to_numpy()
+                            if ts_col in sub.columns else np.array([""] * len(sub))),
+                        line=(sub[line_col].astype(str).fillna("").to_numpy()
+                              if line_col in sub.columns else np.array([""] * len(sub))),
+                        point=(sub[point_col].astype(str).fillna("").to_numpy()
+                               if (point_col and point_col in sub.columns) else np.array([""] * len(sub))),
                     )
                 )
 
@@ -1155,9 +1431,7 @@ class DSRLineGraphics(object):
                 )
                 renderers.append(r)
 
-                # Legend label includes series name + category
-                label = f"{y_label_text} · {cat}"
-                legend_items.append(LegendItem(label=label, renderers=[r]))
+                legend_items.append(LegendItem(label=f"{y_label_text} · {cat}", renderers=[r]))
 
             hover.renderers = renderers
             return p, legend_items
@@ -1171,11 +1445,11 @@ class DSRLineGraphics(object):
         p2, leg_items2 = _build_one_plot(title2, y2_col, s2_label)
         p3, leg_items3 = _build_one_plot(title3, y3_col, s3_label)
 
-        # Only bottom plot shows x-axis labels (cleaner)
+        # only bottom plot shows x-axis labels
         p1.xaxis.visible = False
         p2.xaxis.visible = False
 
-        # ---------- one legend ABOVE all plots (attach to top plot "above")
+        # ---------- one legend ABOVE all plots
         all_leg_items = leg_items1 + leg_items2 + leg_items3
 
         if all_leg_items:
@@ -1198,13 +1472,12 @@ class DSRLineGraphics(object):
         stack = gridplot(
             [[p1], [p2], [p3]],
             merge_tools=True,
-            toolbar_location="right",
+            toolbar_location="above",
             sizing_mode="stretch_both",
         )
 
-        # ---------- one control toolbox for legend (optional)
+        # ---------- legend toggle button
         btn_toggle = Button(label="Legend", button_type="default", width=80)
-
         if L is not None:
             btn_toggle.js_on_click(CustomJS(args=dict(leg=L), code="leg.visible = !leg.visible;"))
         else:

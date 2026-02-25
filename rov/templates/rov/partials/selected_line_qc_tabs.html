@@ -15,6 +15,13 @@
       <i class="fa-solid fa-scale-balanced"></i><span>Prim vs Sec</span>
     </button>
   </li>
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-delta"
+            id="tab-ellipse" data-bs-toggle="tab" data-bs-target="#pane-ellipse"
+            type="button" role="tab" aria-controls="pane-ellipse" aria-selected="false">
+      <i class="fa-solid fa-reacteurope"></i><span>95% Ellipse</span>
+    </button>
+  </li>
 
   <li class="nav-item" role="presentation">
     <button class="qc-btn qc-deplpre"
@@ -76,11 +83,14 @@
 
 <div class="tab-content border rounded-3 p-2" id="qcTabsContent">
   <div class="tab-pane fade show active" id="pane-water" role="tabpanel" aria-labelledby="tab-water">
-    <div id="plot-water" class="qc-plot-slot">Open tab to load…</div>
+    <div id="plot-water" class="qc-plot-slot w-100" style="height: 50vh">Open tab to load…</div>
   </div>
 
   <div class="tab-pane fade" id="pane-primsec" role="tabpanel" aria-labelledby="tab-primsec">
-    <div id="plot-primsec" class="qc-plot-slot">Open tab to load…</div>
+    <div id="plot-primsec" class="qc-plot-slot w-100" style="height: 100vh">Open tab to load…</div>
+  </div>
+  <div class="tab-pane fade" id="pane-ellipse" role="tabpanel" aria-labelledby="tab-ellipse">
+    <div id="plot-ellipse" class="qc-plot-slot w-100" style="height: 100vh">Open tab to load…</div>
   </div>
 
   <div class="tab-pane fade" id="pane-deplpre" role="tabpanel" aria-labelledby="tab-deplpre">
@@ -88,7 +98,8 @@
   </div>
 
   <div class="tab-pane fade" id="pane-lineinfo" role="tabpanel" aria-labelledby="tab-lineinfo">
-    <div id="plot-lineinfo" class="qc-plot-slot">Open tab to load…</div>
+    {%  include "rov/partials/dsr_single_line_table.html" %}
+    <!--<div id="plot-lineinfo" class="qc-plot-slot">Open tab to load…</div>-->
   </div>
 
   <div class="tab-pane fade" id="pane-map" role="tabpanel" aria-labelledby="tab-map">

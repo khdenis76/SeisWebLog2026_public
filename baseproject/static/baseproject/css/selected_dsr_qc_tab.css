@@ -1,8 +1,10 @@
 /* container spacing */
-.qc-tabs { flex-wrap: wrap; }
+.qc-tabs {
+  flex-wrap: wrap;
+}
 
 /* ultra-compact button */
-.qc-btn{
+.qc-btn {
   display: inline-flex;
   align-items: center;
   gap: .35rem;
@@ -18,36 +20,48 @@
   user-select: none;
 }
 
-.qc-btn i { font-size: .72rem; opacity: .9; }
-.qc-btn span { white-space: nowrap; }
+.qc-btn i {
+  font-size: .72rem;
+  opacity: .9;
+}
+
+.qc-btn span {
+  white-space: nowrap;
+}
 
 /* hover */
-.qc-btn:hover { transform: translateY(-1px); opacity: .92; }
+.qc-btn:hover {
+  transform: translateY(-1px);
+  opacity: .92;
+}
 
-/* active */
-.qc-btn.active{
+/* active (base style for all tabs) */
+.qc-btn.active {
   color: #fff;
   border-color: rgba(0,0,0,.18);
   box-shadow: 0 0 0 1px rgba(255,255,255,.12) inset;
 }
 
 /* plot area */
-.qc-plot-slot { min-height: 420px; }
+.qc-plot-slot {
+  min-height: 420px;
+}
 
-/* Delta symbol */
-.delta{
+/* Delta symbol styling */
+.delta {
   font-weight: 900;
   font-size: .82rem;
   margin-right: .05rem;
+  letter-spacing: .4px;
 }
 
 /* Per-tab colors (active only) */
-.qc-water.active   { background: #0d6efd; } /* blue */
-.qc-primsec.active { background: #6f42c1; } /* purple */
-.qc-deplpre.active { background: #20c997; } /* teal */
-.qc-lineinfo.active{ background: #495057; } /* gray */
-.qc-map.active     { background: #198754; } /* green */
-.qc-delta.active   { background: #fd7e14; } /* orange */
-.qc-xline.active   { background: #0dcaf0; } /* cyan */
-.qc-timing.active  { background: #dc3545; } /* red */
-.qc-3d.active      { background: #111827; } /* near-black */
+.qc-water.active    { background: #0d6efd; } /* blue */
+.qc-primsec.active  { background: #6f42c1; } /* purple */
+.qc-deplpre.active  { background: #20c997; } /* teal */
+.qc-lineinfo.active { background: #495057; } /* gray */
+.qc-map.active      { background: #198754; } /* green */
+.qc-delta.active    { background: #ea580c; } /* strong engineering orange */
+.qc-xline.active    { background: #0dcaf0; } /* cyan */
+.qc-timing.active   { background: #dc3545; } /* red */
+.qc-3d.active       { background: #111827; } /* near-black */

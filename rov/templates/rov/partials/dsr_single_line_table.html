@@ -1,10 +1,69 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="dsr-wrap">
+  <div class="dsr-scroll">
+    <table class="dsr-table">
+      <thead>
+        <tr>
+
+          <!-- IDENTIFIERS -->
+          <!--<th class="band-id sticky-1 w-stn">Line</th>-->
+          <th class="band-id sticky-1 w-line">Line</th>
+          <th class="band-id sticky-2 w-stn">Station</th>
+          <th class="band-id sticky-3 w-node">Node</th>
+
+          <!-- PREPLOT -->
+          <th class="band-preplot">PreplotE</th>
+          <th class="band-preplot">PreplotN</th>
+
+          <!-- DEPLOY -->
+          <th class="band-deploy">DEP.ROV</th>
+          <th class="band-deploy">DEP.Time</th>
+          <th class="band-deploy">PrimE</th>
+          <th class="band-deploy">PrimN</th>
+          <th class="band-deploy">SecE</th>
+          <th class="band-deploy">SecN</th>
+          <th class="band-deploy">Sigma</th>
+
+          <!-- DELTA -->
+          <th class="band-delta">ΔE Prim to Sec</th>
+          <th class="band-delta">ΔN Prim to Sec</th>
+          <th class="band-delta">DC Prim to Sec</th>
+
+          <th class="band-delta">DC to PP</th>
+          <th class="band-delta">Brg</th>
+          <th class="band-quality">σE95%</th>
+          <th class="band-quality">σN95%</th>
+
+          <!-- ELEV -->
+          <th class="band-elev">PrimZ</th>
+          <th class="band-elev">SecZ</th>
+
+          <!-- QUALITY -->
+          <th class="band-quality">Quality</th>
+
+          <!-- RECOVER -->
+          <th class="band-recov">REC ROV</th>
+          <th class="band-recov">Rec Date</th>
+
+          <!-- STATUS -->
+          <th class="band-status">Status</th>
+          <th class="band-status">DeploymentType</th>
+          <th class="band-dates">Comments</th>
+          <!-- DATES -->
+         <!-- <th class="band-dates">Date</th>-->
+          <!--<th class="band-dates">Date1</th>-->
+
+          <!-- WATER -->
+          <th class="band-water">DaysInWater</th>
+          <th class="band-water">TodayDays</th>
+
+        </tr>
+      </thead>
+
+      <!-- 🔥 LAZY LOAD CONTAINER -->
+      <tbody id="dsr-table-body">
+        <!-- JS will inject rows here -->
+      </tbody>
+
+    </table>
+  </div>
+</div>

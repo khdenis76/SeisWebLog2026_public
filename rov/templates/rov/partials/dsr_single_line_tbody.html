@@ -1,10 +1,59 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+{% for r in rows %}
+<tr>
+
+  <td class="sticky-1 w-line num"><strong>{{ r.Line }}</strong></td>
+  <td class="sticky-2 w-stn num"><strong>{{ r.Station }}</strong></td>
+  <td class="sticky-3 w-node num">{{ r.Node }}</td>
+
+  <td class="num">{{ r.PreplotEasting }}</td>
+  <td class="num">{{ r.PreplotNorthing }}</td>
+
+  <td class="txt">{{ r.ROV }}</td>
+  <td class="txt">{{ r.TimeStamp }}</td>
+  <td class="num">{{ r.PrimaryEasting }}</td>
+  <td class="num">{{ r.PrimaryNorthing }}</td>
+  <td class="num">{{ r.SecondaryEasting }}</td>
+  <td class="num">{{ r.SecondaryNorthing }}</td>
+  <td class="num">{{ r.Sigma }}</td>
+
+  <td class="num">{{ r.DeltaEprimarytosecondary }}</td>
+  <td class="num">{{ r.DeltaNprimarytosecondary }}</td>
+  <td class="num">{{ r.Rangeprimarytosecondary }}</td>
+  <td class="num">{{ r.RangetoPrePlot }}</td>
+  <td class="num">{{ r.BrgtoPrePlot }}</td>
+  <td class="num
+            {% if r.Primary_e95 %}
+                {% if r.Primary_e95 >= max_sma %}
+                      bg-danger text-white fw-bold
+                 {% elif r.Primary_e95 > warning_sma %}
+                      bg-warning text-dark fw-bold
+                 {% endif %}
+            {% endif %}">
+      {{ r.Primary_e95|floatformat:1 }}
+  </td>
+  <td class="num
+          {% if r.Primary_n95 %}
+                {% if r.Primary_n95 >= max_sma %}
+                      bg-danger text-white fw-bold
+                 {% elif r.Primary_n95 > warning_sma %}
+                      bg-warning text-dark fw-bold
+                 {% endif %}
+            {% endif %}
+">{{ r.Primary_n95|floatformat:1 }}</td>
+
+  <td class="num">{{ r.PrimaryElevation }}</td>
+  <td class="num">{{ r.SecondaryElevation }}</td>
+
+  <td class="txt"><span class="pill">{{ r.Quality }}</span></td>
+
+  <td class="txt">{{ r.ROV1|default_if_none:"" }}</td>
+  <td class="txt">{{ r.TimeStamp1|default_if_none:"" }}</td>
+
+  <td class="txt"><span class="pill">{{ r.Status|default_if_none:"" }}</span></td>
+  <td class="txt">{{ r.DeploymentType|default_if_none:"" }}</td>
+
+  <td class="txt">{{ r.Comments|default_if_none:"" }}</td>
+  <td class="num">{{ r.DaysInWater|default_if_none:"" }}</td>
+  <td class="num">{{ r.TodayDaysInWater|default_if_none:"" }}</td>
+</tr>
+{% endfor %}

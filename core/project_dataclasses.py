@@ -101,6 +101,8 @@ class NodeQCSettings:
     max_xl_offset: float = 0.0
     max_radial_offset: float = 0.0
     percent_of_depth: float = 0.0
+    max_sma:float = 0.0
+    warning_sma:float = 0.0
     # 0 = radial, 1 = inline, 2 = crossline
     use_offset: int = 0
     battery_life: int = 0

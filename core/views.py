@@ -298,6 +298,7 @@ def project_settings_view(request):
             line_code=request.POST.get("main_line_code", "").strip(),
             start_project=request.POST.get("main_start_project", "").strip(),
             project_duration=f_int("main_project_duration", "30"),
+
         )
 
         # ---- GEOMETRY ----
@@ -324,7 +325,9 @@ def project_settings_view(request):
             battery_life=f_int("battery_life", "0"),
             gnss_fixed_quality=f_int("gnss_fixed_quality", "0"),
             gnss_diffage_warning=f_int("gnss_diffage_warning", "0"),
-            gnss_diffage_error=f_int("gnss_diffage_error", "0")
+            gnss_diffage_error=f_int("gnss_diffage_error", "0"),
+            max_sma = f_float("max_sma", "0"),
+            warning_sma=f_float("warning_sma", "0"),
         )
 
         # ---- GUN QC ----

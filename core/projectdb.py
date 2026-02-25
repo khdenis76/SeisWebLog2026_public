@@ -181,6 +181,8 @@ class ProjectDB:
 	                     "gnss_diffage_warning"	INTEGER DEFAULT 0,
 	                     "gnss_diffage_error"	INTEGER DEFAULT 0,
 	                     "gnss_fixed_quality"	INTEGER DEFAULT 0,
+	                     "max_sma" REAL DEFAULT 0,
+	                     "warning_sma" REAL DEFAULT 0, 
 	                     PRIMARY KEY("id")
                 )
                 """
@@ -192,12 +194,13 @@ class ProjectDB:
                     """
                     INSERT INTO project_node_qc
                         (id, max_il_offset, max_xl_offset, max_radial_offset,
-                         percent_of_depth, use_offset,battery_life,gnss_diffage_warning,gnss_diffage_error,gnss_fixed_quality)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         percent_of_depth, use_offset,battery_life,gnss_diffage_warning,gnss_diffage_error,gnss_fixed_quality,max_sma,warning_sma)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         n.max_il_offset, n.max_xl_offset, n.max_radial_offset,
-                        n.percent_of_depth, n.use_offset,n.battery_life,n.gnss_diffage_warning,n.gnss_diffage_error,n.gnss_fixed_quality
+                        n.percent_of_depth, n.use_offset,n.battery_life,n.gnss_diffage_warning,
+                        n.gnss_diffage_error,n.gnss_fixed_quality,n.max_sma,n.warning_sma
                     ),
                 )
 
@@ -347,6 +350,8 @@ class ProjectDB:
                 gnss_diffage_error=row["gnss_diffage_error"],
                 gnss_fixed_quality=row["gnss_fixed_quality"],
                 gnss_diffage_warning=row["gnss_diffage_warning"],
+                max_sma=row["max_sma"],
+                warning_sma=row["warning_sma"],
 
 
             )
@@ -455,7 +460,7 @@ class ProjectDB:
                 UPDATE project_node_qc
                 SET max_il_offset = ?, max_xl_offset = ?, max_radial_offset = ?,
                     percent_of_depth = ?, use_offset = ?,battery_life=?,gnss_diffage_error=?,gnss_diffage_warning=?,
-                    gnss_fixed_quality=?
+                    gnss_fixed_quality=?,max_sma=?,warning_sma=? 
                 WHERE id = 1;
                 """,
                 (
@@ -467,7 +472,9 @@ class ProjectDB:
                     data.battery_life,
                     data.gnss_diffage_error,
                     data.gnss_diffage_warning,
-                    data.gnss_fixed_quality
+                    data.gnss_fixed_quality,
+                    data.max_sma,
+                    data.warning_sma
                 ),
             )
             conn.commit()

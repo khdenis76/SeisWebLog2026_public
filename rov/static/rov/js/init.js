@@ -22,11 +22,12 @@ import {initDsrExportSmModal} from "./dsrExportSm.js";
 import {initDsrRovListAutoReload} from "./dsrExportRovs.js";
 import {initDailyProdDaySelect} from "./dailyProdDaySelect.js";
 import {initExportSpsModal} from "./initExportSpsModal.js";
-import {initDsrLineClick} from "./initDSRLineClick.js";
+// import {initDsrLineClick} from "./initDSRLineClick.js";
 import {initBatteryLifeMap,initBatteryLifeRestMap} from "./initBatteryLifeButton.js";
 import {initDSRHistogram} from "./initDSRHistogram.js";
 import {initDSRLineSort} from "./initDSRLineSort.js";
 import {initLineMinMaxQc} from "./initLineMinMaxQCBtn.js";
+import {initDSRLineQCTabs} from "./initDSRLineQCTabs.js";
 
 
 
@@ -52,12 +53,13 @@ export function initAllJSForRovUpload() {
   initDailyProdDaySelect();
   initExportSpsModal();
   initDsrExportSmModal({ rovNames: window.DSR_ROV_NAMES || [] });
-  initDsrLineClick();
+
   initBatteryLifeMap();
   initBatteryLifeRestMap();
   initDSRHistogram();
   initDSRLineSort();
   initLineMinMaxQc();
+  initDSRLineQCTabs();
 
 
     // GNSS QC

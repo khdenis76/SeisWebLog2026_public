@@ -27,4 +27,5 @@ urlpatterns = [
     path("dsr/hist",load_dsr_historgram,name="load_dsr_historgram"),
     path("dsr/line_qc_plot",load_min_max_line_qc,name="load_min_max_line_qc"),
     path("bbox/plot/item/", bbox_plot_item, name="bbox_plot_item"),
+    path("project/rov/dsr/line/qc/plot-item/", dsr_line_qc_plot_item, name="dsr_line_qc_plot_item"),
 ]

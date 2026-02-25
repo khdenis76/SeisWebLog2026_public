@@ -1,3 +1,5 @@
+import math
+
 from bokeh.io import show
 from bokeh.layouts import gridplot
 from dsr_line_graphics import DSRLineGraphics
@@ -9,6 +11,24 @@ from bbox_graphics import BlackBoxGraphics
 project_db_path="D:\\313311_AW1-APEX\\16_SWL_DATA\\AW1\\data\\project.sqlite3"
 plgr=DSRLineGraphics(project_db_path)
 line_df = plgr.read_dsr_for_line(13513)
+line_df['Primary_e95']= line_df['Sigma1']*math.sqrt(5.991)
+line_df['Primary_n95']= line_df['Sigma2']*math.sqrt(5.991)
+line_df['Primary_z95']= line_df['Sigma5']*math.sqrt(5.991)
+
+plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
+                                           rov_col="ROV",
+                                           is_show=True,
+                                           json_return=False,
+                                           reverse_y_if_negative=False,
+                                           y1_col="Primary_e95",
+                                           y2_col="Primary_n95",
+                                           y3_col='Primary_z95',
+                                           title1="σE → 95% Primary(INS)",
+                                           title2="σN → 95% Primary(INS)",
+                                           title3="σZ → 95% Primary(INS)",
+                                           y1_label="σE",y2_label="σN",y3_label="σZ ",y_axis_label="Offset,m"
+                                           )
+"""
 plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
                                            rov_col="ROV",
                                            is_show=True,
@@ -16,9 +36,14 @@ plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
                                            reverse_y_if_negative=False,
                                            y1_col="DeltaEprimarytosecondary",
                                            y2_col="DeltaNprimarytosecondary",
-                                           y3_col="Rangeprimarytosecondary")
+                                           y3_col="Rangeprimarytosecondary",
+                                           title1="Δ Easting Primary(INS) to Secondary(USBL)",
+                                           title2="Δ Northing Primary(INS) to Secondary(USBL)",
+                                           title3="Radial Offset Primary(INS) to Secondary(USBL)",
+                                           y1_label="ΔE",y2_label="ΔN",y3_label="Rad. Offset ",y_axis_label="Offset,m"
+                                           )
 
-"""
+
 plgr.bokeh_one_series_vbar_vs_station_by_category(df=line_df,
                                               y_col="DeltaEprimarytosecondary",
                                               rov_col="ROV",

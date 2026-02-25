@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import os
 import re
 from datetime import datetime, timedelta
@@ -19,6 +20,7 @@ from django.views.decorators.http import require_POST, require_GET
 
 from core.models import UserSettings
 from core.projectdb import ProjectDB
+from rov.dsr_line_graphics import DSRLineGraphics
 from rov.dsr_map_graphics import DSRMapPlots
 from rov.dsrclass import DSRDB
 from rov.bbox_graphics import BlackBoxGraphics
@@ -1295,6 +1297,103 @@ def bbox_plot_item(request):
             "plot_key": plot_key,
             "item": json_item(fig),
         })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+from django.http import JsonResponse
+from django.views.decorators.http import require_POST
+import json
+from bokeh.embed import json_item
+
+@require_POST
+def dsr_line_qc_plot_item(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    try:
+        payload = json.loads(request.body or "{}")
+        line = (payload.get("line") or "").strip()
+        plot_key = (payload.get("plot_key") or "").strip()
+
+        if not line or not plot_key:
+            return JsonResponse({"ok": False, "error": "Missing line or plot_key"}, status=400)
+
+        # You already have DSRLineGraphics class:
+        g = DSRLineGraphics(project.db_path)
+        pdb=ProjectDB(project.db_path)
+
+        # Load df for this line (use your existing DB method)
+        # Example: df = g.read_dsr_for_line(line)  (use your real function)
+        df = g.line_df = g.read_dsr_for_line(line)
+        df['Primary_e95']= df['Sigma1']*math.sqrt(5.991)
+        df['Primary_n95']= df['Sigma2']*math.sqrt(5.991)
+        df['Primary_z95']= df['Sigma5']*math.sqrt(5.991)  # <-- replace with YOUR method
+
+        # Build ONE plot depending on tab requested
+        if plot_key == "water":
+            layout = g.bokeh_two_series_vs_station(df=df,
+                                 series1_col="PrimaryElevation",
+                                 series2_col="SecondaryElevation",
+                                 series1_label="PRIMARY DEPTH",
+                                 series2_label="SECONDARY DEPTH",
+                                 rov_col="ROV",
+                                 is_show=False,
+                                 json_item=False,
+                                 reverse_y_if_negative=False)
+            return JsonResponse({"ok": True, "plot_key": plot_key, "item": json_item(layout)})
+
+        elif plot_key == "primsec":
+            layout = g.bokeh_three_vbar_by_category_shared_x(df=df,
+                                           rov_col="ROV",
+                                           is_show=False,
+                                           json_return=False,
+                                           reverse_y_if_negative=False,
+                                           y1_col="DeltaEprimarytosecondary",
+                                           y2_col="DeltaNprimarytosecondary",
+                                           y3_col="Rangeprimarytosecondary",
+                                           title1="Δ Easting Primary(INS) to Secondary(USBL)",
+                                           title2="Δ Northing Primary(INS) to Secondary(USBL)",
+                                           title3="Radial Offset Primary(INS) to Secondary(USBL)",
+                                           y1_label="ΔE",y2_label="ΔN",y3_label="Rad. Offset ",y_axis_label="Offset,m"
+                                           )
+            return JsonResponse({"ok": True, "plot_key": plot_key, "item": json_item(layout)})
+        elif plot_key == "ellipse":
+            layout = g.bokeh_three_vbar_by_category_shared_x(df=df,
+                                           rov_col="ROV",
+                                           is_show=False,
+                                           json_return=False,
+                                           reverse_y_if_negative=False,
+                                           y1_col="Primary_e95",
+                                           y2_col="Primary_n95",
+                                           y3_col='Primary_z95',
+                                           title1="σE → 95% Primary(INS)",
+                                           title2="σN → 95% Primary(INS)",
+                                           title3="σZ → 95% Primary(INS)",
+                                           y1_label="σE",y2_label="σN",y3_label="σZ ",y_axis_label="Offset,m"
+                                           )
+            return JsonResponse({"ok": True, "plot_key": plot_key, "item": json_item(layout)})
+
+        elif plot_key == "lineinfo":
+            # For non-bokeh tab, return HTML
+            max_sma = pdb.get_node_qc().max_sma
+            warning_sma = pdb.get_node_qc().warning_sma
+            html =render_to_string("rov/partials/dsr_single_line_tbody.html",{
+                         "rows":df.itertuples(),
+                         "max_sma": max_sma,
+                         "warning_sma": warning_sma,
+            })
+
+            return JsonResponse({"ok": True,
+                                 "plot_key": plot_key,
+                                 "html": html})
+
+        # placeholders for later tabs:
+        elif plot_key in {"deplpre", "map", "delta", "xline", "timing", "3d"}:
+            return JsonResponse({"ok": True, "plot_key": plot_key, "html": f"<div class='text-muted p-2'>Plot '{plot_key}' not implemented yet.</div>"})
+
+        return JsonResponse({"ok": False, "error": f"Unknown plot_key: {plot_key}"}, status=400)
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)

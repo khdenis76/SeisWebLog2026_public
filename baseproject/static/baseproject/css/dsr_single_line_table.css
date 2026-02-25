@@ -1,0 +1,252 @@
+/* ==========================================
+   DSR TABLE — FULL CSS (LIGHT + DARK)
+   Bootstrap 5.3 friendly: <html data-bs-theme="dark">
+========================================== */
+
+/* ---------- THEME TOKENS (LIGHT default) ---------- */
+:root{
+  --dsr-bg: #ffffff;
+  --dsr-bg-2: rgba(0,0,0,.015);
+  --dsr-hover: rgba(13,110,253,.06);
+
+  --dsr-border: rgba(0,0,0,.10);
+  --dsr-grid: rgba(0,0,0,.06);
+
+  --dsr-text: #111827;
+
+  /* IMPORTANT: opaque sticky background (fix bleed-through) */
+  --dsr-sticky-bg: #ffffff;
+
+  /* header text (light) */
+  --dsr-header-text: #111827;
+
+  --dsr-pill-bg: rgba(255,255,255,.75);
+  --dsr-pill-border: rgba(0,0,0,.12);
+  --dsr-pill-text: #111827;
+
+  /* header bands */
+  --band-id: #0284c7;
+  --band-preplot: #16a34a;
+  --band-deploy: #7c3aed;
+  --band-recov: #e11d48;
+  --band-delta: #f59e0b;
+  --band-elev: #64748b;
+  --band-quality: #0ea5e9;
+  --band-dates: #10b981;
+  --band-meta: #db2777;
+  --band-status: #2563eb;
+  --band-epoch: #94a3b8;
+  --band-sps: #ef4444;
+  --band-actual: #f97316;
+  --band-flags: #525252;
+  --band-dl: #facc15;
+  --band-water: #22d3ee;
+
+  /* scrollbars */
+  --dsr-scroll-track: #f3f4f6;
+  --dsr-scroll-thumb: #cbd5e1;
+  --dsr-scroll-thumb-hover: #94a3b8;
+
+  --dsr-shadow-sticky: rgba(0,0,0,.18);
+}
+
+/* ---------- DARK TOKENS ---------- */
+[data-bs-theme="dark"]{
+  --dsr-bg: #0f172a;
+  --dsr-bg-2: rgba(255,255,255,.02);
+  --dsr-hover: rgba(59,130,246,.15);
+
+  --dsr-border: rgba(255,255,255,.08);
+  --dsr-grid: rgba(255,255,255,.05);
+
+  --dsr-text: #e2e8f0;
+
+  /* IMPORTANT: opaque sticky background (fix bleed-through) */
+  --dsr-sticky-bg: #111827;
+
+  /* header text (dark) */
+  --dsr-header-text: #ffffff;
+
+  --dsr-pill-bg: rgba(255,255,255,.08);
+  --dsr-pill-border: rgba(255,255,255,.15);
+  --dsr-pill-text: #e2e8f0;
+
+  /* header bands tuned for dark */
+  --band-id: #0369a1;
+  --band-preplot: #166534;
+  --band-deploy: #5b21b6;
+  --band-recov: #9f1239;
+  --band-delta: #b45309;
+  --band-elev: #475569;
+  --band-quality: #0284c7;
+  --band-dates: #047857;
+  --band-meta: #9d174d;
+  --band-status: #1d4ed8;
+  --band-epoch: #334155;
+  --band-sps: #991b1b;
+  --band-actual: #c2410c;
+  --band-flags: #374151;
+  --band-dl: #a16207;
+  --band-water: #0e7490;
+
+  --dsr-scroll-track: #111827;
+  --dsr-scroll-thumb: #334155;
+  --dsr-scroll-thumb-hover: #475569;
+
+  --dsr-shadow-sticky: rgba(0,0,0,.70);
+}
+
+/* ---------- WRAPPER ---------- */
+.dsr-wrap{
+  border: 1px solid var(--dsr-border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--dsr-bg);
+  color: var(--dsr-text);
+}
+
+.dsr-scroll{
+  overflow: auto;
+  max-height: 72vh;
+  background: var(--dsr-bg);
+}
+
+/* ---------- TABLE ---------- */
+table.dsr-table{
+  border-collapse: separate;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
+  font-size: 12.5px;
+  line-height: 1.25;
+  background: var(--dsr-bg) !important; /* ensure opaque */
+  color: var(--dsr-text);
+}
+
+.dsr-table th,
+.dsr-table td{
+  padding: 7px 10px;
+  border-right: 1px solid var(--dsr-grid);
+  border-bottom: 1px solid var(--dsr-grid);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* sticky header */
+.dsr-table thead th{
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  font-weight: 700;
+  letter-spacing: .3px;
+}
+
+/* zebra + hover (NON-sticky cells) */
+.dsr-table tbody tr:nth-child(odd) td{
+  background: var(--dsr-bg-2);
+}
+.dsr-table tbody tr:hover td{
+  background: var(--dsr-hover);
+}
+
+/* ---------- STICKY LEFT COLUMNS ---------- */
+.sticky-1,
+.sticky-2,
+.sticky-3{
+  position: sticky;
+  z-index: 6;
+  background: var(--dsr-sticky-bg) !important;  /* opaque */
+  background-clip: padding-box;
+}
+
+/* positions (adjust to match your sticky column widths) */
+.sticky-1{ left: 0; }
+.sticky-2{ left: 140px; }
+.sticky-3{ left: 260px; }
+
+/* widths for sticky columns */
+.w-line{ min-width: 140px; }
+.w-stn{ min-width: 120px; }
+.w-node{ min-width: 110px; }
+
+.num{ text-align: right; font-variant-numeric: tabular-nums; }
+.txt{ text-align: left; }
+
+/* keep sticky header cells above */
+.dsr-table thead th.sticky-1,
+.dsr-table thead th.sticky-2,
+.dsr-table thead th.sticky-3{
+  z-index: 7;
+}
+
+/* FIX: zebra/hover MUST NOT override sticky backgrounds */
+.dsr-table tbody tr:nth-child(odd) td.sticky-1,
+.dsr-table tbody tr:nth-child(odd) td.sticky-2,
+.dsr-table tbody tr:nth-child(odd) td.sticky-3,
+.dsr-table tbody tr:hover td.sticky-1,
+.dsr-table tbody tr:hover td.sticky-2,
+.dsr-table tbody tr:hover td.sticky-3{
+  background: var(--dsr-sticky-bg) !important;
+}
+
+/* subtle separation line / shadow on last sticky column */
+.dsr-table td.sticky-3,
+.dsr-table th.sticky-3{
+  border-right: 1px solid var(--dsr-grid);
+  box-shadow: 6px 0 10px -10px var(--dsr-shadow-sticky);
+}
+
+/* ---------- HEADER BANDS ---------- */
+.band-id{
+  background: var(--band-id);
+  color: var(--dsr-header-text);
+}
+.band-preplot{ background: var(--band-preplot); color:#fff; }
+.band-deploy{ background: var(--band-deploy); color:#fff; }
+.band-recov{ background: var(--band-recov); color:#fff; }
+.band-elev{ background: var(--band-elev); color:#fff; }
+.band-quality{ background: var(--band-quality); color:#fff; }
+.band-dates{ background: var(--band-dates); color:#fff; }
+.band-meta{ background: var(--band-meta); color:#fff; }
+.band-status{ background: var(--band-status); color:#fff; }
+.band-sps{ background: var(--band-sps); color:#fff; }
+.band-flags{ background: var(--band-flags); color:#fff; }
+
+/* bands that can be "dark text" in light mode */
+.band-delta{ background: var(--band-delta); color:#111; }
+.band-epoch{ background: var(--band-epoch); color:#111; }
+.band-actual{ background: var(--band-actual); color:#111; }
+.band-dl{ background: var(--band-dl); color:#111; }
+.band-water{ background: var(--band-water); color:#083344; }
+
+/* In dark mode, force readable text on those bands */
+[data-bs-theme="dark"] .band-delta,
+[data-bs-theme="dark"] .band-epoch,
+[data-bs-theme="dark"] .band-actual,
+[data-bs-theme="dark"] .band-dl,
+[data-bs-theme="dark"] .band-water{
+  color:#fff;
+}
+
+/* ---------- PILLS ---------- */
+.pill{
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--dsr-pill-bg);
+  color: var(--dsr-pill-text);
+  border: 1px solid var(--dsr-pill-border);
+}
+
+/* ---------- SCROLLBARS (Chrome/Edge) ---------- */
+.dsr-scroll::-webkit-scrollbar{ height: 10px; width: 10px; }
+.dsr-scroll::-webkit-scrollbar-track{ background: var(--dsr-scroll-track); }
+.dsr-scroll::-webkit-scrollbar-thumb{
+  background: var(--dsr-scroll-thumb);
+  border-radius: 6px;
+}
+.dsr-scroll::-webkit-scrollbar-thumb:hover{
+  background: var(--dsr-scroll-thumb-hover);
+}
