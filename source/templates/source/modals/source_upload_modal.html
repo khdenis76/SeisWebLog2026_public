@@ -1,0 +1,134 @@
+<!-- Source Upload Modal -->
+<div class="modal fade" id="sourceUploadModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="fas fa-upload me-2"></i>Load Source Files
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <form id="source-upload-form"
+            method="post"
+            enctype="multipart/form-data"
+            action="{% url 'source_upload_files' %}">
+        {% csrf_token %}
+
+        <div class="modal-body">
+          <div class="row g-3">
+
+            <!-- File type -->
+            <div class="col-12 col-md-6">
+              <label class="form-label">File Type</label>
+              <select class="form-select" id="source-file-type" name="file_type" required>
+                <option value="" selected disabled>Select…</option>
+                <option value="SPS">Source SPS</option>
+                <option value="SHOT">TGS SHOT TABLE</option>
+              </select>
+            </div>
+
+            <!-- Files -->
+            <div class="col-12">
+              <label class="form-label">Files</label>
+              <input class="form-control"
+                     type="file"
+                     id="source-files"
+                     name="files"
+                     multiple
+                     required>
+              <div class="form-text">
+                You can select many files.
+              </div>
+            </div>
+
+            <!-- SPS OPTIONS -->
+            <div class="col-12">
+              <div id="sps-options" class="border rounded p-3 d-none">
+                <div class="row g-3">
+
+                  <!-- Source Vessel (project_fleet) -->
+                  <div class="col-12 col-md-6 col-lg-3">
+                    <label class="form-label">Source Vessel</label>
+                    <select class="form-select" name="source_vessel_id" id="sps-vessel">
+                      <option value="" selected disabled>Select…</option>
+                      {% for v in fleet_vessels %}
+                        <option value="{{ v.id }}">{{ v.vessel_name }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+
+                  <!-- SPS Revision (Django model) -->
+                  <div class="col-12 col-md-6 col-lg-3">
+                    <label class="form-label">SPS Revision</label>
+                    <select class="form-select" name="sps_revision_id" id="sps-revision">
+                      <option value="" selected disabled>Select…</option>
+                      {% for r in sps_revisions %}
+                        <option value="{{ r.id }}">{{ r }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+
+                  <!-- Tier -->
+                  <div class="col-12 col-md-6 col-lg-3">
+                    <label class="form-label">TIER</label>
+                    <select class="form-select" name="tier" id="sps-tier">
+                      <option value="" selected disabled>Select…</option>
+                      {% for t in tiers %}
+                        <option value="{{ t }}">{{ t }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+
+                  <!-- Year -->
+                  <div class="col-12 col-md-6 col-lg-3">
+                    <label class="form-label">Year</label>
+                    <select class="form-select" name="year" id="sps-year">
+                      <option value="" selected disabled>Select…</option>
+                      {% for y in years %}
+                        <option value="{{ y }}">{{ y }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+
+                  <div class="col-12">
+                    <div class="alert alert-secondary py-2 mb-0">
+                      SPS selected: please set Vessel / Revision / Tier / Year.
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+
+            <!-- SHOT TABLE hint -->
+            <div class="col-12">
+              <div id="shot-options" class="border rounded p-3 d-none">
+                <div class="alert alert-secondary py-2 mb-0">
+                  Shot Table selected: no SPS metadata required.
+                </div>
+              </div>
+            </div>
+
+            <!-- Optional result / errors area -->
+            <div class="col-12 d-none" id="source-upload-msg-wrap">
+              <div class="alert mb-0" id="source-upload-msg"></div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+            Close
+          </button>
+          <button type="submit" class="btn btn-warning" id="source-upload-submit">
+            <i class="fas fa-cloud-upload-alt me-2"></i>Upload
+          </button>
+        </div>
+
+      </form>
+    </div>
+  </div>
+</div>

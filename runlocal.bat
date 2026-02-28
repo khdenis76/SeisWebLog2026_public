@@ -1,4 +1,5 @@
 @echo off
+color 1F
 title SeisWebLog Django Server
 echo ===============================
 echo   Starting SeisWebLog Server

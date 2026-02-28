@@ -4,6 +4,7 @@ from django.contrib.auth import views as auth_views
 from django.contrib.auth.views import LoginView, LogoutView
 from core.views import project_members_view
 
+
 from core.views import (
     logout_view,
     signup_view,
@@ -33,6 +34,9 @@ urlpatterns = [
     path('login/', auth_views.LoginView.as_view(template_name='registration/login.html'), name='login'),
     path("project/base/", include("baseproject.urls")),
     path("project/rov/",include("rov.urls")),
+    path("project/users/", include("project_users.urls")),
+    path("source/", include("source.urls")),
+    path("fleet/", include("fleet.urls")),
 
     path('', include('core.urls')),
 ]

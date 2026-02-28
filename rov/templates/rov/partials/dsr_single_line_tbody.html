@@ -29,7 +29,7 @@
                       bg-warning text-dark fw-bold
                  {% endif %}
             {% endif %}">
-      {{ r.Primary_e95|floatformat:1 }}
+      {{ r.Primary_e95|floatformat:2 }}
   </td>
   <td class="num
           {% if r.Primary_n95 %}
@@ -39,7 +39,7 @@
                       bg-warning text-dark fw-bold
                  {% endif %}
             {% endif %}
-">{{ r.Primary_n95|floatformat:1 }}</td>
+">{{ r.Primary_n95|floatformat:2 }}</td>
 
   <td class="num">{{ r.PrimaryElevation }}</td>
   <td class="num">{{ r.SecondaryElevation }}</td>

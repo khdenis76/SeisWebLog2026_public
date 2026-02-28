@@ -325,10 +325,16 @@ class DSRDB:
                 "SELECT * FROM V_DSR_LineSummary ORDER BY Line"
             ).fetchall()
 
-        context = {
-            "lines": rows
-        }
 
+        max_sma = self.pdb.get_node_qc().max_sma
+        warning_sma = self.pdb.get_node_qc().warning_sma
+        max_radial_offset = self.pdb.get_node_qc().max_radial_offset
+        context = {
+            "lines": rows,
+            "max_sma": max_sma,
+            "warning_sma": warning_sma,
+            "max_radial_offset": max_radial_offset,
+        }
         return render_to_string(
             "rov/partials/dsr_line_body.html",
             context=context,

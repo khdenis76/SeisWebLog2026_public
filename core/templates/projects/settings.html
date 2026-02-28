@@ -158,17 +158,28 @@
                   <input type="text" name="geom_non_production_code" class="form-control"
                          value="{{ geom.non_production_code }}">
                 </div>
+                <div class="col-md-3">
+                  <label class="form-label">Kill code</label>
+                  <input type="text" name="geom_kill_code" class="form-control"
+                         value="{{ geom.kill_code }}">
+                </div>  
 
                 <div class="col-md-6">
-                  <label class="form-label">RL mask</label>
+                  <label class="form-label">RL mask (LLLL-Line PPPP-Proint)</label>
                   <input type="text" name="geom_rl_mask" class="form-control"
                          value="{{ geom.rl_mask }}">
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label">SL mask</label>
+                  <label class="form-label">SL mask (LLLL-Line PPPP-Proint)</label>
                   <input type="text" name="geom_sl_mask" class="form-control"
                          value="{{ geom.sl_mask }}">
                 </div>
+                <div class="col-md-6">
+                  <label class="form-label">Sail Line Mask (LLLL-Line X-attempt SSSS-Sequence)</label>
+                  <input type="text" name="geom_sail_line_mask" class="form-control"
+                         value="{{ geom.sail_line_mask }}">
+                </div>
+                
               </div>
             </div>
 
@@ -273,12 +284,12 @@
                   </div>
 
                   <div class="col-md-4">
-                    <label class="form-label">Depth (m)</label>
+                    <label class="form-label">Gun Depth (m)</label>
                     <input type="number" step="0.01" name="gun_depth" class="form-control"
                            value="{{ gun_qc.depth }}">
                   </div>
                   <div class="col-md-4">
-                    <label class="form-label">Depth tolerance (m)</label>
+                    <label class="form-label">Gun Depth tolerance (m)</label>
                     <input type="number" step="0.01" name="gun_depth_tolerance" class="form-control"
                            value="{{ gun_qc.depth_tolerance }}">
                   </div>
@@ -324,6 +335,16 @@
                     <input type="number" step="0.01" name="gun_max_radial_offset" class="form-control"
                            value="{{ gun_qc.max_radial_offset }}">
                   </div>
+                  <div class="col-md-4">
+                      <label class="form-label">Max. num conseq killed shots (K or X)</label>
+                      <input type="text" name="gun_kill_shots_cons" class="form-control"
+                              value="{{ gun_qc.kill_shots_cons }}">
+                  </div> 
+                  <div class="col-md-4">
+                      <label class="form-label">Max.% killed shots per line (K or X)</label>
+                      <input type="text" name="gun_percentage_of_kill" class="form-control"
+                              value="{{ gun_qc.percentage_of_kill }}">
+                  </div>   
                 </div>
               </div>
             </div>
@@ -358,10 +379,11 @@
           </div>
 
           <hr class="my-4">
-
+          {% if user.is_staff %}
           <button class="btn btn-primary">
             <i class="fa-solid fa-floppy-disk me-1"></i> Save
           </button>
+          {% endif %}
           <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
             Cancel
           </a>

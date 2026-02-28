@@ -29,14 +29,77 @@
     <input type="checkbox" class="dsr-line-checkbox" value="{{ r.Line }}">
   </td>
 
-  <td class="sticky-col sticky-col-2">{{ r.Line }}</td>
+  <td class="sticky-col sticky-col-2">
+      <i class="dsr-line-click text-success fas fa-square-check me-1{% if r.isLineClicked != 1 %} d-none{% endif %}"></i>
+      {{ r.Line }}
+      {% if r.Stations < r.PlannedPoints %}
+          <i class="fas fa-triangle-exclamation text-warning" title="Line deployment incomplete"></i>
+      {% elif r.Stations > r.PlannedPoints %}
+          <i class="fas fa-triangle-exclamation text-danger" title="Number of nodes more than in Preplot"></i>
+      {% elif r.Stations == r.PlannedPoints %}
+          <i class="fas fa-circle-check text-success" title="Deployment completed"></i>
+      {% endif %}
+      {% if r.Stations > r.SMCount %}
+          <i class="fas fa-triangle-exclamation text-warning" title="Survey Manager does not fully loaded"></i>
+      {% elif r.Stations < r.SMCount %}
+          <i class="fas fa-triangle-exclamation text-danger" title="Survey Manager for this line has more records then in DSR"></i>
+      {% elif r.Stations == r.SMCount %}
+          <i class="fas fa-circle-check text-success" title="Survey manager completed"></i>
+      {% endif %}
+
+      {% if r.Stations > r.SMRCount %}
+          <i class="fas fa-triangle-exclamation text-warning" title="SM data for recovered nodes incomplete"></i>
+      {% elif r.Stations < r.SMRCount %}
+          <i class="fas fa-triangle-exclamation text-danger" title="SM data for recovery has more records for this line than DSR"></i>
+      {% elif r.Stations == r.SMRCount %}
+          <i class="fas fa-circle-check text-success" title="Survey manager for recovery completed"></i>
+      {% endif %}
+      {% if r.Primary_e95 > max_sma or r.Primary_n95 > max_sma  %}
+          <i class="fas fa-globe text-danger" title="Primary SMA is out of spec"></i>
+      {% elif r.Primary_e95 > warning_sma or r.Primary_n95 > warning_sma %}
+          <i class="fas fa-globe text-warning" title="Primary SMA exceed warning value {{ warning_sma }}"></i>
+      {% else%}
+          <i class="fas fa-globe text-success" title="All SMA within spec"></i>
+      {% endif %}
+      {% if r.PlannedPoints > r.RetrievedCount %}
+          <i class="fas fa-truck-pickup text-warning" title="Nodes recovery incompleted"></i>
+      {% elif r.PlannedPoints < r.RetrievedCount %}
+          <i class="fas fa-truck-pickup text-danger" title="Extra nodes were recovered"></i>
+      {% elif r.PlannedPoints == r.RetrievedCount %}
+          <i class="fas fa-truck-pickup text-success" title="Recovery completed"></i>
+      {% endif %}
+      {% if r.Stations > r.ProcessedCount %}
+          <i class="fas fa-egg text-warning" title="rec db incompleted"></i>
+      {% elif r.Stations < r.ProcessedCount %}
+          <i class="fas fa-egg text-danger" title="Extra nodes in rec db"></i>
+      {% elif r.Stations == r.ProcessedCount %}
+          <i class="fas fa-egg text-success" title="Processing completed"></i>
+      {% endif %}
+
+  </td>
 
   <td>{{ r.PlannedPoints|default_if_none:"" }}</td>
-  <td>{{ r.DSRRows }}</td>
-  <td>{{ r.Stations }}</td>
+  <td class=" {% if r.Stations == r.PlannedPoints %}text-success fw-bold{% endif %}
+              {% if r.Stations < r.PlannedPoints %}bg-warning text-white fw-bold{% endif %}
+  ">{{ r.Stations }}</td>
   <td>{{ r.Nodes }}</td>
-  <td>{{ r.MinStation }}</td>
-  <td>{{ r.MaxStation }}</td>
+  <td class="text-primary">{{ r.MinStation }}</td>
+  <td class="text-danger">{{ r.MaxStation }}</td>
+  <td class ="
+         {% if r.Primary_e95 > warning_sma and r.Primary_e95 <= max_sma   %}bg-warning text-white
+         {% elif r.Primary_e95 > max_sma %}bg-danger text-white{% else %}
+           text-success fw-bold
+         {% endif %}">
+      {{ r.Primary_e95|floatformat:2 }}
+  </td>
+  <td class="
+             {% if r.Primary_n95 > warning_sma and r.Primary_n95 <= max_sma   %}bg-warning text-white
+                 {% elif r.Primary_n95 > max_sma %}
+                      bg-danger text-white
+                 {% else %}
+                     text-success fw-bold
+            {% endif %}">
+   {{ r.Primary_n95|floatformat:2 }}</td>
   <td>{{ r.DeployedCount }}</td>
   <td>{{ r.RetrievedCount }}</td>
  <td {% if r.SMCount == r.Stations %}class="text-success fw-bold"{% endif %}
@@ -53,9 +116,9 @@
 
   {# Dep % conditional #}
   <td class="
-      {% if r.DeployedPct is not None and r.DeployedPct < 90 %}
-        fw-bold text-warning
-      {% endif %}
+      {% if r.DeployedPct is not None and r.DeployedPct < 90 %}fw-bold text-warning{% endif %}
+      {% if r.DeployedPct == 100 %}fw-bold text-success{% endif %}
+      {% if r.DeployedPct > 100 %}fw-bold text-danger{% endif %}
     ">
     {{ r.DeployedPct|floatformat:1 }}
   </td>

@@ -1,0 +1,110 @@
+<div class="card shadow">
+    <div class="card-header bg-danger text-white fw-bold">
+        <h5><i class="fas fa-bomb me-2"></i> SOURCE PRODUCTION</h5>
+    </div>
+    <div class="card-body">
+        <div class="container-fluid mt-3">
+
+    <!-- Nav Tabs -->
+    <ul class="nav nav-tabs" id="sourceTab" role="tablist">
+
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active"
+                    id="summary-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#summary-pane"
+                    type="button"
+                    role="tab">
+                <i class="fas fa-table me-1"></i>
+                Summary
+            </button>
+        </li>
+
+        <li class="nav-item" role="presentation">
+            <button class="nav-link"
+                    id="shots-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#shots-pane"
+                    type="button"
+                    role="tab">
+                <i class="fas fa-crosshairs me-1"></i>
+                Shots
+            </button>
+        </li>
+
+        <li class="nav-item" role="presentation">
+            <button class="nav-link"
+                    id="stats-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#stats-pane"
+                    type="button"
+                    role="tab">
+                <i class="fas fa-chart-line me-1"></i>
+                Statistics
+            </button>
+        </li>
+
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content mt-3" id="sourceTabContent">
+
+        <!-- SUMMARY TAB -->
+        <div class="tab-pane fade show active"
+             id="summary-pane"
+             role="tabpanel">
+
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div>
+                        <button type="button"
+                                class="btn btn-primary"
+                                id="shot-table-filter-btn">
+                            <i class="fas fa-filter"></i>
+                        </button>
+                    </div>
+                    <div id="shot-summary-container">
+                        {% include 'source/partials/shot_table.html' %}
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- SHOTS TAB -->
+        <div class="tab-pane fade"
+             id="shots-pane"
+             role="tabpanel">
+
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5>Shot Data</h5>
+                    <div id="shot-table-container">
+                        <!-- full shot table or filtered data -->
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- STATISTICS TAB -->
+        <div class="tab-pane fade"
+             id="stats-pane"
+             role="tabpanel">
+
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5>Shot Statistics</h5>
+                    <div id="shot-stats-container">
+                        <!-- charts here -->
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+    </div>
+</div>

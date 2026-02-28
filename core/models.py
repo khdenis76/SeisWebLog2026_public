@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 from .project_dataclasses import MainSettings, GeometrySettings, NodeQCSettings, GunQCSettings, FolderSettings
 
@@ -21,12 +22,17 @@ def path_exists_or_raise(p: Path):
     if not p.exists() or not p.is_dir():
         raise ValidationError(f"Root path does not exist or is not a directory: {p}")
 
+class ProjectQuerySet(models.QuerySet):
+    def alive(self):
+        return self.filter(is_deleted=False)
 
+    def deleted(self):
+        return self.filter(is_deleted=True)
 class Project(models.Model):
     """
     Represents a user-created project stored outside the Django project folder.
     """
-
+    objects = ProjectQuerySet.as_manager()
     name = models.CharField("Name", max_length=200, unique=True)
     root_path = models.CharField("Path", max_length=500)
     folder_name = models.CharField("Project folder name", max_length=200)
@@ -40,15 +46,25 @@ class Project(models.Model):
         related_name="owned_projects",
         verbose_name="Owner",
     )
-
+    owner_readonly = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
     class Meta:
         ordering = ["name"]
 
     def __str__(self) -> str:
         return self.name
 
+    def soft_delete(self):
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.save(update_fields=["is_deleted", "deleted_at"])
+
+    def restore(self):
+        self.is_deleted = False
+        self.deleted_at = None
+        self.save(update_fields=["is_deleted", "deleted_at"])
     # ---------------------- PATH HELPERS ----------------------
 
     @property
@@ -148,29 +164,33 @@ class Project(models.Model):
     # ---------------------- PERMISSIONS ----------------------
 
     def can_view(self, user: User) -> bool:
-        """
-        User can view if:
-          - he is the owner
-          - or he is in ProjectMember (view or edit)
-        """
-        if not user.is_authenticated:
+        if not user or not user.is_authenticated:
             return False
+
+        # ✅ superuser = full access
+        if user.is_superuser:
+            return True
+
         if user == self.owner:
             return True
+
         return ProjectMember.objects.filter(project=self, user=user).exists()
 
     def can_edit(self, user: User) -> bool:
-        """
-        User can edit if:
-          - he is the owner
-          - or ProjectMember.can_edit is True
-        """
-        if not user.is_authenticated:
+        if not user or not user.is_authenticated:
             return False
-        if user == self.owner:
+
+        # ✅ superuser = full access
+        if user.is_superuser:
             return True
+
+        if user == self.owner:
+            return not getattr(self, "owner_readonly", False)
+
         return ProjectMember.objects.filter(
-            project=self, user=user, can_edit=True
+            project=self,
+            user=user,
+            can_edit=True,
         ).exists()
 
 
@@ -191,7 +211,7 @@ class UserSettings(models.Model):
         blank=True,
         related_name="active_for_users",
     )
-
+    theme_mode = models.CharField(max_length=8, default="dark")
     def __str__(self) -> str:
         return f"Settings for {self.user.username}"
 
@@ -360,8 +380,11 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
                     sl_heading REAL NOT NULL,
                     production_code TEXT NOT NULL,
                     non_production_code TEXT NOT NULL,
+                    kill_code TEXT NOT NULL,
                     rl_mask TEXT NOT NULL,
-                    sl_mask TEXT NOT NULL
+                    sl_mask TEXT NOT NULL,
+                    sail_line_mask TEXT NOT NULL
+                    
                 );
                 """
             )
@@ -373,15 +396,15 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
                     INSERT INTO project_geometry
                         (id, rpi, rli, spi, sli,
                          rl_heading, sl_heading,
-                         production_code, non_production_code,
-                         rl_mask, sl_mask)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         production_code, non_production_code,kill_code,
+                         rl_mask, sl_mask,sail_line_mask)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         g.rpi, g.rli, g.spi, g.sli,
                         g.rl_heading, g.sl_heading,
-                        g.production_code, g.non_production_code,
-                        g.rl_mask, g.sl_mask,
+                        g.production_code, g.non_production_code,g.kill_code,
+                        g.rl_mask, g.sl_mask,g.sail_line_mask
                     ),
                 )
 
@@ -437,7 +460,9 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
                     volume REAL NOT NULL,
                     max_il_offset REAL NOT NULL,
                     max_xl_offset REAL NOT NULL,
-                    max_radial_offset REAL NOT NULL
+                    max_radial_offset REAL NOT NULL,
+                    kill_shots_cons INTEGER,
+                    percentage_of_kill INTEGER
                 );
                 """
             )
@@ -451,15 +476,15 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
                          depth, depth_tolerance,
                          time_warning, time_error,
                          pressure, pressure_drop, volume,
-                         max_il_offset, max_xl_offset, max_radial_offset)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         max_il_offset, max_xl_offset, max_radial_offset,kill_shots_cons,percentage_of_kill)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         q.num_of_arrays, q.num_of_strings, q.num_of_guns,
                         q.depth, q.depth_tolerance,
                         q.time_warning, q.time_error,
                         q.pressure, q.pressure_drop, q.volume,
-                        q.max_il_offset, q.max_xl_offset, q.max_radial_offset,
+                        q.max_il_offset, q.max_xl_offset, q.max_radial_offset,q.kill_shots_cons,q.percentage_of_kill
                     ),
                 )
             cur.execute(

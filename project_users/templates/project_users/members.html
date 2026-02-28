@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}PROJECT USERS — {{ project.name }}{% endblock %}
+{% block content %}
+<div class="swl-hero mb-4">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+    <div>
+      <div class="d-flex align-items-center gap-2">
+        <i class="fas fa-users"></i>
+        <h3 class="mb-0">Project Users</h3>
+      </div>
+      <div class="sub mt-1">
+        {{ project.name }} — manage membership & edit rights (SeisWebLog)
+      </div>
+    </div>
+
+    <div class="d-flex align-items-center gap-2">
+      <span class="swl-pill swl-pill-view">
+        <i class="fas fa-eye me-1"></i> View = member
+      </span>
+      <span class="swl-pill swl-pill-edit">
+        <i class="fas fa-pen-to-square me-1"></i> Edit = can_edit
+      </span>
+    </div>
+  </div>
+</div>
+
+{# Django messages (if you use messages framework) #}
+{% if messages %}
+  <div class="mb-3">
+    {% for message in messages %}
+      <div class="alert alert-{{ message.tags }} swl-card mb-2" role="alert" style="border-radius:16px;">
+        <div class="d-flex align-items-start gap-2">
+          <i class="fas fa-circle-info mt-1"></i>
+          <div>{{ message }}</div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="card swl-card h-100">
+      <div class="card-header swl-card-h">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center gap-2">
+            <i class="fas fa-user-plus text-primary"></i>
+            <strong>Create new user</strong>
+          </div>
+          <span class="badge text-bg-primary">Create</span>
+        </div>
+      </div>
+
+      <div class="card-body swl-form">
+        <form method="post" action="{% url 'project_users_create' %}">
+          {% csrf_token %}
+          {{ create_form.as_p }}
+          <button class="btn btn-primary swl-btn w-100" type="submit">
+            <i class="fas fa-plus me-2"></i>Create + Add to Project
+          </button>
+          <div class="text-muted small mt-2">
+            Tip: if password fields are empty, user will be created with unusable password (reset later).
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card swl-card h-100">
+      <div class="card-header swl-card-h" style="background: rgba(32,201,151,.08);">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center gap-2">
+            <i class="fas fa-user-check" style="color:#20c997;"></i>
+            <strong>Add existing user</strong>
+          </div>
+          <span class="badge text-bg-success">Add</span>
+        </div>
+      </div>
+
+      <div class="card-body swl-form">
+        <form method="post" action="{% url 'project_users_add' %}">
+          {% csrf_token %}
+          {{ add_form.as_p }}
+          <button class="btn btn-success swl-btn w-100" type="submit">
+            <i class="fas fa-link me-2"></i>Add / Update Membership
+          </button>
+          <div class="text-muted small mt-2">
+            Adds the user to this project (view) and optionally grants edit.
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card swl-card">
+  <div class="card-header swl-card-h">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <i class="fas fa-list-check text-primary"></i>
+        <strong>Members</strong>
+      </div>
+      <div class="text-muted small">
+        Total: <strong>{{ members|length }}</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="card-body p-0">
+    <div class="table-responsive" style="max-height: 65vh;">
+      <table class="table table-sm align-middle mb-0 swl-table">
+        <thead>
+          <tr>
+            <th style="min-width:180px;">User</th>
+            <th style="min-width:220px;">Email</th>
+            <th class="text-center" style="min-width:120px;">Access</th>
+            <th class="text-center" style="min-width:110px;">Active</th>
+            <th class="text-end" style="min-width:220px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in members %}
+            <tr>
+              <td>
+                <div class="d-flex align-items-center gap-2">
+                  <span class="badge rounded-pill text-bg-secondary">
+                    <i class="fas fa-user"></i>
+                  </span>
+                  <div>
+                    <div class="fw-semibold">{{ m.user.username }}</div>
+                    <div class="text-muted small">id: {{ m.user.id }}</div>
+                  </div>
+                </div>
+              </td>
+
+              <td>
+                {% if m.user.email %}
+                  <span class="text-muted">{{ m.user.email }}</span>
+                {% else %}
+                  <span class="text-muted fst-italic">no email</span>
+                {% endif %}
+              </td>
+
+              <td class="text-center">
+                <form method="post"
+                      action="{% url 'project_users_update_member' m.id %}"
+                      class="d-inline">
+                  {% csrf_token %}
+
+                  <div class="d-flex flex-column align-items-center gap-1">
+                    <div class="form-check form-switch m-0">
+                      <input class="form-check-input"
+                             type="checkbox"
+                             name="can_edit"
+                             {% if m.can_edit %}checked{% endif %}
+                             onchange="this.form.submit()">
+                    </div>
+                    {% if m.can_edit %}
+                      <span class="swl-pill swl-pill-edit">
+                        <i class="fas fa-pen-to-square me-1"></i>Edit
+                      </span>
+                    {% else %}
+                      <span class="swl-pill swl-pill-view">
+                        <i class="fas fa-eye me-1"></i>View
+                      </span>
+                    {% endif %}
+                  </div>
+                </form>
+              </td>
+
+              <td class="text-center">
+                {% if m.user.is_active %}
+                  <span class="swl-pill swl-pill-on">
+                    <i class="fas fa-circle-check me-1"></i>Yes
+                  </span>
+                {% else %}
+                  <span class="swl-pill swl-pill-off">
+                    <i class="fas fa-triangle-exclamation me-1"></i>No
+                  </span>
+                {% endif %}
+              </td>
+
+              <td class="text-end">
+                <div class="d-inline-flex gap-2">
+                  <form method="post" action="{% url 'project_users_toggle_active' m.user.id %}" class="d-inline">
+                    {% csrf_token %}
+                    <button class="btn btn-outline-warning btn-sm swl-btn" type="submit"
+                            title="Toggle user active">
+                      {% if m.user.is_active %}
+                        <i class="fas fa-user-slash me-1"></i>Deactivate
+                      {% else %}
+                        <i class="fas fa-user-check me-1"></i>Activate
+                      {% endif %}
+                    </button>
+                  </form>
+
+                  <form method="post"
+                        action="{% url 'project_users_remove_member' m.id %}"
+                        class="d-inline"
+                        onsubmit="return confirm('Remove {{ m.user.username }} from project?');">
+                    {% csrf_token %}
+                    <button class="btn btn-outline-danger btn-sm swl-btn" type="submit"
+                            title="Remove from project">
+                      <i class="fas fa-trash-can me-1"></i>Remove
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="5" class="p-4">
+                <div class="text-center text-muted">
+                  <i class="fas fa-people-group fa-2x mb-2"></i>
+                  <div class="fw-semibold">No members yet</div>
+                  <div class="small">Create a user or add an existing one above.</div>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card-footer bg-white">
+    <div class="text-muted small">
+      Access rules: <strong>Owner</strong> always has view (and edit unless locked). Members have view; <strong>can_edit</strong> toggles edit tools.
+    </div>
+  </div>
+</div>
+
+{% endblock %}

@@ -123,7 +123,10 @@ def logout_view(request):
 
 @login_required
 def project_list_view(request):
-    projects = Project.objects.filter(
+    if request.user.is_superuser:
+        projects = Project.objects.all()
+    else:
+        projects = Project.objects.filter(
         Q(owner=request.user) |
         Q(memberships__user=request.user)
     ).distinct().order_by("name")
@@ -311,8 +314,10 @@ def project_settings_view(request):
             sl_heading=f_float("geom_sl_heading", "0"),
             production_code=request.POST.get("geom_production_code", "").strip() or "AP",
             non_production_code=request.POST.get("geom_non_production_code", "").strip() or "LRMXTK",
+            kill_code =request.POST.get("geom_kill_code", "").strip() or "KX",
             rl_mask=request.POST.get("geom_rl_mask", "").strip() or "LLLLPPPP",
-            sl_mask=request.POST.get("geom_sl_mask", "").strip() or "LLLLXSSSS",
+            sl_mask=request.POST.get("geom_sl_mask", "").strip() or "LLLLPPPP",
+            sail_line_mask=request.POST.get("geom_sail_line_mask", "").strip() or "LLLLXSSSS",
         )
 
         # ---- NODE QC ----
@@ -345,6 +350,8 @@ def project_settings_view(request):
             max_il_offset=f_float("gun_max_il_offset", "0"),
             max_xl_offset=f_float("gun_max_xl_offset", "0"),
             max_radial_offset=f_float("gun_max_radial_offset", "0"),
+            kill_shots_cons=f_int('gun_kill_shots_cons',"0"),
+            percentage_of_kill = f_int('gun_percentage_of_kill',"0")
         )
         folders_qc = FolderSettings(
             shapes_folder=f_str("shapes_folder", ""),
@@ -390,17 +397,8 @@ def set_theme_view(request):
         return JsonResponse({"ok": False, "error": "Invalid theme"}, status=400)
 
     settings, _ = UserSettings.objects.get_or_create(user=request.user)
-    project = settings.active_project
-    if not project:
-        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
 
-    if not project.can_edit(request.user):
-        return JsonResponse({"ok": False, "error": "No permission"}, status=403)
+    settings.theme_mode = mode
+    settings.save(update_fields=["theme_mode"])
 
-    pdb = ProjectDB(project.db_path)
-    main = pdb.get_main()
-
-    # write theme into your project sqlite main settings
-    main.color_scheme = mode
-    pdb.update_main(main)
     return JsonResponse({"ok": True, "theme": mode})

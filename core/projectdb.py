@@ -43,7 +43,13 @@ class ProjectDB:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
-
+    def set_line_clicked (self,line:int=None):
+        with self._connect() as conn:
+            cur = conn.cursor()
+            sql=f"UPDATE RLPreplot SET isLineClicked = 1 WHERE Line={line}"
+            cur.execute(sql)
+            conn.commit()
+        return True
     def update_days_in_water(self):
         """
         Update DSR:
@@ -142,8 +148,10 @@ class ProjectDB:
                     sl_heading REAL NOT NULL,
                     production_code TEXT NOT NULL,
                     non_production_code TEXT NOT NULL,
+                    kill_code TEXT NOT NULL,
                     rl_mask TEXT NOT NULL,
-                    sl_mask TEXT NOT NULL
+                    sl_mask TEXT NOT NULL,
+					sail_line_mask TEXT NOT NULL
                 );
                 """
             )
@@ -155,15 +163,15 @@ class ProjectDB:
                     INSERT INTO project_geometry
                         (id, rpi, rli, spi, sli,
                          rl_heading, sl_heading,
-                         production_code, non_production_code,
-                         rl_mask, sl_mask)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         production_code, non_production_code,kill_code,
+                         rl_mask, sl_mask, sail_line_mask)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         g.rpi, g.rli, g.spi, g.sli,
                         g.rl_heading, g.sl_heading,
-                        g.production_code, g.non_production_code,
-                        g.rl_mask, g.sl_mask,
+                        g.production_code, g.non_production_code,g.kill_code,
+                        g.rl_mask, g.sl_mask,g.sail_line_mask
                     ),
                 )
 
@@ -221,7 +229,9 @@ class ProjectDB:
                     volume REAL NOT NULL,
                     max_il_offset REAL NOT NULL,
                     max_xl_offset REAL NOT NULL,
-                    max_radial_offset REAL NOT NULL
+                    max_radial_offset REAL NOT NULL,
+                    kill_shots_cons INTEFER,
+                    percentage_of_kill INTEGER
                 );
                 """
             )
@@ -235,15 +245,15 @@ class ProjectDB:
                          depth, depth_tolerance,
                          time_warning, time_error,
                          pressure, pressure_drop, volume,
-                         max_il_offset, max_xl_offset, max_radial_offset)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         max_il_offset, max_xl_offset, max_radial_offset, kill_shots_cons,percentage_of_kill)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         q.num_of_arrays, q.num_of_strings, q.num_of_guns,
                         q.depth, q.depth_tolerance,
                         q.time_warning, q.time_error,
                         q.pressure, q.pressure_drop, q.volume,
-                        q.max_il_offset, q.max_xl_offset, q.max_radial_offset,
+                        q.max_il_offset, q.max_xl_offset, q.max_radial_offset,q.kill_shots_cons,q.percentage_of_kill
                     ),
                 )
             cur.execute(
@@ -330,6 +340,7 @@ class ProjectDB:
                 sl_heading=row["sl_heading"],
                 production_code=row["production_code"],
                 non_production_code=row["non_production_code"],
+                kill_code=row["kill_code"],
                 rl_mask=row["rl_mask"] or "",
                 sl_mask=row["sl_mask"] or "",
             )
@@ -376,6 +387,8 @@ class ProjectDB:
                 max_il_offset=row["max_il_offset"],
                 max_xl_offset=row["max_xl_offset"],
                 max_radial_offset=row["max_radial_offset"],
+                kill_shots_cons=row["kill_shots_cons"],
+                percentage_of_kill=row["percentage_of_kill"],
             )
     def get_folders(self)->FolderSettings:
         with self._connect() as conn:
@@ -440,14 +453,14 @@ class ProjectDB:
                 UPDATE project_geometry
                 SET rpi = ?, rli = ?, spi = ?, sli = ?,
                     rl_heading = ?, sl_heading = ?,
-                    production_code = ?, non_production_code = ?,
+                    production_code = ?, non_production_code = ?,kill_code = ?,
                     rl_mask = ?, sl_mask = ?
                 WHERE id = 1;
                 """,
                 (
                     data.rpi, data.rli, data.spi, data.sli,
                     data.rl_heading, data.sl_heading,
-                    data.production_code, data.non_production_code,
+                    data.production_code, data.non_production_code,data.kill_code,
                     data.rl_mask, data.sl_mask,
                 ),
             )
@@ -488,7 +501,8 @@ class ProjectDB:
                     depth = ?, depth_tolerance = ?,
                     time_warning = ?, time_error = ?,
                     pressure = ?, pressure_drop = ?, volume = ?,
-                    max_il_offset = ?, max_xl_offset = ?, max_radial_offset = ?
+                    max_il_offset = ?, max_xl_offset = ?, max_radial_offset = ?,
+                    kill_shots_cons = ?, percentage_of_kill = ?
                 WHERE id = 1;
                 """,
                 (
@@ -497,6 +511,7 @@ class ProjectDB:
                     data.time_warning, data.time_error,
                     data.pressure, data.pressure_drop, data.volume,
                     data.max_il_offset, data.max_xl_offset, data.max_radial_offset,
+                    data.kill_shots_cons, data.percentage_of_kill
                 ),
             )
             conn.commit()
@@ -3450,6 +3465,114 @@ class ProjectDB:
                 "real_length": real_len,
             }
 
+    def list_project_fleet(self):
+        """
+        Returns list of dicts from project_fleet table.
+        """
+        conn = self._connect()
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            rows = cur.execute(
+                """
+                SELECT
+                    id,
+                    vessel_name,
+                    imo,
+                    mmsi,
+                    call_sign,
+                    vessel_type,
+                    owner,
+                    is_active,
+                    is_retired,
+                    notes,
+                    source_vessel_id,
+                    created_at,
+                    updated_at
+                FROM project_fleet
+                ORDER BY vessel_name
+                """
+            ).fetchall()
+
+            return [dict(r) for r in rows]
+
+        finally:
+            conn.close()
+
+    def add_vessel_to_project(self, vessel: dict):
+        """
+        vessel dict must contain:
+          id (Django Vessel.id)
+          name
+          vessel_type
+          imo
+          mmsi
+          call_sign
+          owner
+          is_active
+          is_retired
+          notes (optional)
+        """
+
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+
+            src_id = vessel.get("id")
+            if not src_id:
+                raise ValueError("source_vessel_id (vessel.id) required")
+
+            # check if already exists
+            exists = cur.execute(
+                "SELECT 1 FROM project_fleet WHERE source_vessel_id = ? LIMIT 1",
+                (src_id,)
+            ).fetchone()
+
+            if exists:
+                return "exists"
+
+            cur.execute(
+                """
+                INSERT INTO project_fleet (
+                    vessel_name, imo, mmsi, call_sign, vessel_type, owner,
+                    is_active, is_retired, notes,
+                    source_vessel_id,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                """,
+                (
+                    vessel.get("name"),
+                    vessel.get("imo"),
+                    vessel.get("mmsi"),
+                    vessel.get("call_sign"),
+                    vessel.get("vessel_type"),
+                    vessel.get("owner"),
+                    1 if vessel.get("is_active") else 0,
+                    1 if vessel.get("is_retired") else 0,
+                    vessel.get("notes"),
+                    src_id,
+                )
+            )
+
+            conn.commit()
+            return "inserted"
+
+        finally:
+            conn.close()
+
+    def remove_project_vessel(self, project_fleet_id: int):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM project_fleet WHERE id = ?",
+                (project_fleet_id,)
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
 
 
 

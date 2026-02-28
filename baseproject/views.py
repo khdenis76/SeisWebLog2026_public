@@ -27,6 +27,8 @@ from core.projectdb import ProjectDB
 from core.projectlayers import ProjectLayer
 from core.projectshp import ProjectShape
 from baseproject.preplot_graphics import PreplotGraphics
+from fleet.models import Vessel
+from fleet.utils import import_vessels_from_csv_if_missing
 from .models import BaseProjectFile
 from .forms import BaseProjectUploadForm
 from django.http import JsonResponse
@@ -152,7 +154,8 @@ def upload_source_sps(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
-
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     dup_mode = request.POST.get("dup_mode", "add")
 
     pdb = ProjectDB(project.db_path)
@@ -226,7 +229,10 @@ def upload_receiver_sps(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
-
+    if not project:
+        return JsonResponse({"error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     dup_mode = request.POST.get("dup_mode", "add")
 
     pdb = ProjectDB(project.db_path)
@@ -296,6 +302,10 @@ def upload_header_sps(request):
     # 1) file
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+    if not project:
+        return JsonResponse({"error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     pdb = ProjectDB(project.db_path)
     uploaded = request.FILES.get("files")
     if not uploaded:
@@ -342,7 +352,8 @@ def delete_selected_receiver_lines(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
-
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except Exception:
@@ -390,7 +401,8 @@ def delete_selected_source_lines(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
-
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except Exception:
@@ -474,7 +486,8 @@ def add_shape_to_db(request):
         project = user_settings.active_project
         if not project:
             return JsonResponse({"error": "No active project"}, status=400)
-
+        if not project.can_edit(request.user):
+            raise PermissionDenied
         pdb = ProjectDB(project.db_path)
         pgr =PreplotGraphics(project.db_path)
 
@@ -537,7 +550,8 @@ def project_shapes_update(request):
         project = user_settings.active_project
         if not project:
             return JsonResponse({"error": "No active project"}, status=400)
-
+        if not project.can_edit(request.user):
+            raise PermissionDenied
         pdb = ProjectDB(project.db_path)
 
         shape = ProjectShape(
@@ -581,7 +595,8 @@ def project_layers_update(request):
         project = user_settings.active_project
         if not project:
             return JsonResponse({"error": "No active project"}, status=400)
-
+        if not project.can_edit(request.user):
+            raise PermissionDenied
         pdb = ProjectDB(project.db_path)
         pgr =PreplotGraphics(project.db_path)
         layout = pgr.preplot_map(
@@ -620,7 +635,8 @@ def project_shapes_delete(request):
         project = user_settings.active_project
         if not project:
             return JsonResponse({"error": "No active project"}, status=400)
-
+        if not project.can_edit(request.user):
+            raise PermissionDenied
         # sanitize
         full_names = [str(x).strip() for x in full_names if str(x).strip()]
         if not full_names:
@@ -900,7 +916,8 @@ def upload_csv_layer_ajax(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
-
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     f = request.FILES.get("csv_file")
     if not f:
         return JsonResponse({"error": "No file"}, status=400)
@@ -1091,7 +1108,8 @@ def rp_points_delete(request):
         project = user_settings.active_project
         if not project:
             return JsonResponse({"ok": False, "error": "No active project"}, status=400)
-
+        if not project.can_edit(request.user):
+            raise PermissionDenied
         pdb = ProjectDB(project.db_path)
         deleted = pdb.delete_preplot_points(point_ids,table_name="SPPreplot")
 
@@ -1114,7 +1132,8 @@ def sp_points_delete(request):
         project = user_settings.active_project
         if not project:
             return JsonResponse({"ok": False, "error": "No active project"}, status=400)
-
+        if not project.can_edit(request.user):
+            raise PermissionDenied
         pdb = ProjectDB(project.db_path)
         deleted = pdb.delete_preplot_points(point_ids,table_name="SPPreplot")
 
@@ -1122,3 +1141,218 @@ def sp_points_delete(request):
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
+def _json_body(request):
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _get_project_or_404(project_id: int) -> Project:
+    # You can replace with get_object_or_404 if you prefer
+    return Project.objects.get(pk=project_id)
+
+
+def _vessel_to_dict(v: Vessel) -> dict:
+    return {
+        "id": v.id,
+        "name": v.name,
+        "vessel_type": v.vessel_type or "",
+        "imo": v.imo or "",
+        "mmsi": v.mmsi or "",
+        "call_sign": v.call_sign or "",
+        "owner": v.owner or "",
+        "is_active": bool(v.is_active),
+        "is_retired": bool(v.is_retired),
+        "notes": v.notes or "",
+    }
+
+
+# -------------------------
+# Django (master) fleet API
+# -------------------------
+
+@require_GET
+@login_required
+def api_django_vessels_list(request):
+    """
+    Returns Django master fleet list for right table.
+    Supports ?q= for name search.
+    """
+    q = (request.GET.get("q") or "").strip()
+    qs = Vessel.objects.all()
+
+    if q:
+        qs = qs.filter(name__icontains=q)
+
+    # Optional filters
+    only_active = (request.GET.get("only_active") or "").strip().lower() in ("1", "true", "yes")
+    if only_active:
+        qs = qs.filter(is_active=True)
+
+    items = [_vessel_to_dict(v) for v in qs.order_by("name")[:5000]]
+    return JsonResponse({"ok": True, "items": items})
+
+
+@require_POST
+@login_required
+def api_django_vessel_create(request):
+    payload = _json_body(request)
+    if not payload:
+        return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"ok": False, "error": "Name is required"}, status=400)
+
+    v = Vessel(
+        name=name,
+        vessel_type=(payload.get("vessel_type") or "").strip() or None,
+        imo=(payload.get("imo") or "").strip() or None,
+        mmsi=(payload.get("mmsi") or "").strip() or None,
+        call_sign=(payload.get("call_sign") or "").strip() or None,
+        owner=(payload.get("owner") or "").strip() or None,
+        is_active=bool(payload.get("is_active", True)),
+        is_retired=bool(payload.get("is_retired", False)),
+        notes=(payload.get("notes") or "").strip() or None,
+    )
+
+    try:
+        v.save()
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+    return JsonResponse({"ok": True, "id": v.id})
+
+
+@require_POST
+@login_required
+def api_django_vessel_update(request, pk: int):
+    payload = _json_body(request)
+    if not payload:
+        return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    try:
+        v = Vessel.objects.get(pk=pk)
+    except Vessel.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Vessel not found"}, status=404)
+
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"ok": False, "error": "Name is required"}, status=400)
+
+    v.name = name
+    v.vessel_type = (payload.get("vessel_type") or "").strip() or None
+    v.imo = (payload.get("imo") or "").strip() or None
+    v.mmsi = (payload.get("mmsi") or "").strip() or None
+    v.call_sign = (payload.get("call_sign") or "").strip() or None
+    v.owner = (payload.get("owner") or "").strip() or None
+    v.is_active = bool(payload.get("is_active", True))
+    v.is_retired = bool(payload.get("is_retired", False))
+    v.notes = (payload.get("notes") or "").strip() or None
+
+    try:
+        v.save()
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+    return JsonResponse({"ok": True})
+
+
+@require_POST
+@login_required
+def api_django_vessel_delete(request, pk: int):
+    try:
+        v = Vessel.objects.get(pk=pk)
+    except Vessel.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Vessel not found"}, status=404)
+
+    v.delete()
+    return JsonResponse({"ok": True})
+
+
+# -----------------------------------
+# ProjectDB project_fleet management
+# -----------------------------------
+
+@require_GET
+@login_required
+def api_project_fleet_list(request, project_id: int):
+    project = _get_project_or_404(project_id)
+    pdb = ProjectDB(project.db_path)
+
+    try:
+        items = pdb.list_project_fleet()
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+    return JsonResponse({"ok": True, "items": items})
+
+
+@require_POST
+@login_required
+def api_project_fleet_add_from_django(request, project_id: int):
+    """
+    Adds a Django vessel into ProjectDB project_fleet by vessel_id.
+    Body: { "vessel_id": 123 }
+    """
+    payload = _json_body(request)
+    if not payload or not payload.get("vessel_id"):
+        return JsonResponse({"ok": False, "error": "vessel_id required"}, status=400)
+
+    project = _get_project_or_404(project_id)
+    pdb = ProjectDB(project.db_path)
+
+    vessel_id = int(payload["vessel_id"])
+    try:
+        v = Vessel.objects.get(pk=vessel_id)
+    except Vessel.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Django vessel not found"}, status=404)
+
+    try:
+        status = pdb.add_vessel_to_project(_vessel_to_dict(v))
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+    # status: "inserted" or "exists"
+    return JsonResponse({"ok": True, "status": status})
+
+
+@require_POST
+@login_required
+def api_project_fleet_remove(request, project_id: int):
+    """
+    Removes a project_fleet row by project_fleet_id.
+    Body: { "project_fleet_id": 10 }
+    """
+    payload = _json_body(request)
+    if not payload or not payload.get("project_fleet_id"):
+        return JsonResponse({"ok": False, "error": "project_fleet_id required"}, status=400)
+
+    project = _get_project_or_404(project_id)
+    pdb = ProjectDB(project.db_path)
+
+    try:
+        deleted = pdb.remove_project_vessel(int(payload["project_fleet_id"]))
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+    return JsonResponse({"ok": True, "deleted": deleted})
+
+
+# -------------------------
+# Optional: CSV import master fleet
+# -------------------------
+
+@require_POST
+@login_required
+def api_import_master_fleet_csv(request):
+    """
+    Imports missing vessels into Django master fleet from fleet/vessels_list.csv
+    (your Update Fleet button).
+    """
+    try:
+        result = import_vessels_from_csv_if_missing("fleet/vessels_list.csv")
+        return JsonResponse({"ok": True, "result": result})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)

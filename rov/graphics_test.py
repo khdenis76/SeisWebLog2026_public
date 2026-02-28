@@ -14,7 +14,33 @@ line_df = plgr.read_dsr_for_line(13513)
 line_df['Primary_e95']= line_df['Sigma1']*math.sqrt(5.991)
 line_df['Primary_n95']= line_df['Sigma2']*math.sqrt(5.991)
 line_df['Primary_z95']= line_df['Sigma5']*math.sqrt(5.991)
+line_df['Secondary_e95']= line_df['Sigma3']*math.sqrt(5.991)
+line_df['Secondary_n95']= line_df['Sigma4']*math.sqrt(5.991)
 
+line_df['dX_primary'] = line_df['PreplotEasting']-line_df['PrimaryEasting']
+line_df['dX_secondary'] = line_df['PreplotEasting']-line_df['SecondaryEasting']
+
+line_df['dY_primary'] = line_df['PreplotNorthing']-line_df['PrimaryNorthing']
+line_df['dY_secondary'] = line_df['PreplotNorthing']-line_df['SecondaryNorthing']
+
+plgr.make_dxdy_primary_secondary_with_hists(
+            line_df,
+            dx_p_col="dX_primary",
+            dy_p_col="dY_primary",
+            dx_s_col="dX_secondary",
+            dy_s_col="dY_secondary",
+            title="DSR dX/dY (Primary & Secondary)",
+            red_radius=20,  # fixed, legend-controlled
+            red_is_show=True,
+            p_name="Primary",
+            s_name="Secondary",
+            bins=40,
+            padding_ratio=0.10,
+            is_show=True,
+            json_return=False,
+            target_id="dxdy_plot",
+    )
+"""
 plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
                                            rov_col="ROV",
                                            is_show=True,
@@ -28,7 +54,7 @@ plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
                                            title3="σZ → 95% Primary(INS)",
                                            y1_label="σE",y2_label="σN",y3_label="σZ ",y_axis_label="Offset,m"
                                            )
-"""
+
 plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
                                            rov_col="ROV",
                                            is_show=True,

@@ -1,0 +1,36 @@
+<div class="table-responsive seis-shot-table-wrap" id="shot-table-div-container" style="height: 70vh">
+  <table class="table table-sm table-striped table-hover align-middle mb-0 seis-shot-table" id="shot-table-list">
+    <thead class="table-dark">
+        <th class="text-nowrap">Nav Line</th>
+        <th class="text-nowrap">Attempt</th>
+        <th class="text-nowrap">Seq</th>
+
+        <th class="text-nowrap text-end">Stations</th>
+        <th class="text-nowrap text-end">Distinct</th>
+
+        <th class="text-nowrap text-end">Sources</th>
+        <th class="text-nowrap text-end">Arrays</th>
+
+        <th class="text-nowrap text-end">Gun Min</th>
+        <th class="text-nowrap text-end">Gun Max</th>
+
+        <th class="text-nowrap text-end">Water Min</th>
+        <th class="text-nowrap text-end">Water Max</th>
+
+        <th class="text-nowrap text-end">Prod</th>
+        <th class="text-nowrap text-end">NonProd</th>
+        <th class="text-nowrap text-end">Kills</th>
+
+        <th class="text-nowrap text-end">Prod %</th>
+        <th class="text-nowrap text-end">NonProd %</th>
+        <th class="text-nowrap text-end">Kills %</th>
+    </thead>
+    <tbody id="shot-table-tbody">
+      {{ st_summary|safe }}
+    </tbody>
+  </table>
+</div>
+
+
+
+

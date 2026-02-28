@@ -1,0 +1,58 @@
+{% if rows %}
+        {% for r in rows %}
+          <tr>
+            <td class="text-nowrap">{{ r.nav_line }}</td>
+            <td class="text-nowrap">{{ r.attempt }}</td>
+            <td class="text-nowrap">
+                {% if r.min_water_depth is not None and r.min_water_depth == 0 %}
+                    <i class="text-warning fas fa-triangle-exclamation me-1" title="Water depth is 0!"></i>
+                {% endif %}
+                {{ r.seq }}
+            </td>
+
+            <td class="text-end">{{ r.nav_station_count }}</td>
+            <td class="text-end">{{ r.nav_station_distinct_count }}</td>
+
+            <td class="text-end">{{ r.SourceCount }}</td>
+            <td class="text-end">{{ r.ArraysCount }}</td>
+
+            <td class="text-end">
+              {% if r.min_gun_depth is not None %}{{ r.min_gun_depth|floatformat:1 }}{% else %}-{% endif %}
+            </td>
+            <td class="text-end">
+              {% if r.max_gun_depth is not None %}{{ r.max_gun_depth|floatformat:1 }}{% else %}-{% endif %}
+            </td>
+
+            <td class="text-end">
+                {% if r.min_water_depth is not None and r.min_water_depth == 0 %}
+                    <i class="text-danger fas fa-triangle-exclamation me-1"></i>
+                {% endif %}
+                {% if r.min_water_depth is not None %}{{ r.min_water_depth|floatformat:1 }}{% else %}-{% endif %}
+
+            </td>
+            <td class="text-end">
+              {% if r.max_water_depth is not None %}{{ r.max_water_depth|floatformat:1 }}{% else %}-{% endif %}
+            </td>
+
+            <td class="text-end">{{ r.ProdCount }}</td>
+            <td class="text-end">{{ r.NonProdCount }}</td>
+            <td class="text-end">{{ r.KillCount }}</td>
+
+            <td class="text-end">
+              {% if r.ProdPercent is not None %}{{ r.ProdPercent|floatformat:2 }}{% else %}-{% endif %}
+            </td>
+            <td class="text-end">
+              {% if r.NonProdPercent is not None %}{{ r.NonProdPercent|floatformat:2 }}{% else %}-{% endif %}
+            </td>
+            <td class="text-end">
+              {% if r.KillPercent is not None %}{{ r.KillPercent|floatformat:2 }}{% else %}-{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="15" class="text-center text-muted py-4">
+            No summary rows found.
+          </td>
+        </tr>
+      {% endif %}

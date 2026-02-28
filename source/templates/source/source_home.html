@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}SOURCE (SPS,SHOT TABLE ETC) — {{ project.name }}{% endblock %}
+{% block content %}
+<div class="container-fluid">
+   <div class="card shadow-sm mb-3">
+         <div class="card-header clearfix">
+                  <h4 class="mb-0 float-start">
+                      <i class="fa-solid fa-database me-2"></i>
+                      SOURCE DATA
+                      <small class="text-muted">/ {{ project.name }}</small>
+                  </h4>
+        <!-- ICON BUTTON: OPEN MODAL -->
+                  <button type="button"
+                          class="btn  btn-warning float-end me-2"
+                          title="Upload SPS | SHOT TABLE"
+                          data-bs-toggle="modal"
+                          data-bs-target="#sourceUploadModal"
+                  >
+                          <i class="fas fa-folder-open"></i>
+                  </button>
+         </div>
+    </div>
+  <div class="row">
+    <div class="col-4" id="source_left-rov-col">
+      <!-- LEFT COLUMN -->
+      <div class="d-flex align-items-center mb-2">
+                <!-- Left spacer -->
+                <div class="flex-grow-1"></div>
+                <div class="flex-grow-1 text-end">
+                      <button type="button"
+                                   class="btn btn-sm float-end"
+                                   id = "source_toggle-left-rov-btn">
+                                <i class="fas fa-expand" id="source_left-rov-toggle-icon"></i>
+                      </button>
+                </div>
+            </div>
+        {%  include "source/cards/source_production_card.html" %}
+    </div>
+
+    <div class="col-8" id="source_right-rov-col" >
+    <div class="d-flex align-items-center mb-2">
+                <!-- Left spacer -->
+                <div class="flex-grow-1"></div>
+                <div class="flex-grow-1 text-end">
+                      <button type="button"
+                                   class="btn btn-sm float-end"
+                                   id = "source_toggle-right-rov-btn">
+                                <i class="fas fa-expand" id="source_right-rov-toggle-icon"></i>
+                      </button>
+                </div>
+
+    </div>
+      <!-- RIGHT COLUMN -->
+    </div>
+  </div>
+</div>
+{% include "source/modals/source_upload_modal.html" %}
+{% endblock %}

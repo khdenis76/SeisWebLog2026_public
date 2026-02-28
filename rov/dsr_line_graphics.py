@@ -6,13 +6,16 @@ from pathlib import Path
 import pandas as pd
 from bokeh.embed import json_item
 from bokeh.layouts import column, gridplot, row
-from bokeh.models import ColumnDataSource, HoverTool, Range1d, Button, CustomJS, FactorRange, LegendItem, Legend, Div
+from bokeh.models import ColumnDataSource, HoverTool, Range1d, Button, CustomJS, FactorRange, LegendItem, Legend, Div, \
+    Span, TextInput
 from bokeh.palettes import Category10, Turbo256, Category20
 from bokeh.plotting import figure, show
 import numpy as np
 from bokeh.models import ColumnDataSource, ColorBar
-from bokeh.transform import linear_cmap, factor_cmap
+from bokeh.transform import linear_cmap, factor_cmap, dodge
 from bokeh.palettes import Viridis256
+from django.shortcuts import render
+
 
 class DSRLineGraphics(object):
     def __init__(self,db_path):
@@ -1490,6 +1493,504 @@ class DSRLineGraphics(object):
 
         return json_item(layout) if json_return else layout
 
+    def make_dxdy_primary_secondary_with_hists(
+            self,
+            df,
+            dx_p_col="dX_primary",
+            dy_p_col="dY_primary",
+            dx_s_col="dX_secondary",
+            dy_s_col="dY_secondary",
+            # hover meta
+            line_col="Line",
+            station_col="Station",
+            rov_col="ROV",
+            deploy_time_col="TimeStamp",  # shown as "Deploy Time"
+            range_to_preplot_col="RangeToPreplot",
+            sma_col="SMA95",
+            p_sma_e95_col="Primary_e95",
+            p_sma_n95_col="Primary_n95",
+            s_sma_e95_col="Secondary_e95",
+            s_sma_n95_col="Secondary_n95",
+            title="DSR dX/dY (Primary & Secondary)",
+            p_name="Primary",
+            s_name="Secondary",
+            # circles
+            red_radius=None,  # fixed, legend-controlled
+            red_is_show=True,
+            orange_radius=None,  # dynamic via JS input
+            orange_is_show=True,
+            # orange radius input
+            orange_input_is_show=True,
+            # hist
+            bins=40,
+            hist_show_std=True,
+            hist_show_kde=True,
+            kde_points=200,
+            kde_bandwidth=None,  # None -> Silverman
+            padding_ratio=0.10,
+            # output
+            is_show=False,
+            json_return=False,
+            target_id="dxdy_plot",
+    ):
+        try:
+            # -------------------- basic validation --------------------
+            if df is None:
+                return self._error_layout(
+                    title="DX/DY Plot Error",
+                    message="DataFrame is None.",
+                    level="error",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            if df.empty:
+                return self._error_layout(
+                    title="DX/DY Plot Error",
+                    message="DataFrame is empty.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            required_cols = [dx_p_col, dy_p_col, dx_s_col, dy_s_col]
+            missing = [c for c in required_cols if c not in df.columns]
+            if missing:
+                return self._error_layout(
+                    title="DX/DY Plot Error",
+                    message="Missing required columns.",
+                    details=", ".join(missing),
+                    level="error",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            # optional hover columns (if missing -> empty strings)
+            hover_cols = [
+                line_col, station_col, rov_col, deploy_time_col, range_to_preplot_col,
+                sma_col, p_sma_e95_col, p_sma_n95_col, s_sma_e95_col, s_sma_n95_col,
+            ]
+            hover_present = {c: (c in df.columns) for c in hover_cols}
+
+            # -------------------- helpers --------------------
+            def _safe_str(v):
+                if v is None:
+                    return ""
+                try:
+                    return str(v)
+                except Exception:
+                    return ""
+
+            def _safe_float(v):
+                try:
+                    if v is None:
+                        return None
+                    vv = float(v)
+                    if vv != vv:  # NaN
+                        return None
+                    return vv
+                except Exception:
+                    return None
+
+            def _mean_std(vals):
+                n = len(vals)
+                if n == 0:
+                    return (0.0, 0.0)
+                m = sum(vals) / float(n)
+                if n < 2:
+                    return (m, 0.0)
+                s2 = 0.0
+                for v in vals:
+                    d = v - m
+                    s2 += d * d
+                s2 /= float(n - 1)
+                return (m, s2 ** 0.5)
+
+            def _hist(vals, bins_count):
+                vals2 = []
+                for v in vals:
+                    fv = _safe_float(v)
+                    if fv is not None:
+                        vals2.append(fv)
+                if not vals2:
+                    return {"left": [], "right": [], "top": []}
+
+                vmin = min(vals2)
+                vmax = max(vals2)
+                if vmin == vmax:
+                    vmin -= 0.5
+                    vmax += 0.5
+
+                step = (vmax - vmin) / float(bins_count)
+                counts = [0] * bins_count
+
+                for v in vals2:
+                    idx = int((v - vmin) / step)
+                    if idx < 0:
+                        idx = 0
+                    if idx >= bins_count:
+                        idx = bins_count - 1
+                    counts[idx] += 1
+
+                left = [vmin + i * step for i in range(bins_count)]
+                right = [vmin + (i + 1) * step for i in range(bins_count)]
+                return {"left": left, "right": right, "top": counts, "bin_width": step, "n": len(vals2)}
+
+            def _kde_gaussian(vals, x_grid, bw):
+                n = len(vals)
+                if n == 0:
+                    return [0.0 for _ in x_grid]
+                if bw <= 0:
+                    bw = 1.0
+                inv = 1.0 / (n * bw)
+                c = 0.3989422804014327  # 1/sqrt(2*pi)
+                e = 2.718281828459045
+                out = []
+                for x in x_grid:
+                    s = 0.0
+                    for v in vals:
+                        z = (x - v) / bw
+                        s += c * (e ** (-0.5 * z * z))
+                    out.append(inv * s)
+                return out
+
+            def _kde_scaled_to_counts(vals, bins_count, grid_n, bw_override=None):
+                if not vals:
+                    return ([], [])
+                vmin = min(vals)
+                vmax = max(vals)
+                if vmin == vmax:
+                    vmin -= 0.5
+                    vmax += 0.5
+
+                if grid_n < 50:
+                    grid_n = 50
+                step = (vmax - vmin) / float(grid_n - 1)
+                x_grid = [vmin + i * step for i in range(grid_n)]
+
+                # bandwidth
+                bw = None
+                if bw_override is not None:
+                    try:
+                        bw = float(bw_override)
+                    except Exception:
+                        bw = None
+
+                m, sd = _mean_std(vals)
+                n = len(vals)
+                if bw is None:
+                    if sd <= 0 or n < 2:
+                        bw = (vmax - vmin) / 20.0 if (vmax - vmin) > 0 else 1.0
+                    else:
+                        bw = 1.06 * sd * (n ** (-0.2))
+
+                dens = _kde_gaussian(vals, x_grid, bw)
+
+                bin_width = (vmax - vmin) / float(bins_count) if bins_count > 0 else 1.0
+                y_scaled = [d * n * bin_width for d in dens]
+                return (x_grid, y_scaled)
+
+            # -------------------- build sources with hover fields --------------------
+            keep_hover = [c for c in hover_cols if hover_present.get(c)]
+
+            dpf = df[[dx_p_col, dy_p_col] + keep_hover].copy().dropna(subset=[dx_p_col, dy_p_col])
+            dsf = df[[dx_s_col, dy_s_col] + keep_hover].copy().dropna(subset=[dx_s_col, dy_s_col])
+
+            if dpf.empty and dsf.empty:
+                return self._error_layout(
+                    title="DX/DY Plot Error",
+                    message="No valid points after dropping NaNs.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            def _build_source(dff, xcol, ycol, kind):
+                x = []
+                y = []
+                Line = []
+                Station = []
+                ROV = []
+                DeployTime = []
+                RangeToPreplot = []
+                SMA95 = []
+                Primary_e95 = []
+                Primary_n95 = []
+                Secondary_e95 = []
+                Secondary_n95 = []
+
+                for _, r in dff.iterrows():
+                    fx = _safe_float(r.get(xcol))
+                    fy = _safe_float(r.get(ycol))
+                    if fx is None or fy is None:
+                        continue
+
+                    x.append(fx)
+                    y.append(fy)
+
+                    Line.append(_safe_str(r.get(line_col)) if hover_present.get(line_col) else "")
+                    Station.append(_safe_str(r.get(station_col)) if hover_present.get(station_col) else "")
+                    ROV.append(_safe_str(r.get(rov_col)) if hover_present.get(rov_col) else "")
+                    DeployTime.append(_safe_str(r.get(deploy_time_col)) if hover_present.get(deploy_time_col) else "")
+                    RangeToPreplot.append(
+                        _safe_str(r.get(range_to_preplot_col)) if hover_present.get(range_to_preplot_col) else "")
+
+                    SMA95.append(_safe_str(r.get(sma_col)) if hover_present.get(sma_col) else "")
+                    Primary_e95.append(_safe_str(r.get(p_sma_e95_col)) if hover_present.get(p_sma_e95_col) else "")
+                    Primary_n95.append(_safe_str(r.get(p_sma_n95_col)) if hover_present.get(p_sma_n95_col) else "")
+                    Secondary_e95.append(_safe_str(r.get(s_sma_e95_col)) if hover_present.get(s_sma_e95_col) else "")
+                    Secondary_n95.append(_safe_str(r.get(s_sma_n95_col)) if hover_present.get(s_sma_n95_col) else "")
+
+                if not x:
+                    return None
+
+                return ColumnDataSource(data=dict(
+                    x=x, y=y,
+                    kind=[kind] * len(x),
+                    Line=Line,
+                    Station=Station,
+                    ROV=ROV,
+                    DeployTime=DeployTime,
+                    RangeToPreplot=RangeToPreplot,
+                    SMA95=SMA95,
+                    Primary_e95=Primary_e95,
+                    Primary_n95=Primary_n95,
+                    Secondary_e95=Secondary_e95,
+                    Secondary_n95=Secondary_n95,
+                ))
+
+            src_p = _build_source(dpf, dx_p_col, dy_p_col, "Primary")
+            src_s = _build_source(dsf, dx_s_col, dy_s_col, "Secondary")
+
+            if src_p is None and src_s is None:
+                return self._error_layout(
+                    title="DX/DY Plot Error",
+                    message="No numeric points could be parsed.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            # -------------------- symmetric limits (0,0 centered) --------------------
+            def _max_abs_from_src(src):
+                if src is None:
+                    return 0.0
+                xs = src.data.get("x", [])
+                ys = src.data.get("y", [])
+                m = 0.0
+                if xs:
+                    m = max(m, max(abs(min(xs)), abs(max(xs))))
+                if ys:
+                    m = max(m, max(abs(min(ys)), abs(max(ys))))
+                return m
+
+            max_abs = max(1.0, _max_abs_from_src(src_p), _max_abs_from_src(src_s))
+
+            if red_radius is not None:
+                try:
+                    max_abs = max(max_abs, abs(float(red_radius)))
+                except Exception:
+                    pass
+            if orange_radius is not None:
+                try:
+                    max_abs = max(max_abs, abs(float(orange_radius)))
+                except Exception:
+                    pass
+
+            lim = max_abs * (1.0 + float(padding_ratio))
+
+            # -------------------- hover tool --------------------
+            hover = HoverTool(tooltips=[
+                ("Series", "@kind"),
+                ("Line", "@Line"),
+                ("Station", "@Station"),
+                ("ROV", "@ROV"),
+                ("Deploy Time", "@DeployTime"),
+                ("RangeToPreplot", "@RangeToPrePlot"),
+                ("Primary SMA95 (e95,n95)", "(@Primary_e95, @Primary_n95)"),
+                ("Secondary SMA95 (e95,n95)", "(@Secondary_e95, @Secondary_n95)"),
+                ("dX", "@x{0.00}"),
+                ("dY", "@y{0.00}"),
+            ], )
+
+            # -------------------- main plot --------------------
+            p = figure(
+                title=title,
+                x_axis_label="dX (m)",
+                y_axis_label="dY (m)",
+                x_range=(-lim, lim),
+                y_range=(-lim, lim),
+                match_aspect=True,
+                tools=[hover, "pan", "wheel_zoom", "box_zoom", "reset", "save"],
+                active_scroll="wheel_zoom",
+                sizing_mode="stretch_both",
+            )
+            p.add_layout(Span(location=0, dimension="width", line_width=2))
+            p.add_layout(Span(location=0, dimension="height", line_width=2))
+
+            if src_p is not None:
+                r_primary =p.scatter("x", "y", source=src_p, size=6, legend_label=p_name, color="red",alpha=0.9)
+            if src_s is not None:
+                r_secondary =p.scatter("x", "y", source=src_s, size=6, legend_label=s_name, color="green", alpha=0.9, marker="triangle")
+            hover.renderers = [r_primary, r_secondary]
+            # -------------------- circles --------------------
+            # RED: fixed from function call + legend-controlled (click to hide/show)
+            red_src = ColumnDataSource(data={
+                "x": [0.0],
+                "y": [0.0],
+                "radius": [float(red_radius) if red_radius is not None else 0.0],
+            })
+            red_renderer = p.circle(
+                x="x", y="y", radius="radius", source=red_src,
+                radius_units="data",
+                fill_alpha=0.0,
+                line_color="red",
+                line_width=2,
+                legend_label=(f"Tolerance ({float(red_radius):g} m)" if red_radius is not None else "Tolerance"),
+                visible=bool(red_is_show and red_radius is not None),
+            )
+
+            # ORANGE: dynamic via JS input (not in legend)
+            orange_src = ColumnDataSource(data={
+                "x": [0.0],
+                "y": [0.0],
+                "radius": [float(orange_radius) if orange_radius is not None else 0.0],
+            })
+            orange_renderer = p.circle(
+                x="x", y="y", radius="radius", source=orange_src,
+                radius_units="data",
+                fill_alpha=0.0,
+                line_color="orange",
+                line_width=2,
+                visible=bool(orange_is_show and orange_radius is not None),
+            )
+
+            # legend click hides/shows primary/secondary + red circle
+            p.legend.click_policy = "hide"
+
+            # -------------------- histograms + stats + KDE --------------------
+            px_all = (src_p.data["x"] if src_p is not None else []) + (src_s.data["x"] if src_s is not None else [])
+            py_all = (src_p.data["y"] if src_p is not None else []) + (src_s.data["y"] if src_s is not None else [])
+
+            hx_h = _hist(px_all, bins)
+            hy_h = _hist(py_all, bins)
+
+            hx_src = ColumnDataSource({"left": hx_h["left"], "right": hx_h["right"], "top": hx_h["top"]})
+            hy_src = ColumnDataSource({"left": hy_h["left"], "right": hy_h["right"], "top": hy_h["top"]})
+
+            mx, sxv = _mean_std(px_all)
+            my, syv = _mean_std(py_all)
+
+            kx_x, kx_y = ([], [])
+            ky_ygrid, ky_xscaled = ([], [])
+            if hist_show_kde:
+                kx_x, kx_y = _kde_scaled_to_counts(px_all, bins, kde_points, kde_bandwidth)
+                ky_ygrid, ky_xscaled = _kde_scaled_to_counts(py_all, bins, kde_points, kde_bandwidth)
+
+            # top hist (dX)
+            hx = figure(
+                title=f"dX (mean={mx:.2f}, std={sxv:.2f})",
+                x_range=p.x_range,
+                height=180,
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                sizing_mode="stretch_width",
+            )
+            hx.quad(left="left", right="right", bottom=0, top="top", source=hx_src, alpha=0.9)
+            hx.xaxis.visible = False
+
+            if hist_show_std and px_all:
+                hx.add_layout(Span(location=mx, dimension="height", line_width=2,line_dash="dotted"))
+                hx.add_layout(Span(location=mx - sxv, dimension="height", line_width=1,line_dash="dotted"))
+                hx.add_layout(Span(location=mx + sxv, dimension="height", line_width=1,line_dash="dotted"))
+
+            if hist_show_kde and kx_x:
+                hx.line(kx_x, kx_y, line_width=2, legend_label="KDE",color="pink")
+                hx.legend.click_policy = "hide"
+
+            # right hist (dY)
+            hy = figure(
+                title=f"dY (mean={my:.2f}, std={syv:.2f})",
+                y_range=p.y_range,
+                width=220,
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                sizing_mode="stretch_height",
+            )
+            hy.quad(bottom="left", top="right", left=0, right="top", source=hy_src, alpha=0.9)
+            hy.yaxis.visible = False
+
+            if hist_show_std and py_all:
+                hy.add_layout(Span(location=my, dimension="width", line_width=2,line_dash="dotted"))
+                hy.add_layout(Span(location=my - syv, dimension="width", line_width=1,line_dash="dotted"))
+                hy.add_layout(Span(location=my + syv, dimension="width", line_width=1,line_dash="dotted"))
+
+            if hist_show_kde and ky_ygrid:
+                hy.line(ky_xscaled, ky_ygrid, line_width=2, legend_label="KDE",color="orange")
+                hy.legend.click_policy = "hide"
+
+            # -------------------- controls --------------------
+            btn_toggle = Button(label="Toggle legend & histograms", button_type="primary")
+            btn_toggle.js_on_click(CustomJS(
+                args=dict(p=p, hx=hx, hy=hy),
+                code="""
+                    if (p.legend && p.legend.length > 0) {
+                        const L = p.legend[0];
+                        L.visible = !L.visible;
+                    }
+                    hx.visible = !hx.visible;
+                    hy.visible = !hy.visible;
+                    p.change.emit(); hx.change.emit(); hy.change.emit();
+                """
+            ))
+
+            controls = [btn_toggle]
+
+            if orange_input_is_show:
+                orange_input = TextInput(
+                    title="Orange Radius (m)",
+                    value=str(orange_radius if orange_radius is not None else ""),
+                )
+                orange_input.js_on_change("value", CustomJS(
+                    args=dict(src=orange_src, rend=orange_renderer),
+                    code="""
+                        const s = (cb_obj.value || "").trim().replace(",", ".");
+                        const v = parseFloat(s);
+
+                        if (!isFinite(v) || v <= 0) {
+                            src.data['radius'][0] = 0.0;
+                            rend.visible = false;
+                        } else {
+                            src.data['radius'][0] = v;
+                            rend.visible = true;
+                        }
+                        src.change.emit();
+                    """
+                ))
+                controls.append(orange_input)
+
+            controls_row = row(*controls, sizing_mode="stretch_width")
+
+            # -------------------- layout --------------------
+            top = column(controls_row, hx, sizing_mode="stretch_width")
+            main_row = row(p, hy, sizing_mode="stretch_both")
+            layout = column(top, main_row, sizing_mode="stretch_both")
+
+            if is_show:
+                show(layout)
+
+            if json_return:
+                return {"layout": layout, "json_item": json_item(layout, target_id)}
+
+            return layout
+
+        except Exception as e:
+            return self._error_layout(
+                title="DX/DY Plot Fatal Error",
+                message="Unexpected error while building plot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
 
 
 

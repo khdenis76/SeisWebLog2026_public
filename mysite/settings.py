@@ -4,19 +4,24 @@ VERSION_FILE = BASE_DIR / "version.txt"
 APP_VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "dev"
 SECRET_KEY = 'dev-secret-key'
 DEBUG = True
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [ "127.0.0.1","10.100.146.140","172.21.77.154"]
 INSTALLED_APPS = [
     'django.contrib.admin','django.contrib.auth','django.contrib.contenttypes',
     'django.contrib.sessions','django.contrib.messages','django.contrib.staticfiles',
     'core',
     'baseproject',
     'rov',
+    'project_users.apps.ProjectUsersConfig',
+    'source.apps.SourceConfig',
+    'fleet.apps.FleetConfig'
+
 ]
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware','django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware','django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware','django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "core.middleware.ActiveProjectMiddleware",
 ]
 ROOT_URLCONF = 'mysite.urls'
 TEMPLATES = [{

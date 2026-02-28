@@ -103,7 +103,8 @@ export function initDSRLineQCTabs() {
   document.addEventListener("click", (e) => {
     const tr = e.target.closest("tr.dsr-line[data-line]");
     if (!tr) return;
-
+    const icon = tr?.querySelector("i.dsr-line-click");
+    icon.classList.remove("d-none");  // show
     selectedLine = tr.dataset.line;
 
     // highlight (optional)

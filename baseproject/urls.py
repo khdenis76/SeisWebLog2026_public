@@ -30,5 +30,9 @@ urlpatterns = [
     path("slines/select",sl_line_click,name="sl_line_click"),
     path("rlines/point_delete/",rp_points_delete,name="rp_points_delete"),
     path("slines/point_delete/",sp_points_delete,name="sp_points_delete"),
+    path("api/projects/<int:project_id>/fleet/list/", api_project_fleet_list, name="api_project_fleet_list"),
+    path("api/fleet/django/list/", api_django_vessels_list, name="api_django_vessels_list"),
+    path("api/projects/<int:project_id>/fleet/add/", api_project_fleet_add_from_django, name="api_project_fleet_add_from_django"),
+    path("api/projects/<int:project_id>/fleet/remove/", api_project_fleet_remove, name="api_project_fleet_remove"),
 
 ]

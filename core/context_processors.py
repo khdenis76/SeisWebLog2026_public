@@ -6,32 +6,14 @@ from .projectdb import ProjectDB
 from .version_checker import check_new_version
 
 def theme_context(request):
-    """
-    Adds:
-      theme_mode: "dark" | "light"
-    to every template.
-    """
-    theme_mode = "dark"
-
-    if request.user.is_authenticated:
-        settings, _ = UserSettings.objects.get_or_create(user=request.user)
-
-        # If active project exists, read from project SQLite
-        if settings.active_project:
-            try:
-                pdb = ProjectDB(settings.active_project.db_path)
-                main = pdb.get_main()
-                # adapt this mapping to your DB values
-                cs = (main.color_scheme or "").strip().lower()
-
-                if cs in ("light", "white", "day"):
-                    theme_mode = "light"
-                else:
-                    theme_mode = "dark"
-            except Exception:
-                theme_mode = "dark"
-
-    return {"theme_mode": theme_mode}
+    mode = "dark"
+    user = getattr(request, "user", None)
+    if user and user.is_authenticated:
+        try:
+            mode = user.settings.theme_mode or "dark"
+        except Exception:
+            pass
+    return {"theme_mode": mode}
 def app_version(request):
     return {"APP_VERSION": getattr(settings, "APP_VERSION", "dev")}
 def version_info(request):

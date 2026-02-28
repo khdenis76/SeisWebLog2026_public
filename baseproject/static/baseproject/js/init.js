@@ -15,6 +15,8 @@ import {initDeleteLayersBtn} from "./deleteCSVLayer.js";
 import {initRLLineClick} from "./rlLineClick.js";
 import {initSLLineClick} from "./slLineClick.js";
 import {initThemeToggle} from "./initThemeToggle.js";
+import {initProjectFleetPanel} from "./initProjectFleetPanel.js";
+
 
 export function initAllJSForBaseproject() {
     initRLCheckboxes();
@@ -36,6 +38,8 @@ export function initAllJSForBaseproject() {
   initRLLineClick();
   initSLLineClick();
   initThemeToggle();
+  initProjectFleetPanel();
+
 
   initDeletePreplot([
     {

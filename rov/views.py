@@ -42,8 +42,11 @@ def rov_main_view(request):
     if not project:
         # No active project → go to project list
         return redirect("projects")
-    if not project.can_edit(request.user):
-        raise PermissionDenied
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+
     dsrdb = DSRDB(project.db_path)
     pdb=ProjectDB(project.db_path)
     dsrdb.pdb.update_days_in_water()
@@ -150,7 +153,11 @@ def rov_upload_dsr(request):
         return JsonResponse({"error": "No active project"}, status=400)
 
     project = user_settings.active_project
-
+    if not project:
+        # No active project → go to project list
+        return redirect("projects")
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     files = request.FILES.getlist("files")
 
     if not files:
@@ -225,7 +232,8 @@ def rov_upload_survey_manager(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
-
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"error": "No files uploaded"}, status=400)
@@ -322,7 +330,8 @@ def rov_upload_black_box(request):
         project = user_settings.active_project
         if not project:
             return JsonResponse({"error": "No active project"}, status=400)
-
+        if not project.can_edit(request.user):
+            raise PermissionDenied
         pdb = DSRDB(project.db_path)
 
         # --- mapping ---
@@ -378,7 +387,8 @@ def rov_upload_rec_db(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
-
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"error": "No files uploaded"}, status=400)
@@ -552,7 +562,8 @@ def delete_selected_dsr_lines(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
-
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     try:
         payload = json.loads(request.body.decode("utf-8"))
         lines = payload.get("lines", [])
@@ -640,6 +651,8 @@ def delete_bbox_files(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
     try:
         payload = json.loads(request.body)
         ids = payload.get("ids", [])
@@ -1232,6 +1245,7 @@ def load_min_max_line_qc(request):
     return JsonResponse({"ok": True, "line_qc_plot": json_item(line_qc_plot)})
 
 @require_POST
+@login_required
 def bbox_plot_item(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -1300,12 +1314,10 @@ def bbox_plot_item(request):
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
-from django.http import JsonResponse
-from django.views.decorators.http import require_POST
-import json
-from bokeh.embed import json_item
+
 
 @require_POST
+@login_required
 def dsr_line_qc_plot_item(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -1323,13 +1335,21 @@ def dsr_line_qc_plot_item(request):
         # You already have DSRLineGraphics class:
         g = DSRLineGraphics(project.db_path)
         pdb=ProjectDB(project.db_path)
-
+        pdb.set_line_clicked (line)
         # Load df for this line (use your existing DB method)
         # Example: df = g.read_dsr_for_line(line)  (use your real function)
         df = g.line_df = g.read_dsr_for_line(line)
-        df['Primary_e95']= df['Sigma1']*math.sqrt(5.991)
-        df['Primary_n95']= df['Sigma2']*math.sqrt(5.991)
-        df['Primary_z95']= df['Sigma5']*math.sqrt(5.991)  # <-- replace with YOUR method
+        df['Primary_e95']= df['Sigma']*math.sqrt(5.991)
+        df['Primary_n95']= df['Sigma1']*math.sqrt(5.991)
+        df['Primary_z95']= df['Sigma4']*math.sqrt(5.991)  # <-- replace with YOUR method
+        df['Secondary_e95'] = df['Sigma3'] * math.sqrt(5.991)
+        df['Secondary_n95'] = df['Sigma4'] * math.sqrt(5.991)
+
+        df['dX_primary'] = df['PreplotEasting'] - df['PrimaryEasting']
+        df['dX_secondary'] = df['PreplotEasting'] - df['SecondaryEasting']
+
+        df['dY_primary'] = df['PreplotNorthing'] - df['PrimaryNorthing']
+        df['dY_secondary'] = df['PreplotNorthing'] - df['SecondaryNorthing']
 
         # Build ONE plot depending on tab requested
         if plot_key == "water":
@@ -1379,19 +1399,38 @@ def dsr_line_qc_plot_item(request):
             # For non-bokeh tab, return HTML
             max_sma = pdb.get_node_qc().max_sma
             warning_sma = pdb.get_node_qc().warning_sma
+            max_rad_offset = pdb.get_node_qc().max_radial_offset
             html =render_to_string("rov/partials/dsr_single_line_tbody.html",{
                          "rows":df.itertuples(),
                          "max_sma": max_sma,
                          "warning_sma": warning_sma,
+                         "max_rad_offset": max_rad_offset,
             })
 
             return JsonResponse({"ok": True,
                                  "plot_key": plot_key,
                                  "html": html})
 
-        # placeholders for later tabs:
-        elif plot_key in {"deplpre", "map", "delta", "xline", "timing", "3d"}:
-            return JsonResponse({"ok": True, "plot_key": plot_key, "html": f"<div class='text-muted p-2'>Plot '{plot_key}' not implemented yet.</div>"})
+        # placeholders for later tabs: "deplpre", "map", "xline", "timing", "3d"
+        elif plot_key in {"delta"}:
+            layout = g.make_dxdy_primary_secondary_with_hists(
+                df,
+                dx_p_col="dX_primary",
+                dy_p_col="dY_primary",
+                dx_s_col="dX_secondary",
+                dy_s_col="dY_secondary",
+                title="DSR dX/dY (Primary & Secondary)",
+                red_radius=pdb.get_node_qc().max_radial_offset,  # fixed, legend-controlled
+                red_is_show=True,
+                p_name="Primary",
+                s_name="Secondary",
+                bins=40,
+                padding_ratio=0.10,
+                is_show=False,
+                json_return=False,
+                target_id="dxdy_plot",
+            )
+            return JsonResponse({"ok": True, "plot_key": plot_key,"item": json_item(layout)})
 
         return JsonResponse({"ok": False, "error": f"Unknown plot_key: {plot_key}"}, status=400)
 

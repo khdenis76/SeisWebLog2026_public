@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+ <form style="display:none;">
+    {% csrf_token %}
+</form>
+<div class="container-fluid">
+
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <h4 class="mb-0">Fleet / Vessels</h4>
+      <div class="text-muted small">Master list of vessels (used / historical)</div>
+    </div>
+    <button class="btn btn-sm btn-outline-warning"
+        id="btn-import-fleet"
+        data-import-url="{% url 'fleet:api_import_fleet_from_csv' %}">
+        <i class="fas fa-rotate me-1"></i> Update fleet
+    </button>
+    <button class="btn btn-sm btn-warning"
+            id="btn-add-vessel"
+            data-bs-toggle="modal"
+            data-bs-target="#vesselModal">
+      <i class="fas fa-plus me-1"></i> Add vessel
+    </button>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+
+      <div class="row g-2 align-items-center mb-2">
+        <div class="col-md-5">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="fas fa-magnifying-glass"></i></span>
+            <input type="text" class="form-control" id="vessel-search" placeholder="Search vessel name...">
+            <button class="btn btn-outline-secondary" id="btn-search">Search</button>
+          </div>
+        </div>
+
+        <div class="col-md-7 text-end">
+          <span class="badge bg-secondary" id="vessel-count">0</span>
+        </div>
+      </div>
+
+      <div class="table-responsive" style="max-height: 72vh;">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead class="table-light sticky-top">
+            <tr>
+              <th style="min-width:220px;">Name</th>
+              <th>Type</th>
+              <th>IMO</th>
+              <th>MMSI</th>
+              <th>Call</th>
+              <th>Owner</th>
+              <th class="text-center">Active</th>
+              <th class="text-center">Retired</th>
+              <th class="text-end" style="min-width:150px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="vessel-tbody">
+            <tr><td colspan="9" class="text-muted">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal fade" id="vesselModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="vesselModalTitle">Add vessel</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="alert alert-danger d-none" id="vessel-form-error"></div>
+
+        <input type="hidden" id="vessel-id">
+
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label small mb-1">Name *</label>
+            <input class="form-control form-control-sm" id="v-name">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small mb-1">Type</label>
+            <input class="form-control form-control-sm" id="v-type" placeholder="Node / Source / Support">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small mb-1">Call sign</label>
+            <input class="form-control form-control-sm" id="v-call">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label small mb-1">IMO</label>
+            <input class="form-control form-control-sm" id="v-imo">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small mb-1">MMSI</label>
+            <input class="form-control form-control-sm" id="v-mmsi">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-1">Owner</label>
+            <input class="form-control form-control-sm" id="v-owner">
+          </div>
+
+          <div class="col-md-6">
+            <div class="form-check mt-3">
+              <input class="form-check-input" type="checkbox" id="v-active" checked>
+              <label class="form-check-label" for="v-active">Active</label>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <div class="form-check mt-3">
+              <input class="form-check-input" type="checkbox" id="v-retired">
+              <label class="form-check-label" for="v-retired">Retired (historical)</label>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label small mb-1">Notes</label>
+            <textarea class="form-control form-control-sm" id="v-notes" rows="3"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-warning btn-sm" id="btn-save-vessel">
+          <i class="fas fa-floppy-disk me-1"></i> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Modal -->
+<div class="modal fade" id="vesselDeleteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Remove vessel</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="text-muted">Are you sure you want to remove:</div>
+        <div class="fw-bold" id="delete-vessel-name">—</div>
+        <input type="hidden" id="delete-vessel-id">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-danger btn-sm" id="btn-confirm-delete">
+          <i class="fas fa-trash me-1"></i> Remove
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  const listUrl   = "{% url 'fleet:api_vessel_list' %}";
+  const createUrl = "{% url 'fleet:api_vessel_create' %}";
+  const csrfToken = "{{ csrf_token }}";
+
+  const tbody = document.getElementById("vessel-tbody");
+  const count = document.getElementById("vessel-count");
+  const searchInput = document.getElementById("vessel-search");
+
+  function showError(msg) {
+    const box = document.getElementById("vessel-form-error");
+    box.textContent = msg || "Error";
+    box.classList.remove("d-none");
+  }
+  function clearError() {
+    const box = document.getElementById("vessel-form-error");
+    box.classList.add("d-none");
+    box.textContent = "";
+  }
+
+  function rowHtml(v) {
+    const badgeYes = '<span class="badge bg-success">Yes</span>';
+    const badgeNo  = '<span class="badge bg-secondary">No</span>';
+
+    return `
+      <tr data-id="${v.id}">
+        <td class="fw-semibold">${escapeHtml(v.name)}</td>
+        <td>${escapeHtml(v.vessel_type || "")}</td>
+        <td>${escapeHtml(v.imo || "")}</td>
+        <td>${escapeHtml(v.mmsi || "")}</td>
+        <td>${escapeHtml(v.call_sign || "")}</td>
+        <td>${escapeHtml(v.owner || "")}</td>
+        <td class="text-center">${v.is_active ? badgeYes : badgeNo}</td>
+        <td class="text-center">${v.is_retired ? badgeYes : badgeNo}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-secondary btn-sm me-1 btn-edit">
+            <i class="fas fa-pen"></i>
+          </button>
+          <button class="btn btn-outline-danger btn-sm btn-del">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
+    }[c]));
+  }
+
+  async function loadList() {
+    const q = (searchInput.value || "").trim();
+    tbody.innerHTML = `<tr><td colspan="9" class="text-muted">Loading...</td></tr>`;
+
+    const url = q ? `${listUrl}?q=${encodeURIComponent(q)}` : listUrl;
+    const res = await fetch(url, { headers: { "Accept": "application/json" }});
+    const data = await res.json();
+
+    if (!data.ok) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-danger">Failed to load</td></tr>`;
+      return;
+    }
+
+    count.textContent = data.items.length;
+
+    if (!data.items.length) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-muted">No vessels</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = data.items.map(rowHtml).join("");
+
+    // attach actions
+    tbody.querySelectorAll(".btn-edit").forEach(btn => {
+      btn.addEventListener("click", () => openEdit(btn.closest("tr")));
+    });
+    tbody.querySelectorAll(".btn-del").forEach(btn => {
+      btn.addEventListener("click", () => openDelete(btn.closest("tr")));
+    });
+  }
+
+  function openAdd() {
+    clearError();
+    document.getElementById("vesselModalTitle").textContent = "Add vessel";
+    document.getElementById("vessel-id").value = "";
+
+    document.getElementById("v-name").value = "";
+    document.getElementById("v-type").value = "";
+    document.getElementById("v-imo").value = "";
+    document.getElementById("v-mmsi").value = "";
+    document.getElementById("v-call").value = "";
+    document.getElementById("v-owner").value = "";
+    document.getElementById("v-active").checked = true;
+    document.getElementById("v-retired").checked = false;
+    document.getElementById("v-notes").value = "";
+  }
+
+  function openEdit(tr) {
+    clearError();
+    const id = tr.getAttribute("data-id");
+    document.getElementById("vesselModalTitle").textContent = "Edit vessel";
+    document.getElementById("vessel-id").value = id;
+
+    // read values from cells (simple) OR keep dataset in memory
+    const tds = tr.querySelectorAll("td");
+    document.getElementById("v-name").value = tds[0].textContent.trim();
+    document.getElementById("v-type").value = tds[1].textContent.trim();
+    document.getElementById("v-imo").value  = tds[2].textContent.trim();
+    document.getElementById("v-mmsi").value = tds[3].textContent.trim();
+    document.getElementById("v-call").value = tds[4].textContent.trim();
+    document.getElementById("v-owner").value = tds[5].textContent.trim();
+
+    // badges -> booleans (works because Yes/No)
+    document.getElementById("v-active").checked = (tds[6].textContent.trim() === "Yes");
+    document.getElementById("v-retired").checked = (tds[7].textContent.trim() === "Yes");
+
+    // notes not in table - keep empty unless you want to store it in dataset
+    document.getElementById("v-notes").value = "";
+
+    const modal = new bootstrap.Modal(document.getElementById("vesselModal"));
+    modal.show();
+  }
+
+  function openDelete(tr) {
+    const id = tr.getAttribute("data-id");
+    const name = tr.querySelector("td").textContent.trim();
+
+    document.getElementById("delete-vessel-id").value = id;
+    document.getElementById("delete-vessel-name").textContent = name;
+
+    const modal = new bootstrap.Modal(document.getElementById("vesselDeleteModal"));
+    modal.show();
+  }
+
+  async function saveVessel() {
+    clearError();
+
+    const id = document.getElementById("vessel-id").value.trim();
+    const payload = {
+      name: document.getElementById("v-name").value.trim(),
+      vessel_type: document.getElementById("v-type").value.trim(),
+      imo: document.getElementById("v-imo").value.trim(),
+      mmsi: document.getElementById("v-mmsi").value.trim(),
+      call_sign: document.getElementById("v-call").value.trim(),
+      owner: document.getElementById("v-owner").value.trim(),
+      is_active: document.getElementById("v-active").checked,
+      is_retired: document.getElementById("v-retired").checked,
+      notes: document.getElementById("v-notes").value.trim(),
+    };
+
+    if (!payload.name) {
+      showError("Name is required");
+      return;
+    }
+
+    const url = id ? `{% url 'fleet:api_vessel_update' 0 %}`.replace("/0/", `/${id}/`) : createUrl;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken,
+        "Accept": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      showError(data.error || "Save failed");
+      return;
+    }
+
+    bootstrap.Modal.getInstance(document.getElementById("vesselModal")).hide();
+    await loadList();
+  }
+
+  async function deleteVessel() {
+    const id = document.getElementById("delete-vessel-id").value.trim();
+    if (!id) return;
+
+    const url = `{% url 'fleet:api_vessel_delete' 0 %}`.replace("/0/", `/${id}/`);
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "X-CSRFToken": csrfToken,
+        "Accept": "application/json",
+      },
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) return;
+
+    bootstrap.Modal.getInstance(document.getElementById("vesselDeleteModal")).hide();
+    await loadList();
+  }
+
+  // events
+  document.getElementById("btn-add-vessel").addEventListener("click", openAdd);
+  document.getElementById("btn-save-vessel").addEventListener("click", saveVessel);
+  document.getElementById("btn-confirm-delete").addEventListener("click", deleteVessel);
+
+  document.getElementById("btn-search").addEventListener("click", loadList);
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") loadList();
+  });
+
+  // initial load
+  loadList();
+})();
+</script>
+{% endblock %}

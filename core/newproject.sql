@@ -572,7 +572,7 @@ CREATE TABLE  IF NOT EXISTS  SLSolution (
         ID INTEGER PRIMARY KEY AUTOINCREMENT,
         PPLine_FK INTEGER DEFAULT 0,
         File_FK INTEGER,
-        LineName TEXT UNIQUE,
+        SailLine TEXT UNIQUE,
         Line INTEGER,
         Seq INTEGER,
         Attempt TEXT,
@@ -594,33 +594,24 @@ CREATE TABLE  IF NOT EXISTS  SLSolution (
         PercentOfLineDone REAL,
         SeqProdCount REAL,
         PercentOfSeqDone REAL,
-        Count_All INTEGER,
-        Count_A INTEGER,
-        Count_P INTEGER,
-        Count_L INTEGER,
-        Count_R INTEGER,
-        Count_X INTEGER,
-        Count_M INTEGER,
-        Count_K INTEGER,
-        Count_W INTEGER,
-        Count_T INTEGER,
-        FileName_FK INTEGER,
+        ProductionCount INTEGER,
+        NonProductionCount INTEGER,
+        KillCount INTEGER,
         FOREIGN KEY (PPLine_FK) REFERENCES SLPreplot(ID)  ON UPDATE CASCADE,
-        FOREIGN KEY (FileName_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE,
-        UNIQUE(LineName, ID));
+        FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+        UNIQUE(SailLine, ID));
 CREATE TABLE  IF NOT EXISTS  SPSolution (
     ID INTEGER PRIMARY KEY AUTOINCREMENT,
-    LineName_FK INTEGER,
+    SailLine_FK INTEGER,
     PPLine_FK INTEGER,
-    PP_Point_FK INTEGER,
-    FileName_FK INTEGER,
+    File_FK INTEGER,
     Tier INTEGER DEFAULT 0,
     TierLinePoint INTEGER DEFAULT 0,
     LinePoint INTEGER DEFAULT 0,
     Point INTEGER DEFAULT 0,
     PointIdx INTEGER,
     FireCode TEXT,
-    ArrayNumber INTEGER,
+    ArrayCode INTEGER,
     FCodeIdx INTEGER DEFAULT 0,
     PointCode TEXT,
     Static REAL DEFAULT 0,
@@ -658,11 +649,9 @@ CREATE TABLE  IF NOT EXISTS  SPSolution (
     Spare1 INTEGER DEFAULT 0,
     Spare2 INTEGER DEFAULT 0,
     Spare3 INTEGER DEFAULT 0,
-    UNIQUE(ID),
-    FOREIGN KEY (LineName_FK) REFERENCES SLSolution(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (SailLine_FK) REFERENCES SLSolution(ID) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (PPLine_FK) REFERENCES SLPreplot(ID)  ON UPDATE CASCADE,
-    FOREIGN KEY (PP_Point_FK) REFERENCES SPPreplot(ID) ON UPDATE CASCADE,
-    FOREIGN KEY (FileName_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE
+    FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE
 );
 --Create Receiver Solution
 CREATE TABLE  IF NOT EXISTS  RLSolution (
@@ -849,6 +838,107 @@ CREATE TABLE IF NOT EXISTS project_shapes (
                                 "HatchPattern" TEXT DEFAULT '',
                                 "FileCheck" INT DEFAULT 1,
 	                            PRIMARY KEY(id,FullName));
+CREATE TABLE IF NOT EXISTS project_fleet (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vessel_name TEXT NOT NULL,
+    imo TEXT,
+    mmsi TEXT,
+    call_sign TEXT,
+    vessel_type TEXT,
+    owner TEXT,
+    is_active INTEGER DEFAULT 1,
+    is_retired INTEGER DEFAULT 0,
+    notes TEXT,
+    source_vessel_id INTEGER,         -- link back to Django Vessel.id
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_project_fleet_source_vessel_id
+ON project_fleet(source_vessel_id);
+
+CREATE TABLE IF NOT EXISTS SHOT_TABLE (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Link to Files table
+    File_FK INTEGER NOT NULL,
+
+    -- H26 main fields
+    sail_line INTEGER,
+    shot_station INTEGER,
+    shot_index INTEGER,
+    shot_status INTEGER,
+
+    -- Raw navigation code (LLLLLXSSSS)
+    nav_line_code TEXT,
+
+    -- Decoded navigation components
+    nav_line INTEGER,
+    attempt TEXT,
+    seq INTEGER,
+
+    -- Post point + extracted fire code
+    post_point_code TEXT,
+    fire_code TEXT,
+
+    gun_depth REAL,
+    water_depth REAL,
+
+    shot_x REAL,
+    shot_y REAL,
+
+    shot_day INTEGER,
+    shot_hour INTEGER,
+    shot_minute INTEGER,
+    shot_second INTEGER,
+    shot_microsecond INTEGER,
+    shot_year INTEGER,
+
+    vessel TEXT,
+    array_id TEXT,
+    source_id INTEGER,
+
+    nav_station INTEGER,
+    shot_group_id INTEGER,
+    elevation REAL,
+
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (File_FK)
+        REFERENCES Files(id)
+        ON DELETE CASCADE
+);
+-- File link
+CREATE INDEX IF NOT EXISTS idx_shot_file_fk
+ON SHOT_TABLE (File_FK);
+
+-- Line filtering
+CREATE INDEX IF NOT EXISTS idx_shot_sail_line
+ON SHOT_TABLE (sail_line);
+
+-- Nav line filtering
+CREATE INDEX IF NOT EXISTS idx_shot_nav_line
+ON SHOT_TABLE (nav_line);
+
+-- Line + Attempt + Seq (most important for plotting)
+CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq
+ON SHOT_TABLE (nav_line, attempt, seq);
+
+-- Sequence only
+CREATE INDEX IF NOT EXISTS idx_shot_seq
+ON SHOT_TABLE (seq);
+
+-- Time filtering
+CREATE INDEX IF NOT EXISTS idx_shot_time
+ON SHOT_TABLE (shot_year, shot_day);
+
+-- Spatial filtering
+CREATE INDEX IF NOT EXISTS idx_shot_xy
+ON SHOT_TABLE (shot_x, shot_y);
+
+-- Source ID
+CREATE INDEX IF NOT EXISTS idx_shot_source_id
+ON SHOT_TABLE (source_id);
 DROP VIEW IF EXISTS PreplotSummaryAllFiles;
 CREATE VIEW IF NOT EXISTS PreplotSummaryAllFiles AS
 
@@ -990,7 +1080,7 @@ dsr_by_line AS (
         END) AS RetrievedCount,
 
         -- SM flags
-        SUM(CASE WHEN UPPER(TRIM(d.Deployed)) = 'YES' THEN 1 ELSE 0 END) AS SMCount,
+        SUM(CASE WHEN UPPER(TRIM(d.Deployed)) = 'YES' OR UPPER(TRIM(d.PickedUp)) = 'YES' THEN 1 ELSE 0 END) AS SMCount,
         SUM(CASE WHEN UPPER(TRIM(d.PickedUp)) = 'YES' THEN 1 ELSE 0 END) AS SMRCount,
 
         -- Timing (deployment)
@@ -1123,6 +1213,10 @@ SELECT
     s.AvgSigma1, s.MinSigma1, s.MaxSigma1,
     s.AvgSigma2, s.MinSigma2, s.MaxSigma2,
     s.AvgSigma3, s.MinSigma3, s.MaxSigma3,
+
+    -- 95% ellipse semi-axes using chi-square 0.95, df=2 (sqrt(5.991)=2.44774683068)
+    (s.MaxSigma  * 2.44774683068) AS Primary_e95,
+    (s.MaxSigma1 * 2.44774683068) AS Primary_n95,
 
     -- NEW outputs
     s.AvgRadOffset, s.MinRadOffset, s.MaxRadOffset,
@@ -1287,6 +1381,88 @@ GROUP BY
     DATE(TimeStamp),
     TRIM(Line),
     TRIM(ROV1);
+DROP VIEW IF EXISTS V_SHOT_TABLE_SUMMARY;
+CREATE VIEW V_SHOT_TABLE_SUMMARY AS
+SELECT
+    s.nav_line,
+    s.attempt,
+    s.seq,
+
+    COUNT(s.nav_station) AS nav_station_count,
+    COUNT(DISTINCT s.nav_station) AS nav_station_distinct_count,
+
+    COUNT(DISTINCT s.source_id) AS SourceCount,
+    COUNT(DISTINCT s.array_id) AS ArraysCount,
+
+    MIN(s.gun_depth) AS min_gun_depth,
+    MAX(s.gun_depth) AS max_gun_depth,
+
+    MIN(s.water_depth) AS min_water_depth,
+    MAX(s.water_depth) AS max_water_depth,
+
+    -- Production count
+    COUNT(DISTINCT CASE
+        WHEN s.fire_code IS NOT NULL
+         AND instr(pg.production_code, s.fire_code) > 0
+        THEN s.nav_station
+    END) AS ProdCount,
+
+    -- Non-production count
+    COUNT(DISTINCT CASE
+        WHEN s.fire_code IS NOT NULL
+         AND instr(pg.non_production_code, s.fire_code) > 0
+        THEN s.nav_station
+    END) AS NonProdCount,
+    COUNT(DISTINCT CASE
+        WHEN s.fire_code IS NOT NULL
+         AND instr(pg.kill_code, s.fire_code) > 0
+        THEN s.nav_station
+    END) AS KillCount,
+
+    -- Production percentage
+    ROUND(
+        100.0 *
+        COUNT(DISTINCT CASE
+            WHEN s.fire_code IS NOT NULL
+             AND instr(pg.production_code, s.fire_code) > 0
+            THEN s.nav_station
+        END)
+        / NULLIF(COUNT(DISTINCT s.nav_station), 0)
+    , 2) AS ProdPercent,
+
+    -- Non-production percentage
+    ROUND(
+        100.0 *
+        COUNT(DISTINCT CASE
+            WHEN s.fire_code IS NOT NULL
+             AND instr(pg.non_production_code, s.fire_code) > 0
+            THEN s.nav_station
+        END)
+        / NULLIF(COUNT(DISTINCT s.nav_station), 0)
+    , 2) AS NonProdPercent,
+    -- Kill points percentage
+    ROUND(
+        100.0 *
+        COUNT(DISTINCT CASE
+            WHEN s.fire_code IS NOT NULL
+             AND instr(pg.kill_code, s.fire_code) > 0
+            THEN s.nav_station
+        END)
+        / NULLIF(COUNT(DISTINCT s.nav_station), 0)
+    , 2) AS KillPercent
+
+FROM SHOT_TABLE s
+CROSS JOIN project_geometry pg
+
+GROUP BY
+    s.nav_line,
+    s.attempt,
+    s.seq
+
+ORDER BY
+    s.nav_line,
+    s.attempt,
+    s.seq;
 CREATE TABLE IF NOT EXISTS REC_DB
 (
     "ID" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,

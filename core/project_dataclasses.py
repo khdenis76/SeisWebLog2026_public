@@ -35,8 +35,10 @@ class GeometrySettings:
     sl_heading: float = 0.0
     production_code: str = "AP"
     non_production_code: str = "LRMXTK"
+    kill_code:str="KX"
     rl_mask: str = "LLLLPPPP"
-    sl_mask: str = "LLLLXSSSS"
+    sl_mask: str = "LLLLPPPP"
+    sail_line_mask: str = "LLLLLXSSSS"
 
     @property
     def rec_point_length(self) -> int:
@@ -88,9 +90,9 @@ class GeometrySettings:
     @property
     def sou_attempt_length(self) -> int:
         """Source attempt number length (10^n)."""
-        if not self.sl_mask:
+        if not self.sail_line_mask:
             return 0
-        num_X = self.sl_mask.count("X")
+        num_X = self.sail_line_mask.count("X")
         return 10 ** num_X
 @dataclass
 class NodeQCSettings:
@@ -127,6 +129,9 @@ class GunQCSettings:
     max_il_offset: float = 0.0
     max_xl_offset: float = 0.0
     max_radial_offset: float = 0.0
+    kill_shots_cons: int=0
+    percentage_of_kill:int=0
+
 @dataclass
 class FolderSettings:
     """Additional folder for project"""
@@ -156,3 +161,28 @@ class PreplotData:
     tier_line_point:int=0
     tier_line_point_idx:int=0
     line_bearing:float=0
+@dataclass
+class SourceSPSData:
+    """
+        Class for SPS data import to preplot db
+       """
+    line_fk: int | None = None
+    filе_fk: int | None = None
+    sail_line: str = ""
+    line:int =0
+    attempt: str = ""
+    seq:int=0
+    point: int = 0
+    gun_depth:float=0
+    water_depth:float=0
+    point_code: str = ""
+    array_code:int=0
+    point_index: int = 1
+    easting: float = 0.0
+    northing: float = 0.0
+    elevation: float = 0.0
+    line_point: int = 0
+    line_seq_point: int = 0
+    tier: int = 1
+    tier_line: int = 0
+    line_bearing: float = 0

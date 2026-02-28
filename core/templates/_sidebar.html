@@ -48,7 +48,7 @@
         </a>
       </li>  
       <li class="nav-item">
-        <a class="nav-link" href="#">
+        <a class="nav-link" href="{% url 'source_home' %}">
           <i class="fa-solid fa-table"></i>SOURCE QC
         </a>
       </li>  
@@ -63,7 +63,7 @@
         </a>
       </li>
       <li class="nav-item">
-        <a class="nav-link" href="#">
+        <a class="nav-link" href="{% url 'fleet:vessel_page'%}">
           <i class="fa-solid fa-ship"></i>Vessel Activity
         </a>
       </li>
@@ -77,6 +77,13 @@
     <!-- SERVICE -->
     <div class="sidebar-section-title">Service</div>
     <ul class="nav flex-column">
+     
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'project_users_members' %}">
+          <i class="fa-solid fa-users"></i>Users
+        </a>
+      </li>
+        
       <li class="nav-item">
         <a class="nav-link" href="#">
           <i class="fa-solid fa-file-lines"></i>Logs
