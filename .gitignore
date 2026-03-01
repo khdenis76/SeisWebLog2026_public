@@ -27,5 +27,6 @@ env/
 .DS_Store
 Thumbs.db
 /tests/
-#ftpsync
 /ftpsync/ftp_sync_config.json
+*.json
+
