@@ -64,7 +64,7 @@ def unseed_spsrevision(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("core", "0008_previous_migration"),  # <-- replace with your latest migration file name
+        ("core", "0008_usersettings_theme_mode"),  # <-- replace with your latest migration file name
     ]
 
     operations = [

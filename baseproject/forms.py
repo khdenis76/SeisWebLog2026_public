@@ -1,6 +1,7 @@
 # baseproject/forms.py
 from django import forms
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.db import OperationalError, connection
 
 from core.models import SPSRevision
 from .models import BaseProjectFile
@@ -33,6 +34,23 @@ class BaseProjectUploadForm(forms.Form):
         widget=forms.Select(attrs={"class": "form-select"}),
         initial=SPSRevision.objects.filter(default_format=True).first(),
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # If table doesn't exist yet (fresh install), skip DB access
+        try:
+            table_names = set(connection.introspection.table_names())
+            if "core_spsrevision" not in table_names:
+                return
+
+            obj = SPSRevision.objects.filter(default_format=True).first()
+            if obj:
+                self.fields["sps_revision"].initial = obj
+
+        except OperationalError:
+            # DB not ready / migrations not applied yet
+            return
     tier = forms.IntegerField(
         required=False,
         label="Tier / phase",
