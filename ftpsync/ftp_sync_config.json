@@ -125,6 +125,36 @@
       "recursive": true,
       "monitor": false,
       "interval_sec": 60
+    },
+    {
+      "server_name": "313311-amendment-int",
+      "remote_dir": "/313311-amendment-int/4_DWM_Internal/Node_Survey_A8603/3110_Subsea_Positioning_Table",
+      "mask": "*.*",
+      "local_dir": "D:/313311_AW1-APEX/09_FTP_SURVEY_FILE_XFER/Node_Survey_A8630/3110_Subsea_Positioning_Table",
+      "direction": "download",
+      "recursive": true,
+      "monitor": false,
+      "interval_sec": 60
+    },
+    {
+      "server_name": "313311-amendment-int",
+      "remote_dir": "/313311-amendment-int/4_DWM_Internal/Node_Survey_A8603/3080_Node_Vessel_Track",
+      "mask": "*.*",
+      "local_dir": "D:/313311_AW1-APEX/09_FTP_SURVEY_FILE_XFER/Node_Survey_A8630/3080_Node_Vessel_Track",
+      "direction": "download",
+      "recursive": true,
+      "monitor": false,
+      "interval_sec": 60
+    },
+    {
+      "server_name": "313311-amendment-int",
+      "remote_dir": "/313311-amendment-int/4_DWM_Internal/Node_Survey_IP/EOL_QC",
+      "mask": "*.csv",
+      "local_dir": "D:/313311_AW1-APEX/09_FTP_SURVEY_FILE_XFER/Node_Survey_IP/EOL_QC",
+      "direction": "download",
+      "recursive": true,
+      "monitor": false,
+      "interval_sec": 60
     }
   ],
   "concurrency": 2

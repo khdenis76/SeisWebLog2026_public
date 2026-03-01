@@ -28,28 +28,32 @@ class BaseProjectUploadForm(forms.Form):
     )
 
     sps_revision = forms.ModelChoiceField(
-        queryset=SPSRevision.objects.all().order_by("-default_format", "rev_name"),
-        required=True,
-        label="SPS revision",
-        widget=forms.Select(attrs={"class": "form-select"}),
-        initial=SPSRevision.objects.filter(default_format=True).first(),
+        queryset=SPSRevision.objects.all(),
+        required=False,
+        empty_label="Select SPS revision...",
+        label="SPS Revision",
+        initial=None,  # IMPORTANT: no DB query here
     )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # If table doesn't exist yet (fresh install), skip DB access
         try:
-            table_names = set(connection.introspection.table_names())
-            if "core_spsrevision" not in table_names:
+            # fresh install: table may not exist yet
+            if "core_spsrevision" not in connection.introspection.table_names():
                 return
 
-            obj = SPSRevision.objects.filter(default_format=True).first()
+            # Choose ONE of these depending on your model field type:
+            # If default_format is BooleanField:
+            # obj = SPSRevision.objects.filter(default_format=True).first()
+
+            # If default_format is CharField with '0'/'1' (your inserts):
+            obj = SPSRevision.objects.filter(default_format="1").first()
+
             if obj:
                 self.fields["sps_revision"].initial = obj
 
         except OperationalError:
-            # DB not ready / migrations not applied yet
             return
     tier = forms.IntegerField(
         required=False,

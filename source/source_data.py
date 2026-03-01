@@ -1084,8 +1084,29 @@ class SourceData:
           - ProductionCount / NonProductionCount / KillCount (distinct Point)
           - PercentOfLineCompleted / PercentOfSeqCompleted (based on prod_points / all_points)
           - LineLength (distance between Start and End coords)
-          - Min/Max GunDepth (from SPSolution.PointDepth)
-          - Min/Max WaterDepth (from SPSolution.WaterDepth)
+
+          - Min/Max GunDepth (all points)
+          - Min/Max WaterDepth (all points)
+
+          - Min/Max GunDepth and WaterDepth split by:
+            * Production FireCode (project_geometry.production_code)
+            * NonProduction FireCode (project_geometry.non_production_code)
+            * Kill FireCode (project_geometry.kill_code)
+
+        NEW output fields in SLSolution (must exist in table):
+            MinProdGunDepth REAL DEFAULT 0,
+            MaxProdGunDepth REAL DEFAULT 0,
+            MinNonProdGunDepth REAL DEFAULT 0,
+            MaxNonProdGunDepth REAL DEFAULT 0,
+            MinKillGunDepth REAL DEFAULT 0,
+            MaxKillGunDepth REAL DEFAULT 0,
+
+            MinProdWaterDepth REAL DEFAULT 0,
+            MaxProdWaterDepth REAL DEFAULT 0,
+            MinNonProdWaterDepth REAL DEFAULT 0,
+            MaxNonProdWaterDepth REAL DEFAULT 0,
+            MinKillWaterDepth REAL DEFAULT 0,
+            MaxKillWaterDepth REAL DEFAULT 0
         """
         file_fk = int(file_fk)
         conn = self._connect()
@@ -1096,11 +1117,15 @@ class SourceData:
 
             # Get codes (fallback to empty if missing)
             pg = cur.execute(
-                "SELECT COALESCE(production_code,''), COALESCE(non_production_code,'') "
+                "SELECT COALESCE(production_code,''), "
+                "       COALESCE(non_production_code,''), "
+                "       COALESCE(kill_code,'') "
                 "FROM project_geometry LIMIT 1"
             ).fetchone()
+
             prod_codes = (pg[0] if pg else "") or ""
             nonprod_codes = (pg[1] if pg else "") or ""
+            kill_codes = (pg[2] if pg else "") or ""
 
             # Core update driven by CTEs (NO VIEW: SQLite doesn't allow params in views)
             cur.execute(
@@ -1122,7 +1147,8 @@ class SourceData:
                             THEN s.Point END) AS nonprod_points,
 
                         COUNT(DISTINCT CASE
-                            WHEN s.FireCode = 'K' THEN s.Point END) AS kill_points,
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                            THEN s.Point END) AS kill_points,
 
                         -- min/max timestamps
                         MIN(s.TimeStamp) AS min_ts,
@@ -1136,12 +1162,69 @@ class SourceData:
                             WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
                             THEN s.TimeStamp END) AS max_prod_ts,
 
-                        -- depth ranges (gun depth stored in PointDepth)
+                        -- depth ranges (ALL points)
                         MIN(CASE WHEN s.PointDepth IS NOT NULL THEN s.PointDepth END) AS min_gun_depth,
                         MAX(CASE WHEN s.PointDepth IS NOT NULL THEN s.PointDepth END) AS max_gun_depth,
 
                         MIN(CASE WHEN s.WaterDepth IS NOT NULL THEN s.WaterDepth END) AS min_water_depth,
-                        MAX(CASE WHEN s.WaterDepth IS NOT NULL THEN s.WaterDepth END) AS max_water_depth
+                        MAX(CASE WHEN s.WaterDepth IS NOT NULL THEN s.WaterDepth END) AS max_water_depth,
+
+                        -- depth ranges (PRODUCTION points)
+                        MIN(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.PointDepth IS NOT NULL
+                            THEN s.PointDepth END) AS min_prod_gun_depth,
+                        MAX(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.PointDepth IS NOT NULL
+                            THEN s.PointDepth END) AS max_prod_gun_depth,
+
+                        MIN(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.WaterDepth IS NOT NULL
+                            THEN s.WaterDepth END) AS min_prod_water_depth,
+                        MAX(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.WaterDepth IS NOT NULL
+                            THEN s.WaterDepth END) AS max_prod_water_depth,
+
+                        -- depth ranges (NON-PRODUCTION points)
+                        MIN(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.PointDepth IS NOT NULL
+                            THEN s.PointDepth END) AS min_nonprod_gun_depth,
+                        MAX(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.PointDepth IS NOT NULL
+                            THEN s.PointDepth END) AS max_nonprod_gun_depth,
+
+                        MIN(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.WaterDepth IS NOT NULL
+                            THEN s.WaterDepth END) AS min_nonprod_water_depth,
+                        MAX(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.WaterDepth IS NOT NULL
+                            THEN s.WaterDepth END) AS max_nonprod_water_depth,
+
+                        -- depth ranges (KILL points)
+                        MIN(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.PointDepth IS NOT NULL
+                            THEN s.PointDepth END) AS min_kill_gun_depth,
+                        MAX(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.PointDepth IS NOT NULL
+                            THEN s.PointDepth END) AS max_kill_gun_depth,
+
+                        MIN(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.WaterDepth IS NOT NULL
+                            THEN s.WaterDepth END) AS min_kill_water_depth,
+                        MAX(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                             AND s.WaterDepth IS NOT NULL
+                            THEN s.WaterDepth END) AS max_kill_water_depth
 
                     FROM SPSolution s
                     JOIN SLSolution l ON l.ID = s.SailLine_FK
@@ -1196,11 +1279,26 @@ class SourceData:
                     Start_Production_Time = (SELECT min_prod_ts FROM picks x WHERE x.line_id=SLSolution.ID),
                     End_Production_Time   = (SELECT max_prod_ts FROM picks x WHERE x.line_id=SLSolution.ID),
 
-                    -- depth ranges
+                    -- depth ranges (ALL)
                     MinGunDepth   = (SELECT min_gun_depth    FROM picks x WHERE x.line_id=SLSolution.ID),
                     MaxGunDepth   = (SELECT max_gun_depth    FROM picks x WHERE x.line_id=SLSolution.ID),
                     MinWaterDepth = (SELECT min_water_depth  FROM picks x WHERE x.line_id=SLSolution.ID),
                     MaxWaterDepth = (SELECT max_water_depth  FROM picks x WHERE x.line_id=SLSolution.ID),
+
+                    -- depth ranges (PROD / NONPROD / KILL) (default 0 if NULL)
+                    MinProdGunDepth     = COALESCE((SELECT min_prod_gun_depth     FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MaxProdGunDepth     = COALESCE((SELECT max_prod_gun_depth     FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MinNonProdGunDepth  = COALESCE((SELECT min_nonprod_gun_depth  FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MaxNonProdGunDepth  = COALESCE((SELECT max_nonprod_gun_depth  FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MinKillGunDepth     = COALESCE((SELECT min_kill_gun_depth     FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MaxKillGunDepth     = COALESCE((SELECT max_kill_gun_depth     FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+
+                    MinProdWaterDepth    = COALESCE((SELECT min_prod_water_depth    FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MaxProdWaterDepth    = COALESCE((SELECT max_prod_water_depth    FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MinNonProdWaterDepth = COALESCE((SELECT min_nonprod_water_depth FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MaxNonProdWaterDepth = COALESCE((SELECT max_nonprod_water_depth FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MinKillWaterDepth    = COALESCE((SELECT min_kill_water_depth    FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    MaxKillWaterDepth    = COALESCE((SELECT max_kill_water_depth    FROM picks x WHERE x.line_id=SLSolution.ID), 0),
 
                     -- Start coords: FGSP else FSP
                     StartX = COALESCE(
@@ -1266,13 +1364,41 @@ class SourceData:
                   AND EXISTS (SELECT 1 FROM picks x WHERE x.line_id=SLSolution.ID);
                 """,
                 (
-                    prod_codes,
-                    nonprod_codes,
-                    prod_codes,
-                    prod_codes,
+                    # counts
+                    prod_codes,  # prod_points
+                    nonprod_codes,  # nonprod_points
+                    kill_codes,  # kill_points
+
+                    # prod timestamps
+                    prod_codes,  # min_prod_ts
+                    prod_codes,  # max_prod_ts
+
+                    # prod depths
+                    prod_codes,  # min_prod_gun_depth
+                    prod_codes,  # max_prod_gun_depth
+                    prod_codes,  # min_prod_water_depth
+                    prod_codes,  # max_prod_water_depth
+
+                    # nonprod depths
+                    nonprod_codes,  # min_nonprod_gun_depth
+                    nonprod_codes,  # max_nonprod_gun_depth
+                    nonprod_codes,  # min_nonprod_water_depth
+                    nonprod_codes,  # max_nonprod_water_depth
+
+                    # kill depths
+                    kill_codes,  # min_kill_gun_depth
+                    kill_codes,  # max_kill_gun_depth
+                    kill_codes,  # min_kill_water_depth
+                    kill_codes,  # max_kill_water_depth
+
+                    # file filter for base
                     file_fk,
-                    prod_codes,
-                    prod_codes,
+
+                    # fgsp/lgsp selection uses production codes
+                    prod_codes,  # fgsp instr
+                    prod_codes,  # lgsp instr
+
+                    # update where File_FK
                     file_fk,
                 ),
             )
