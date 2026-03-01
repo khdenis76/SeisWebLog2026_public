@@ -1,0 +1,54 @@
+  {% if rows and rows|length > 0 %}
+      {% for r in rows %}
+      <tr id="sps-row-{{ r.PPLine_FK }}-{{ r.Seq }}-{{ r.Attempt }}"
+          data-ppline="{{ r.PPLine_FK }}">
+
+        <td class="sticky-col-0">
+          <input class="form-check-input m-0 row-check"
+                 type="checkbox"
+                 name="sps_row"
+                 value="{{ r.PPLine_FK }}|{{ r.Seq }}|{{ r.Attempt }}">
+        </td>
+
+        <td class="sticky-col-1">{{ r.SailLine }}</td>
+        <td class="sticky-col-2">{{ r.Line }}</td>
+        <td class="sticky-col-3 num">{{ r.Seq }}</td>
+
+        <td class="num">{{ r.Attempt }}</td>
+        <td>{{ r.Tier }}</td>
+        <td>{{ r.TierLine }}</td>
+        <td class="num">{{ r.FSP }}</td>
+        <td class="num">{{ r.LSP }}</td>
+        <td class="num">{{ r.FGSP }}</td>
+        <td class="num">{{ r.LGSP }}</td>
+        <td class="num">{{ r.StartX }}</td>
+        <td class="num">{{ r.StartY }}</td>
+        <td class="num">{{ r.EndX }}</td>
+        <td class="num">{{ r.EndY }}</td>
+        <td class="num">{{ r.Vessel_FK }}</td>
+        <td>{{ r.Start_Time }}</td>
+        <td>{{ r.End_Time }}</td>
+        <td class="num">{{ r.LineLength }}</td>
+        <td>{{ r.Start_Production_Time }}</td>
+        <td>{{ r.End_Production_Time }}</td>
+        <td class="num">{{ r.PercentOfLineCompleted }}</td>
+        <td class="num">{{ r.PercentOfSeqCompleted }}</td>
+        <td class="num">{{ r.ProductionCount }}</td>
+        <td class="num">{{ r.NonProductionCount }}</td>
+        <td class="num">{{ r.KillCount }}</td>
+        <td class="num">{{ r.MinGunDepth }}</td>
+        <td class="num">{{ r.MaxGunDepth }}</td>
+        <td class="num">{{ r.MinWaterDepth }}</td>
+        <td class="num">{{ r.MaxWaterDepth }}</td>
+        <td class="num">{{ r.PP_Length }}</td>
+        <td class="num">{{ r.SeqLenPercentage }}</td>
+        <td class="num">{{ r.MaxSPI }}</td>
+      </tr>
+      {% endfor %}
+  {% else %}
+      <tr>
+        <td colspan="35" class="text-center text-muted py-4">
+            No SPS records found
+        </td>
+      </tr>
+  {% endif %}

@@ -586,34 +586,47 @@ CREATE TABLE  IF NOT EXISTS  SLSolution (
         StartY DOUBLE,
         EndX DOUBLE,
         EndY DOUBLE,
-        Vessel Text,
+        Vessel_FK INTEGER,
         Start_Time DATETIME,
         End_Time DATETIME,
+        LineLength REAL DEFAULT 0,
         Start_Production_Time DATETIME,
         End_Production_Time DATETIME,
-        PercentOfLineDone REAL,
-        SeqProdCount REAL,
-        PercentOfSeqDone REAL,
+        PercentOfLineCompleted REAL,
+        PercentOfSeqCompleted REAL,
         ProductionCount INTEGER,
         NonProductionCount INTEGER,
         KillCount INTEGER,
+        MinGunDepth REAL,
+        MaxGunDepth REAL,
+        MinWaterDepth REAL,
+        MaxWaterDepth REAL,
+        PP_Length REAL,
+        SeqLenPercentage REAL,
+        MaxSPI REAL,
+        MaxSeq INTEGER,
+        FOREIGN KEY (Vessel_FK) REFERENCES project_fleet(ID) ON DELETE CASCADE ON UPDATE CASCADE,
         FOREIGN KEY (PPLine_FK) REFERENCES SLPreplot(ID)  ON UPDATE CASCADE,
-        FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE,
-        UNIQUE(SailLine, ID));
+        FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
 CREATE TABLE  IF NOT EXISTS  SPSolution (
     ID INTEGER PRIMARY KEY AUTOINCREMENT,
     SailLine_FK INTEGER,
     PPLine_FK INTEGER,
+    Vessel_FK INTEGER,
     File_FK INTEGER,
+    SailLine Text,
+    Line INTEGER,
+    Attempt TEXT,
+    Seq INTEGER,
     Tier INTEGER DEFAULT 0,
     TierLinePoint INTEGER DEFAULT 0,
     LinePoint INTEGER DEFAULT 0,
-    Point INTEGER DEFAULT 0,
     PointIdx INTEGER,
+    Point INTEGER DEFAULT 0,
+    PointCode TEXT,
     FireCode TEXT,
     ArrayCode INTEGER,
-    FCodeIdx INTEGER DEFAULT 0,
-    PointCode TEXT,
     Static REAL DEFAULT 0,
     PointDepth REAL DEFAULT 0,
     Datum INTEGER DEFAULT 0,
@@ -651,8 +664,59 @@ CREATE TABLE  IF NOT EXISTS  SPSolution (
     Spare3 INTEGER DEFAULT 0,
     FOREIGN KEY (SailLine_FK) REFERENCES SLSolution(ID) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (PPLine_FK) REFERENCES SLPreplot(ID)  ON UPDATE CASCADE,
-    FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE
+    FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (Vessel_FK) REFERENCES project_fleet(ID) ON DELETE CASCADE ON UPDATE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_sps_file_line_ts
+ON SPSolution (File_FK, SailLine_FK, TimeStamp);
+
+CREATE INDEX IF NOT EXISTS idx_sps_line_ts
+ON SPSolution (SailLine_FK, TimeStamp);
+
+CREATE INDEX IF NOT EXISTS idx_sps_line_fire_ts
+ON SPSolution (SailLine_FK, FireCode, TimeStamp);
+
+CREATE INDEX IF NOT EXISTS idx_sl_file
+ON SLSolution (File_FK);
+-- For FK joins (always good)
+CREATE INDEX IF NOT EXISTS idx_slsolution_file
+ON SLSolution (File_FK);
+
+CREATE INDEX IF NOT EXISTS idx_slsolution_ppline
+ON SLSolution (PPLine_FK);
+
+-- For your “group by / filter by line meta”
+CREATE INDEX IF NOT EXISTS idx_slsolution_line_seq_attempt
+ON SLSolution (Line, Seq, Attempt);
+
+-- For TierLine queries
+CREATE INDEX IF NOT EXISTS idx_slsolution_tierline
+ON SLSolution (TierLine);
+
+-- If you filter by vessel often
+CREATE INDEX IF NOT EXISTS idx_slsolution_vessel
+ON SLSolution (Vessel_FK);
+
+-- Most queries: points of a line
+CREATE INDEX IF NOT EXISTS idx_spsolution_line_point
+ON SPSolution (SailLine_FK, Point);
+
+-- If you use PointIdx as well
+CREATE INDEX IF NOT EXISTS idx_spsolution_line_pointidx
+ON SPSolution (SailLine_FK, PointIdx);
+
+-- Fire code stats per line
+CREATE INDEX IF NOT EXISTS idx_spsolution_line_firecode
+ON SPSolution (SailLine_FK, FireCode);
+
+-- File-based filtering
+CREATE INDEX IF NOT EXISTS idx_spsolution_file
+ON SPSolution (File_FK);
+
+-- PPLine join (if you map to preplot line often)
+CREATE INDEX IF NOT EXISTS idx_spsolution_ppline
+ON SPSolution (PPLine_FK);
+
 --Create Receiver Solution
 CREATE TABLE  IF NOT EXISTS  RLSolution (
         ID INTEGER PRIMARY KEY AUTOINCREMENT,

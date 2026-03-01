@@ -27,7 +27,9 @@ def source_home(request):
     pdb = ProjectDB(project.db_path)
     sd = SourceData(project.db_path)
     shot_table_rows = sd.list_shot_table_summary()
+    sps_table_rows =sd.list_sps_files_summary()
     st_summary = render_to_string("source/partials/shot_table_tbody.html",{"rows":shot_table_rows})
+    sps_summary = render_to_string("source/partials/sps_table_tbody.html",{"rows":sps_table_rows})
 
 
     # Project fleet (project-specific)
@@ -55,6 +57,7 @@ def source_home(request):
             "tiers": tiers,
             "sps_revisions": sps_revisions,
             "st_summary": st_summary,
+            "sps_summary": sps_summary,
         },)
 
 
@@ -173,7 +176,7 @@ def source_upload_files(request):
                 res = sd.load_source_sps_uploaded_file_fast(
                     f,  # UploadedFile
                     sps_revision=sps_revision,
-                    vessel=vessel_name,   # resolved from project_fleet
+                    vessel_fk=src_id,   # resolved from project_fleet
                     tier=tier,
                     geometry=pdb.get_geometry(),
                     line_bearing=0.0,
@@ -181,6 +184,10 @@ def source_upload_files(request):
                     batch_size=50000,
                 )
                 # res should include points/skipped/lines/file_fk etc.
+                sd.update_slsolution_from_spsolution_timebased(file_fk=res["file_fk"])
+                sd.update_line_maxspi_maxseq(res["source_line"])
+                sd.update_slsolution_from_preplot_timebased(file_fk=res["file_fk"])
+
                 total_inserted += int(res.get("points") or 0)
                 file_results.append({"name": f.name, **res})
 

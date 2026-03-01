@@ -1,0 +1,51 @@
+<div class="sps-table-wrap">
+  <table class="table table-sm table-hover align-middle mb-0 sps-sticky-table" id="sps-table">
+    <thead id="sps-table-thead">
+      <tr>
+        <!-- MAIN CHECKBOX -->
+        <th class="sticky-col-0">
+          <input class="form-check-input m-0" type="checkbox" id="sps-check-all">
+        </th>
+
+        <!-- FIRST 3 STICKY DATA COLS (SailLine, Line, Seq) -->
+        <th class="sticky-col-1">SailLine</th>
+        <th class="sticky-col-2">Line</th>
+        <th class="sticky-col-3 num">Seq</th>
+
+        <!-- REST -->
+        <th class="num">Attempt</th>
+        <th>Tier</th>
+        <th>TierLine</th>
+        <th class="num">FSP</th>
+        <th class="num">LSP</th>
+        <th class="num">FGSP</th>
+        <th class="num">LGSP</th>
+        <th class="num">StartX</th>
+        <th class="num">StartY</th>
+        <th class="num">EndX</th>
+        <th class="num">EndY</th>
+        <th class="num">Vessel_FK</th>
+        <th>Start_Time</th>
+        <th>End_Time</th>
+        <th class="num">LineLength</th>
+        <th>Start_Production_Time</th>
+        <th>End_Production_Time</th>
+        <th class="num">PercentOfLineCompleted</th>
+        <th class="num">PercentOfSeqCompleted</th>
+        <th class="num">ProductionCount</th>
+        <th class="num">NonProductionCount</th>
+        <th class="num">KillCount</th>
+        <th class="num">MinGunDepth</th>
+        <th class="num">MaxGunDepth</th>
+        <th class="num">MinWaterDepth</th>
+        <th class="num">MaxWaterDepth</th>
+        <th class="num">PP_Length</th>
+        <th class="num">SeqLenPercentage</th>
+        <th class="num">MaxSPI</th>
+      </tr>
+    </thead>
+    <tbody id="sps-table-tbody">
+       {{ sps_summary|safe }}
+    </tbody>
+  </table>
+</div>

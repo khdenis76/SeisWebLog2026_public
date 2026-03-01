@@ -1,4 +1,5 @@
 import csv
+import datetime
 import io
 import re
 import sqlite3
@@ -394,6 +395,59 @@ class SourceData:
 
         finally:
             conn.close()
+    def list_sps_files_summary(self) -> list[dict]:
+        """
+        Returns rows from V_SHOT_TABLE_SUMMARY as list[dict].
+        """
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            rows = cur.execute("""
+                SELECT
+                    ID,
+                    PPLine_FK,
+                    File_FK,
+                    SailLine,
+                    Line,
+                    Seq,
+                    Attempt,
+                    Tier,
+                    TierLine,
+                    FSP,
+                    LSP,
+                    FGSP,
+                    LGSP,
+                    StartX,
+                    StartY,
+                    EndX,
+                    EndY,
+                    Vessel_FK,
+                    Start_Time,
+                    End_Time,
+                    LineLength,
+                    Start_Production_Time,
+                    End_Production_Time,
+                    PercentOfLineCompleted,
+                    PercentOfSeqCompleted,
+                    ProductionCount,
+                    NonProductionCount,
+                    KillCount,
+                    MinGunDepth,
+                    MaxGunDepth,
+                    MinWaterDepth,
+                    MaxWaterDepth,
+                    PP_Length,
+                    SeqLenPercentage,
+                    MaxSPI,
+                    MaxSeq
+                FROM SLSolution
+                ORDER BY Seq, attempt
+            """).fetchall()
+
+            return [dict(r) for r in rows]
+
+        finally:
+            conn.close()
     #=============================================================================================
     #             LOAD SOURCE SPS
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -416,42 +470,39 @@ class SourceData:
 
     def _get_or_create_sl_solution_id(
             self,
+            conn: sqlite3.Connection,
             *,
+            file_fk: int,
+            sail_line: str,
             line: int,
             seq: int,
             attempt: str,
             tier: int,
-            tierline: int,
-            vessel: str | None,
-            file_fk: int,
+            vessel_fk: int | None,
     ) -> int:
-        """
-        Gets/creates SLSolution row by LineName (unique).
-        LineName format: LLLLLXSSSS (same idea as your nav line code).
-        """
-        conn = self._connect()
-        cur = conn.cursor()
-        attempt = (attempt or "").strip() or "A"
-        attempt = attempt[:1]  # ensure 1 char
-        line_name = f"{int(line):05d}{attempt}{int(seq):04d}"
+        sail_line = (sail_line or "").strip()
+        attempt = (attempt or "").strip()[:1].upper() or "X"
+
+        # TierLine (simple stable encoding)
+        tierline = int(tier) * 100000 + int(line)  # or your own encoding
 
         row = conn.execute(
-            "SELECT ID FROM SLSolution WHERE LineName=?",
-            (line_name,),
+            "SELECT ID FROM SLSolution WHERE SailLine=?",
+            (sail_line,),
         ).fetchone()
         if row:
             return int(row[0])
 
-        conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             """
             INSERT INTO SLSolution
-            (File_FK, FileName_FK, LineName, Line, Seq, Attempt, Tier, TierLine, Vessel)
-            VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (PPLine_FK, File_FK, SailLine, Line, Seq, Attempt, Tier, TierLine, Vessel_FK)
+            VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (file_fk, file_fk, line_name, int(line), int(seq), attempt, int(tier), int(tierline), vessel),
+            (int(file_fk), sail_line, int(line), int(seq), attempt, int(tier), int(tierline), vessel_fk),
         )
-        return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        return int(cur.lastrowid)
 
     @staticmethod
     def _detect_text_encoding(sample: bytes) -> str:
@@ -521,79 +572,100 @@ class SourceData:
             return float(s.replace(",", "."))
         except (ValueError, TypeError):
             return default
-    def decode_sps_string(self,s:str,
-                          sps_revision:SPSRevision,
-                          geom:GeometrySettings,
-                          default:int|None,
-                          tier:int=1,
-                          line_bearing:float=0)->SourceSPSData:
+
+    def decode_sps_string(
+            self,
+            s: str,
+            *,
+            sps_revision,
+            geom,
+            default: int | None,
+            tier: int = 1,
+            year: int | None = None,
+            line_bearing: float = 0.0,
+    ) -> SourceSPSData | None:
+
+        if year is None:
+            year = date.today().year
 
         point_len = geom.sou_point_length
         line_len = geom.sou_line_length
         line_point_len = geom.sou_linepoint_length
 
-        sail_line=s[sps_revision.line_start:sps_revision.line_end] or ""
-        sail_line_mask=geom.sail_line_mask
-        if "L" in sail_line_mask:
-            l_first = sail_line_mask.find("L")  # 1
-            l_last = sail_line_mask.rfind("L")+1  # 5
-        else:
-            return None
-        if "X" in sail_line_mask:
-            x_first = sail_line_mask.find("X")  # 1
-            x_last = sail_line_mask.rfind("X")+1  # 5
-        else:
-            return None
-        if "S" in sail_line_mask:
-            s_first = sail_line_mask.find("S")  # 1
-            s_last = sail_line_mask.rfind("S")+1  # 5
-        else:
+        sail_line = (s[sps_revision.line_start:sps_revision.line_end] or "").strip()
+        sail_line_mask = (geom.sail_line_mask or "").strip()
+
+        if "L" not in sail_line_mask or "X" not in sail_line_mask or "S" not in sail_line_mask:
             return None
 
-        line  = self._to_int(sail_line[l_first:l_last],default=default)
-        attempt = sail_line[x_first:x_last] or ""
-        seq = self._to_int(sail_line[s_first:s_last],default=default)
-        point = self._to_int(s[sps_revision.point_start:sps_revision.point_end],default=default)
-        gun_depth =  self._to_float(s[sps_revision.point_depth_start:sps_revision.point_depth_end],default=default)
+        l_first = sail_line_mask.find("L")
+        l_last = sail_line_mask.rfind("L") + 1
+
+        x_first = sail_line_mask.find("X")
+        x_last = sail_line_mask.rfind("X") + 1
+
+        s_first = sail_line_mask.find("S")
+        s_last = sail_line_mask.rfind("S") + 1
+
+        line = self._to_int(sail_line[l_first:l_last], default=default)
+        attempt = (sail_line[x_first:x_last] or "").strip()[:1].upper() or "X"
+        seq = self._to_int(sail_line[s_first:s_last], default=default)
+
+        point = self._to_int(s[sps_revision.point_start:sps_revision.point_end], default=default)
+        point_depth = self._to_float(s[sps_revision.point_depth_start:sps_revision.point_depth_end], default=default)
         water_depth = self._to_float(s[sps_revision.water_depth_start:sps_revision.water_depth_end], default=default)
-        easting = self._to_float(s[sps_revision.easting_start:sps_revision.easting_end],default=default)
-        northing = self._to_float(s[sps_revision.northing_start:sps_revision.northing_end],default=default)
-        elevation = self._to_float(s[sps_revision.elevation_start:sps_revision.elevation_end],default=default)
-        point_code =s[sps_revision.point_code_start:sps_revision.point_code_end] or ""
-        array_code = self._to_int(point_code[1],default=default)
-        point_index= self._to_int(s[sps_revision.point_idx_start:sps_revision.point_idx_end],default=default)
-        if not point_index:
-            point_index = 1
-        line_point = line*point_len+point
-        line_point_idx = line_point*10+point_index
-        tier_line=tier*line_len+line
-        tier_line_point = tier*line_point_len+line_point
-        tier_line_point_idx = tier*(10**(len(str(line_point_idx)))*10)+line_point_idx
+        easting = self._to_float(s[sps_revision.easting_start:sps_revision.easting_end], default=default)
+        northing = self._to_float(s[sps_revision.northing_start:sps_revision.northing_end], default=default)
+        elevation = self._to_float(s[sps_revision.elevation_start:sps_revision.elevation_end], default=default)
 
+        point_code = (s[sps_revision.point_code_start:sps_revision.point_code_end] or "").strip()
+        fire_code = (point_code[:1] or "").upper()  # "A" from "A8"
+        array_code = self._to_int(point_code[1:2], default=0) if len(point_code) >= 2 else 0
+
+        jday = self._to_int(s[sps_revision.jday_start:sps_revision.jday_end], default=default)
+        hour = self._to_int(s[sps_revision.hour_start:sps_revision.hour_end], default=default)
+        minute = self._to_int(s[sps_revision.minute_start:sps_revision.minute_end], default=default)
+        second = self._to_int(s[sps_revision.second_start:sps_revision.second_end], default=default)
+        microsecond = self._to_int(s[sps_revision.msecond_start:sps_revision.msecond_end], default=0)
+
+        point_idx = self._to_int(s[sps_revision.point_idx_start:sps_revision.point_idx_end], default=default)
+        if not point_idx:
+            point_idx = 1
+
+        line_point = line * point_len + point
+        tier_line = tier * line_len + line
+        tier_line_point = tier * line_point_len + line_point
 
         return SourceSPSData(
             sail_line=sail_line,
+            line=line,
             attempt=attempt,
             seq=seq,
-            line=line,
+            tier=tier,
+
+            point_idx=point_idx,
             point=point,
-            gun_depth=gun_depth,
-            water_depth=water_depth,
-            array_code=array_code,
-            easting=easting,
-            northing=northing,
-            elevation=elevation,
             point_code=point_code,
-            point_index=point_index,
+            fire_code=fire_code,
+            array_code=array_code,
+
+            point_depth=point_depth or 0.0,
+            water_depth=water_depth or 0.0,
+
+            easting=easting or 0.0,
+            northing=northing or 0.0,
+            elevation=elevation or 0.0,
+
             line_point=line_point,
-            #line_point_idx=line_point_idx,
-            tier_line=tier_line,
-            #tier_line_point=tier_line_point,
-            #tier_line_point_idx=tier_line_point_idx,
-            line_bearing=line_bearing
+            tier_line_point=tier_line_point,
 
+            jday=jday or 1,
+            hour=hour or 0,
+            minute=minute or 0,
+            second=second or 0,
+            microsecond=microsecond or 0,
+            year=year,
         )
-
     def load_shot_table_h26_stream_fast(self, file_obj, file_fk: int, chunk_size: int = 50000) -> int:
         """
         High-speed loader for H26 comma-delimited shot table with padded spaces.
@@ -731,42 +803,30 @@ class SourceData:
             except Exception:
                 pass
             conn.close()
+
     def load_source_sps_uploaded_file_fast(
             self,
             uploaded_file,  # Django UploadedFile
             *,
-            sps_revision,  # SPSRevision
-            geometry:GeometrySettings,
-            vessel: str | None,
+            sps_revision,
+            geometry,
+            vessel_fk: int | None,
             tier: int = 1,
             line_bearing: float = 0.0,
             default: int | None = None,
+            year: int | None = None,
             batch_size: int = 50000,
     ) -> dict:
-        """
-        Fast streaming SPS loader into:
-          - SLSolution (line table)
-          - SPSolution (point table)
-
-        Requires: Files table + SLSolution + SPSolution already exist.
-        """
-
-        import io
 
         file_name = uploaded_file.name
 
-        # Detect encoding (reuse your ProjectDB method)
         uploaded_file.seek(0)
         sample = uploaded_file.read(4096)
         encoding = self._detect_text_encoding(sample)
         uploaded_file.seek(0)
 
-
-
-        # Files.ID
         file_fk = self.insert_file_record(file_name, file_type="SPS")
 
-        # Text stream wrapper (fast)
         stream = io.TextIOWrapper(uploaded_file.file, encoding=encoding, errors="replace", newline="")
 
         conn = self._connect()
@@ -775,157 +835,94 @@ class SourceData:
             cur = conn.cursor()
             cur.execute("BEGIN;")
 
-            # Cache line_name -> sl_id to avoid hitting DB each point
-            sl_cache: dict[str, int] = {}
+            insert_cols = [
+                "SailLine_FK", "PPLine_FK", "Vessel_FK", "File_FK",
+                "SailLine", "Line", "Attempt", "Seq", "Tier",
+                "TierLinePoint", "LinePoint", "PointIdx", "Point",
+                "PointCode", "FireCode", "ArrayCode",
+                "PointDepth", "WaterDepth", "Easting", "Northing", "Elevation",
+                "JDay", "Hour", "Minute", "Second", "Microsecond",
+                "Month", "Week", "Day", "Year", "YearDay",
+                "TimeStamp",
+            ]
+            placeholders = ",".join("?" for _ in insert_cols)
 
-            insert_sql = """
-            INSERT INTO SPSolution (
-                LineName_FK,
-                FileName_FK,
-                Tier,
-                TierLinePoint,
-                LinePoint,
-                Point,
-                PointIdx,
-                FireCode,
-                ArrayNumber,
-                PointCode,
-                WaterDepth,
-                Easting,
-                Northing,
-                Elevation,
-                JDay, Hour, Minute, Second, Microsecond,
-                Day, Month, Week, Year,
-                YearDay,
-                TimeStamp,
-                Vessel
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            insert_sql = f"""
+            INSERT INTO SPSolution ({",".join(insert_cols)})
+            VALUES ({placeholders})
             """
 
-            batch: list[tuple] = []
+            sl_cache: dict[str, int] = {}
+
+            batch_tuples: list[tuple] = []
             total = 0
             skipped = 0
             lines_touched: set[int] = set()
+            pplines_touched: set[int] = set()
 
             for text_line in stream:
                 if not text_line:
                     continue
-                if text_line[0] == "H":
+                if text_line and text_line[0] == "H":
                     continue
 
-                # Decode SPS line -> your existing decoder
                 p = self.decode_sps_string(
                     text_line,
                     sps_revision=sps_revision,
+                    geom=geometry,
                     default=default,
                     tier=tier,
-                    geom=geometry,
+                    year=year,
                     line_bearing=line_bearing,
                 )
                 if p is None:
                     skipped += 1
                     continue
 
-                # --- build line identifiers ---
-                # p.line must exist. If not, adjust to your decoded object.
-
-
+                # get/create SLSolution.ID
                 sl_id = sl_cache.get(p.sail_line)
                 if sl_id is None:
                     sl_id = self._get_or_create_sl_solution_id(
                         conn,
-                        line=line,
-                        seq=int(seq),
-                        attempt=attempt1,
-                        tier=int(tier),
-                        tierline=int(tierline),
-                        vessel=vessel,
                         file_fk=int(file_fk),
+                        sail_line=p.sail_line,
+                        line=p.line,
+                        seq=p.seq,
+                        attempt=p.attempt,
+                        tier=p.tier,
+                        vessel_fk=vessel_fk,
                     )
-                    sl_cache[line_name] = sl_id
+                    sl_cache[p.sail_line] = sl_id
 
                 lines_touched.add(sl_id)
 
-                # --- FireCode ---
-                # If your decoded object has fire code -> use it.
-                # Otherwise, you can derive from some field; placeholder:
-                fire_code = None
-                if hasattr(p, "fire_code") and p.fire_code:
-                    fire_code = str(p.fire_code).strip()[:1].upper()
-                elif hasattr(p, "post_point_code") and p.post_point_code:
-                    fire_code = str(p.post_point_code).strip()[:1].upper()
 
-                # --- timestamps / date parts (adapt to what your p contains) ---
-                # Use safe getters; if your p has different names, map accordingly.
-                jday = int(getattr(p, "jday", 0) or 0)
-                hour = int(getattr(p, "hour", 0) or 0)
-                minute = int(getattr(p, "minute", 0) or 0)
-                second = int(getattr(p, "second", 0) or 0)
-                micro = float(getattr(p, "microsecond", 0) or 0)
+                # fill FK/meta into point object
+                p.sail_line_fk = sl_id
+                p.ppline_fk = 0
+                p.vessel_fk = vessel_fk
+                p.file_fk = int(file_fk)
 
-                day = int(getattr(p, "day", 0) or 0)
-                month = int(getattr(p, "month", 0) or 0)
-                week = int(getattr(p, "week", 0) or 0)
-                year = int(getattr(p, "year", 0) or 0)
-
-                # YearDay (text) + TimeStamp (datetime text) if you have them
-                yearday = getattr(p, "year_day", None) or None
-                ts = getattr(p, "timestamp", None) or getattr(p, "time_stamp", None) or None
-
-                # core point
-                point = int(getattr(p, "point", 0) or 0)
-                point_idx = int(getattr(p, "point_index", 0) or 0)
-
-                # offsets / depths / coords
-                wd = int(getattr(p, "water_depth", 0) or 0)
-                x = float(getattr(p, "easting", 0.0) or 0.0)
-                y = float(getattr(p, "northing", 0.0) or 0.0)
-                z = float(getattr(p, "elevation", 0.0) or 0.0)
-
-                # optional
-                array_num = int(getattr(p, "array_number", 0) or 0)
-
-                # linepoint fields (set something useful; change if you have exact logic)
-                tier_line_point = int(getattr(p, "tier_line_point", 0) or 0)
-                line_point = int(getattr(p, "line_point", 0) or 0)
-
-                batch.append((
-                    sl_id,
-                    int(file_fk),
-                    int(tier),
-                    tier_line_point,
-                    line_point,
-                    point,
-                    point_idx,
-                    fire_code,
-                    array_num,
-                    point_code,
-                    wd,
-                    x, y, z,
-                    jday, hour, minute, second, micro,
-                    day, month, week, year,
-                    yearday,
-                    ts,
-                    vessel,
-                ))
+                batch_tuples.append(p.to_db_tuple())
                 total += 1
 
-                if len(batch) >= batch_size:
-                    cur.executemany(insert_sql, batch)
-                    batch.clear()
+                if len(batch_tuples) >= batch_size:
+                    cur.executemany(insert_sql, batch_tuples)
+                    batch_tuples.clear()
 
-            if batch:
-                cur.executemany(insert_sql, batch)
-                batch.clear()
+            if batch_tuples:
+                cur.executemany(insert_sql, batch_tuples)
+                batch_tuples.clear()
 
             conn.commit()
-            self._end_fast_import(conn)
+            self._end_fast_import()
 
             return {
                 "file_fk": int(file_fk),
                 "points": int(total),
                 "skipped": int(skipped),
                 "lines": int(len(lines_touched)),
+                "source_line":int(p.line),
             }
 
         except Exception:
@@ -939,131 +936,442 @@ class SourceData:
                 pass
             conn.close()
 
-    def update_slsolution_from_spsolution_fast(self) -> str:
+    def update_line_maxspi_maxseq(self, line: int, file_fk: int | None = None) -> dict:
         """
-        Fast aggregate update:
-          SLSolution <- SPSolution + project_geometry (production/non-production codes)
-        Uses SQL GROUP BY (very fast).
+        Updates SLSolution.MaxSPI and SLSolution.MaxSeq for a given Line.
+
+        MaxSPI = max distance between neighbouring production points
+                 (FireCode in project_geometry.production_code),
+                 ordered by Point, PointIdx, computed within each SailLine_FK,
+                 then max across all SailLine_FK of this Line.
+
+        MaxSeq = number of distinct SailLine_FK (i.e. SLSolution.ID) for this Line
+                 (optionally limited to file_fk).
         """
+        line = int(line)
+
         conn = self._connect()
         try:
-            self._begin_fast_import(conn, aggressive=False)
-
+            cur = conn.cursor()
+            conn.execute("PRAGMA foreign_keys = ON;")
             conn.execute("BEGIN IMMEDIATE;")
-            try:
-                # If project_geometry can be empty, provide defaults (prevents empty joins)
-                conn.executescript("""
-                DROP VIEW IF EXISTS V_PG_ONE;
-                CREATE VIEW V_PG_ONE AS
-                WITH pg AS (
-                    SELECT production_code, non_production_code
-                    FROM project_geometry
-                    LIMIT 1
-                    UNION ALL
-                    SELECT '' AS production_code, '' AS non_production_code
-                    WHERE NOT EXISTS (SELECT 1 FROM project_geometry)
-                )
-                SELECT production_code, non_production_code FROM pg LIMIT 1;
-                """)
 
-                # Main aggregate per line
-                # Start/End by MIN/MAX(Point) with correlated subqueries for X/Y
-                conn.executescript("""
-                DROP VIEW IF EXISTS V_SPSOLUTION_AGG;
-                CREATE VIEW V_SPSOLUTION_AGG AS
-                WITH pg AS (SELECT production_code, non_production_code FROM V_PG_ONE),
-                a AS (
-                    SELECT
-                        LineName_FK AS line_id,
-                        MIN(Point) AS min_point,
-                        MAX(Point) AS max_point,
-                        COUNT(*) AS count_all,
+            # production codes
+            r = cur.execute(
+                "SELECT COALESCE(production_code,'') FROM project_geometry LIMIT 1"
+            ).fetchone()
+            prod_codes = (r[0] if r else "") or ""
 
-                        SUM(CASE WHEN FireCode='A' THEN 1 ELSE 0 END) AS count_a,
-                        SUM(CASE WHEN FireCode='P' THEN 1 ELSE 0 END) AS count_p,
-                        SUM(CASE WHEN FireCode='L' THEN 1 ELSE 0 END) AS count_l,
-                        SUM(CASE WHEN FireCode='R' THEN 1 ELSE 0 END) AS count_r,
-                        SUM(CASE WHEN FireCode='X' THEN 1 ELSE 0 END) AS count_x,
-                        SUM(CASE WHEN FireCode='M' THEN 1 ELSE 0 END) AS count_m,
-                        SUM(CASE WHEN FireCode='K' THEN 1 ELSE 0 END) AS count_k,
-                        SUM(CASE WHEN FireCode='W' THEN 1 ELSE 0 END) AS count_w,
-                        SUM(CASE WHEN FireCode='T' THEN 1 ELSE 0 END) AS count_t,
-
-                        COUNT(DISTINCT CASE
-                            WHEN FireCode IS NOT NULL
-                             AND instr((SELECT production_code FROM pg), FireCode) > 0
-                            THEN Point
-                        END) AS prod_distinct_points,
-
-                        COUNT(DISTINCT CASE
-                            WHEN FireCode IS NOT NULL
-                             AND instr((SELECT non_production_code FROM pg), FireCode) > 0
-                            THEN Point
-                        END) AS nonprod_distinct_points
-
-                    FROM SPSolution
-                    GROUP BY LineName_FK
-                )
-                SELECT
-                    a.*,
-
-                    (SELECT Easting  FROM SPSolution p WHERE p.LineName_FK=a.line_id AND p.Point=a.min_point LIMIT 1) AS start_x,
-                    (SELECT Northing FROM SPSolution p WHERE p.LineName_FK=a.line_id AND p.Point=a.min_point LIMIT 1) AS start_y,
-                    (SELECT Easting  FROM SPSolution p WHERE p.LineName_FK=a.line_id AND p.Point=a.max_point LIMIT 1) AS end_x,
-                    (SELECT Northing FROM SPSolution p WHERE p.LineName_FK=a.line_id AND p.Point=a.max_point LIMIT 1) AS end_y
-                FROM a;
-                """)
-
-                # Apply updates
-                conn.executescript("""
-                UPDATE SLSolution
-                SET
-                    FSP = (SELECT min_point FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID),
-                    LSP = (SELECT max_point FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID),
-
-                    StartX = (SELECT start_x FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID),
-                    StartY = (SELECT start_y FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID),
-                    EndX   = (SELECT end_x   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID),
-                    EndY   = (SELECT end_y   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID),
-
-                    Count_All = COALESCE((SELECT count_all FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_A   = COALESCE((SELECT count_a   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_P   = COALESCE((SELECT count_p   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_L   = COALESCE((SELECT count_l   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_R   = COALESCE((SELECT count_r   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_X   = COALESCE((SELECT count_x   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_M   = COALESCE((SELECT count_m   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_K   = COALESCE((SELECT count_k   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_W   = COALESCE((SELECT count_w   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-                    Count_T   = COALESCE((SELECT count_t   FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-
-                    SeqProdCount = COALESCE((SELECT prod_distinct_points FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0),
-
-                    PercentOfSeqDone = ROUND(
-                        100.0 * COALESCE((SELECT prod_distinct_points FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0)
-                        / NULLIF(COALESCE((SELECT count_all FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0), 0),
-                    2),
-
-                    PercentOfLineDone = ROUND(
-                        100.0 * COALESCE((SELECT prod_distinct_points FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0)
-                        / NULLIF(COALESCE((SELECT count_all FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID), 0), 0),
-                    2)
-
-                WHERE EXISTS (SELECT 1 FROM V_SPSOLUTION_AGG WHERE line_id=SLSolution.ID);
-                """)
+            if not prod_codes:
+                # still update MaxSeq
+                if file_fk is None:
+                    maxseq = cur.execute(
+                        "SELECT COUNT(*) FROM SLSolution WHERE Line=?",
+                        (line,),
+                    ).fetchone()[0]
+                    cur.execute(
+                        "UPDATE SLSolution SET MaxSPI=0, MaxSeq=? WHERE Line=?",
+                        (int(maxseq), line),
+                    )
+                else:
+                    fk = int(file_fk)
+                    maxseq = cur.execute(
+                        "SELECT COUNT(*) FROM SLSolution WHERE Line=? AND File_FK=?",
+                        (line, fk),
+                    ).fetchone()[0]
+                    cur.execute(
+                        "UPDATE SLSolution SET MaxSPI=0, MaxSeq=? WHERE Line=? AND File_FK=?",
+                        (int(maxseq), line, fk),
+                    )
 
                 conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
+                return {"line": line, "MaxSPI": 0.0, "MaxSeq": int(maxseq)}
 
-            # how many lines updated?
-            updated = conn.execute("""
-                SELECT COUNT(*) FROM SLSolution
-                WHERE Count_All IS NOT NULL AND Count_All > 0
-            """).fetchone()[0]
+            fk_filter_sql = ""
+            fk_params: tuple = ()
+            if file_fk is not None:
+                fk = int(file_fk)
+                fk_filter_sql = "AND l.File_FK = ?"
+                fk_params = (fk,)
 
-            return f"SLSolution updated={int(updated)}"
+            # Compute MaxSPI (SQL window)
+            # - filter by Line via JOIN to SLSolution (l.Line)
+            # - keep only production points
+            # - order by Point, PointIdx within each SailLine_FK
+            # - compute distance to previous point
+            # - take max gap per sail line, then max across line
+            sql_maxspi = f"""
+            WITH prod AS (
+                SELECT
+                    s.SailLine_FK,
+                    s.Easting AS x,
+                    s.Northing AS y,
+                    LAG(s.Easting) OVER (
+                        PARTITION BY s.SailLine_FK
+                        ORDER BY s.Point, COALESCE(s.PointIdx,0)
+                    ) AS px,
+                    LAG(s.Northing) OVER (
+                        PARTITION BY s.SailLine_FK
+                        ORDER BY s.Point, COALESCE(s.PointIdx,0)
+                    ) AS py
+                FROM SPSolution s
+                JOIN SLSolution l ON l.ID = s.SailLine_FK
+                WHERE l.Line = ?
+                  {fk_filter_sql}
+                  AND s.FireCode IS NOT NULL
+                  AND instr(?, s.FireCode) > 0
+                  AND s.Easting IS NOT NULL
+                  AND s.Northing IS NOT NULL
+            ),
+            gaps AS (
+                SELECT
+                    SailLine_FK,
+                    sqrt((x-px)*(x-px) + (y-py)*(y-py)) AS d
+                FROM prod
+                WHERE px IS NOT NULL
+            )
+            SELECT COALESCE(MAX(d), 0) FROM gaps;
+            """
 
+            params_maxspi = (line, *fk_params, prod_codes)
+            maxspi = cur.execute(sql_maxspi, params_maxspi).fetchone()[0]
+            maxspi = float(maxspi or 0.0)
+
+            # MaxSeq = number of SailLine_FK rows for this Line
+            if file_fk is None:
+                maxseq = cur.execute(
+                    "SELECT COUNT(*) FROM SLSolution WHERE Line=?",
+                    (line,),
+                ).fetchone()[0]
+                cur.execute(
+                    "UPDATE SLSolution SET MaxSPI=?, MaxSeq=? WHERE Line=?",
+                    (maxspi, int(maxseq), line),
+                )
+            else:
+                fk = int(file_fk)
+                maxseq = cur.execute(
+                    "SELECT COUNT(*) FROM SLSolution WHERE Line=? AND File_FK=?",
+                    (line, fk),
+                ).fetchone()[0]
+                cur.execute(
+                    "UPDATE SLSolution SET MaxSPI=?, MaxSeq=? WHERE Line=? AND File_FK=?",
+                    (maxspi, int(maxseq), line, fk),
+                )
+
+            conn.commit()
+            return {"line": line, "MaxSPI": round(maxspi, 3), "MaxSeq": int(maxseq)}
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def update_slsolution_from_spsolution_timebased(self, file_fk: int) -> str:
+        """
+        Update SLSolution for one file only (File_FK).
+
+        Definitions (per SailLine_FK == SLSolution.ID):
+          FSP  = Point at earliest TimeStamp
+          LSP  = Point at latest TimeStamp
+          FGSP = Point at earliest TimeStamp where FireCode in project_geometry.production_code
+          LGSP = Point at latest TimeStamp where FireCode in project_geometry.production_code
+
+        Also fills:
+          - Start/End coords from FGSP/LGSP (fallback to FSP/LSP)
+          - Start/End times (min/max TimeStamp)
+          - Start/End production times (min/max prod TimeStamp)
+          - ProductionCount / NonProductionCount / KillCount (distinct Point)
+          - PercentOfLineCompleted / PercentOfSeqCompleted (based on prod_points / all_points)
+          - LineLength (distance between Start and End coords)
+          - Min/Max GunDepth (from SPSolution.PointDepth)
+          - Min/Max WaterDepth (from SPSolution.WaterDepth)
+        """
+        file_fk = int(file_fk)
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("BEGIN IMMEDIATE;")
+            cur = conn.cursor()
+
+            # Get codes (fallback to empty if missing)
+            pg = cur.execute(
+                "SELECT COALESCE(production_code,''), COALESCE(non_production_code,'') "
+                "FROM project_geometry LIMIT 1"
+            ).fetchone()
+            prod_codes = (pg[0] if pg else "") or ""
+            nonprod_codes = (pg[1] if pg else "") or ""
+
+            # Core update driven by CTEs (NO VIEW: SQLite doesn't allow params in views)
+            cur.execute(
+                """
+                WITH
+                base AS (
+                    SELECT
+                        s.SailLine_FK AS line_id,
+
+                        -- counts (distinct points)
+                        COUNT(DISTINCT s.Point) AS count_all_points,
+
+                        COUNT(DISTINCT CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                            THEN s.Point END) AS prod_points,
+
+                        COUNT(DISTINCT CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                            THEN s.Point END) AS nonprod_points,
+
+                        COUNT(DISTINCT CASE
+                            WHEN s.FireCode = 'K' THEN s.Point END) AS kill_points,
+
+                        -- min/max timestamps
+                        MIN(s.TimeStamp) AS min_ts,
+                        MAX(s.TimeStamp) AS max_ts,
+
+                        MIN(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                            THEN s.TimeStamp END) AS min_prod_ts,
+
+                        MAX(CASE
+                            WHEN s.FireCode IS NOT NULL AND instr(?, s.FireCode) > 0
+                            THEN s.TimeStamp END) AS max_prod_ts,
+
+                        -- depth ranges (gun depth stored in PointDepth)
+                        MIN(CASE WHEN s.PointDepth IS NOT NULL THEN s.PointDepth END) AS min_gun_depth,
+                        MAX(CASE WHEN s.PointDepth IS NOT NULL THEN s.PointDepth END) AS max_gun_depth,
+
+                        MIN(CASE WHEN s.WaterDepth IS NOT NULL THEN s.WaterDepth END) AS min_water_depth,
+                        MAX(CASE WHEN s.WaterDepth IS NOT NULL THEN s.WaterDepth END) AS max_water_depth
+
+                    FROM SPSolution s
+                    JOIN SLSolution l ON l.ID = s.SailLine_FK
+                    WHERE l.File_FK = ?
+                      AND s.TimeStamp IS NOT NULL
+                      AND trim(s.TimeStamp) <> ''
+                    GROUP BY s.SailLine_FK
+                ),
+                picks AS (
+                    SELECT
+                        b.*,
+
+                        -- FSP point: earliest timestamp
+                        (SELECT Point FROM SPSolution p
+                         WHERE p.SailLine_FK=b.line_id AND p.TimeStamp=b.min_ts
+                         ORDER BY p.Point ASC, COALESCE(p.PointIdx,0) ASC
+                         LIMIT 1) AS fsp,
+
+                        -- LSP point: latest timestamp
+                        (SELECT Point FROM SPSolution p
+                         WHERE p.SailLine_FK=b.line_id AND p.TimeStamp=b.max_ts
+                         ORDER BY p.Point DESC, COALESCE(p.PointIdx,0) DESC
+                         LIMIT 1) AS lsp,
+
+                        -- FGSP point: earliest production timestamp
+                        (SELECT Point FROM SPSolution p
+                         WHERE p.SailLine_FK=b.line_id
+                           AND p.TimeStamp=b.min_prod_ts
+                           AND p.FireCode IS NOT NULL AND instr(?, p.FireCode) > 0
+                         ORDER BY p.Point ASC, COALESCE(p.PointIdx,0) ASC
+                         LIMIT 1) AS fgsp,
+
+                        -- LGSP point: latest production timestamp
+                        (SELECT Point FROM SPSolution p
+                         WHERE p.SailLine_FK=b.line_id
+                           AND p.TimeStamp=b.max_prod_ts
+                           AND p.FireCode IS NOT NULL AND instr(?, p.FireCode) > 0
+                         ORDER BY p.Point DESC, COALESCE(p.PointIdx,0) DESC
+                         LIMIT 1) AS lgsp
+                    FROM base b
+                )
+                UPDATE SLSolution
+                SET
+                    FSP  = COALESCE((SELECT fsp  FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    LSP  = COALESCE((SELECT lsp  FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    FGSP = COALESCE((SELECT fgsp FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    LGSP = COALESCE((SELECT lgsp FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+
+                    Start_Time = (SELECT min_ts FROM picks x WHERE x.line_id=SLSolution.ID),
+                    End_Time   = (SELECT max_ts FROM picks x WHERE x.line_id=SLSolution.ID),
+
+                    Start_Production_Time = (SELECT min_prod_ts FROM picks x WHERE x.line_id=SLSolution.ID),
+                    End_Production_Time   = (SELECT max_prod_ts FROM picks x WHERE x.line_id=SLSolution.ID),
+
+                    -- depth ranges
+                    MinGunDepth   = (SELECT min_gun_depth    FROM picks x WHERE x.line_id=SLSolution.ID),
+                    MaxGunDepth   = (SELECT max_gun_depth    FROM picks x WHERE x.line_id=SLSolution.ID),
+                    MinWaterDepth = (SELECT min_water_depth  FROM picks x WHERE x.line_id=SLSolution.ID),
+                    MaxWaterDepth = (SELECT max_water_depth  FROM picks x WHERE x.line_id=SLSolution.ID),
+
+                    -- Start coords: FGSP else FSP
+                    StartX = COALESCE(
+                        (SELECT Easting FROM SPSolution p
+                         WHERE p.SailLine_FK=SLSolution.ID
+                           AND p.Point=(SELECT fgsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                         ORDER BY COALESCE(p.PointIdx,0) ASC LIMIT 1),
+                        (SELECT Easting FROM SPSolution p
+                         WHERE p.SailLine_FK=SLSolution.ID
+                           AND p.Point=(SELECT fsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                         ORDER BY COALESCE(p.PointIdx,0) ASC LIMIT 1)
+                    ),
+                    StartY = COALESCE(
+                        (SELECT Northing FROM SPSolution p
+                         WHERE p.SailLine_FK=SLSolution.ID
+                           AND p.Point=(SELECT fgsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                         ORDER BY COALESCE(p.PointIdx,0) ASC LIMIT 1),
+                        (SELECT Northing FROM SPSolution p
+                         WHERE p.SailLine_FK=SLSolution.ID
+                           AND p.Point=(SELECT fsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                         ORDER BY COALESCE(p.PointIdx,0) ASC LIMIT 1)
+                    ),
+
+                    -- End coords: LGSP else LSP
+                    EndX = COALESCE(
+                        (SELECT Easting FROM SPSolution p
+                         WHERE p.SailLine_FK=SLSolution.ID
+                           AND p.Point=(SELECT lgsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                         ORDER BY COALESCE(p.PointIdx,0) DESC LIMIT 1),
+                        (SELECT Easting FROM SPSolution p
+                         WHERE p.SailLine_FK=SLSolution.ID
+                           AND p.Point=(SELECT lsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                         ORDER BY COALESCE(p.PointIdx,0) DESC LIMIT 1)
+                    ),
+                    EndY = COALESCE(
+                        (SELECT Northing FROM SPSolution p
+                         WHERE p.SailLine_FK=SLSolution.ID
+                           AND p.Point=(SELECT lgsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                         ORDER BY COALESCE(p.PointIdx,0) DESC LIMIT 1),
+                        (SELECT Northing FROM SPSolution p
+                         WHERE p.SailLine_FK=SLSolution.ID
+                           AND p.Point=(SELECT lsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                         ORDER BY COALESCE(p.PointIdx,0) DESC LIMIT 1)
+                    ),
+
+                    -- counts
+                    ProductionCount    = COALESCE((SELECT prod_points    FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    NonProductionCount = COALESCE((SELECT nonprod_points FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+                    KillCount          = COALESCE((SELECT kill_points    FROM picks x WHERE x.line_id=SLSolution.ID), 0),
+
+                    -- percents (based on prod_points / all_points)
+                    PercentOfLineCompleted = ROUND(
+                        100.0 * COALESCE((SELECT prod_points FROM picks x WHERE x.line_id=SLSolution.ID), 0)
+                        / NULLIF(COALESCE((SELECT count_all_points FROM picks x WHERE x.line_id=SLSolution.ID), 0), 0),
+                    2),
+
+                    PercentOfSeqCompleted = ROUND(
+                        100.0 * COALESCE((SELECT prod_points FROM picks x WHERE x.line_id=SLSolution.ID), 0)
+                        / NULLIF(COALESCE((SELECT count_all_points FROM picks x WHERE x.line_id=SLSolution.ID), 0), 0),
+                    2)
+
+                WHERE File_FK = ?
+                  AND EXISTS (SELECT 1 FROM picks x WHERE x.line_id=SLSolution.ID);
+                """,
+                (
+                    prod_codes,
+                    nonprod_codes,
+                    prod_codes,
+                    prod_codes,
+                    file_fk,
+                    prod_codes,
+                    prod_codes,
+                    file_fk,
+                ),
+            )
+
+            # LineLength from Start/End coords
+            cur.execute(
+                """
+                UPDATE SLSolution
+                SET LineLength =
+                    CASE
+                      WHEN StartX IS NULL OR StartY IS NULL OR EndX IS NULL OR EndY IS NULL THEN 0
+                      ELSE sqrt((EndX-StartX)*(EndX-StartX) + (EndY-StartY)*(EndY-StartY))
+                    END
+                WHERE File_FK = ?;
+                """,
+                (file_fk,),
+            )
+
+            conn.commit()
+
+            updated = cur.execute(
+                "SELECT COUNT(*) FROM SLSolution WHERE File_FK=? AND Start_Time IS NOT NULL",
+                (file_fk,),
+            ).fetchone()[0]
+
+            return f"SLSolution updated={int(updated)} (file_fk={file_fk})"
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    def update_slsolution_from_preplot_timebased(self, file_fk: int) -> str:
+        file_fk = int(file_fk)
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("BEGIN IMMEDIATE;")
+            cur = conn.cursor()
+
+            # ---- your existing: codes + V_SL_TIME_AGG_FILE + update FSP/LSP/FGSP/LGSP + coords + counts + LineLength ----
+            # (keep everything you already have)
+
+            # ------------------------------------------------------------
+            # NEW PART 1: set PPLine_FK from SLPreplot by Line match
+            # ------------------------------------------------------------
+            cur.execute("""
+            UPDATE SLSolution
+            SET PPLine_FK = (
+                SELECT p.ID
+                FROM SLPreplot p
+                WHERE p.Line = SLSolution.Line
+                ORDER BY p.ID
+                LIMIT 1
+            )
+            WHERE File_FK = ?;
+            """, (file_fk,))
+
+            # ------------------------------------------------------------
+            # NEW PART 2: store PP_Length (SLPreplot.Length)
+            # Requires SLSolution.PP_Length column exists
+            # ------------------------------------------------------------
+            cur.execute("""
+            UPDATE SLSolution
+            SET PP_Length = COALESCE((
+                SELECT p.LineLength
+                FROM SLPreplot p
+                WHERE p.ID = SLSolution.PPLine_FK
+                LIMIT 1
+            ), 0)
+            WHERE File_FK = ?;
+            """, (file_fk,))
+
+            # ------------------------------------------------------------
+            # NEW PART 3: SeqLenPercentage = LineLength / PP_Length * 100
+            # Requires SLSolution.SeqLenPercentage column exists
+            # ------------------------------------------------------------
+            cur.execute("""
+            UPDATE SLSolution
+            SET SeqLenPercentage =
+                CASE
+                  WHEN COALESCE(PP_Length, 0) > 0
+                  THEN ROUND(100.0 * COALESCE(LineLength, 0) / PP_Length, 2)
+                  ELSE 0
+                END
+            WHERE File_FK = ?;
+            """, (file_fk,))
+
+            conn.commit()
+
+            updated = cur.execute(
+                "SELECT COUNT(*) FROM SLSolution WHERE File_FK=?",
+                (file_fk,),
+            ).fetchone()[0]
+
+            return f"SLSolution updated={int(updated)} (file_fk={file_fk})"
+
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()

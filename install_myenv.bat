@@ -49,15 +49,17 @@ echo   %WORKDIR%\myenv\Scripts\activate
 echo ================================
 REM --- Ensure initial SQLite database exists ---
 IF NOT EXIST "db.sqlite3" (
-    echo db.sqlite3 not found. Copying from dummy_db...
-    IF EXIST "dummy_db\db.sqlite3" (
-        copy "dummy_db\db.sqlite3" "db.sqlite3"
-        echo Database copied successfully.
-    ) ELSE (
-        echo ERROR: dummy_db\db.sqlite3 not found!
-        pause
-        exit /b 1
-    )
+REM   echo db.sqlite3 not found. Copying from dummy_db...
+    echo db.sqlite3 not found. run migration...
+    python manage.py migrate
+REM    IF EXIST "dummy_db\db.sqlite3" (
+REM        copy "dummy_db\db.sqlite3" "db.sqlite3"
+REM        echo Database copied successfully.
+REM    ) ELSE (
+REM        echo ERROR: dummy_db\db.sqlite3 not found!
+REM        pause
+REM        exit /b 1
+REM    )
 ) ELSE (
     echo Database already exists. Skipping copy.
 )
