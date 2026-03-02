@@ -106,6 +106,13 @@ def signup_view(request):
         form = CustomUserCreationForm(request.POST)
         if form.is_valid():
             user = form.save()
+
+            # ✅ if this is the FIRST user in system => make admin
+            if User.objects.count() == 1:  # this user is already saved, so count==1 means first
+                user.is_superuser = True
+                user.is_staff = True
+                user.save(update_fields=["is_superuser", "is_staff"])
+
             auth_login(request, user)
             return redirect("dashboard")
     else:
