@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 color 1F
 title SeisWebLog Local Server
 @echo off

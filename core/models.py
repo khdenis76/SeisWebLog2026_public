@@ -412,18 +412,20 @@ def create_project_folder(sender, instance: Project, created, **kwargs):
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS "project_node_qc" (
-                         "id"	INTEGER CHECK("id" = 1),
-                         "max_il_offset"	REAL NOT NULL,
-                         "max_xl_offset"	REAL NOT NULL,
-                         "max_radial_offset"	REAL NOT NULL,
-                         "percent_of_depth"	REAL NOT NULL,
-                         "use_offset"	INTEGER NOT NULL,
-                         "battery_life"	INTEGER DEFAULT 0,
-                         "gnss_diffage_warning"	INTEGER DEFAULT 0,
-                         "gnss_diffage_error"	INTEGER DEFAULT 0,
-                         "gnss_fixed_quality"	INTEGER DEFAULT 0,
-                         PRIMARY KEY("id")
-                )
+	                     "id"	INTEGER CHECK("id" = 1),
+	                     "max_il_offset"	REAL NOT NULL,
+	                     "max_xl_offset"	REAL NOT NULL,
+	                     "max_radial_offset"	REAL NOT NULL,
+	                     "percent_of_depth"	REAL NOT NULL,
+	                     "use_offset"	INTEGER NOT NULL,
+	                     "battery_life"	INTEGER DEFAULT 0,
+	                     "gnss_diffage_warning"	INTEGER DEFAULT 0,
+	                     "gnss_diffage_error"	INTEGER DEFAULT 0,
+	                     "gnss_fixed_quality"	INTEGER DEFAULT 0,
+	                     "max_sma" REAL DEFAULT 0,
+	                     "warning_sma" REAL DEFAULT 0, 
+	                     PRIMARY KEY("id")
+                );
                 """
             )
             cur.execute("SELECT COUNT(*) AS cnt FROM project_node_qc;")
