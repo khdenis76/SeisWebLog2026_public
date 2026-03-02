@@ -883,14 +883,17 @@ class DSRMapPlots:
                 else:
                     label_src = src
 
-                labels = LabelSet(
-                    x="x", y="y", text="Point",
+                r_text = p.text(
+                    x="x",
+                    y="y",
+                    text="Point",
                     source=label_src,
-                    x_offset=6, y_offset=6,
+                    x_offset=6,
+                    y_offset=6,
                     text_font_size="9pt",
                     text_alpha=0.9,
+                    legend_label=layer_name,  # ✅ same legend label
                 )
-                p.add_layout(labels)
 
         return p
     def make_map(

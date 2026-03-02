@@ -617,6 +617,7 @@ CREATE TABLE  IF NOT EXISTS  SLSolution (
         SeqLenPercentage REAL,
         MaxSPI REAL,
         MaxSeq INTEGER,
+        purpose_id INTEGER,
         FOREIGN KEY (Vessel_FK) REFERENCES project_fleet(ID) ON DELETE CASCADE ON UPDATE CASCADE,
         FOREIGN KEY (PPLine_FK) REFERENCES SLPreplot(ID)  ON UPDATE CASCADE,
         FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE ON UPDATE CASCADE
@@ -931,7 +932,20 @@ CREATE TABLE IF NOT EXISTS project_fleet (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_project_fleet_source_vessel_id
 ON project_fleet(source_vessel_id);
-
+CREATE TABLE IF NOT EXISTS "sequence_vessel_assignment" (
+	"id"	INTEGER,
+	"seq_first"	INTEGER NOT NULL,
+	"seq_last"	INTEGER NOT NULL,
+	"vessel_id"	INTEGER NOT NULL,
+	"purpose"	TEXT,
+	"purpose_id"	INTEGER NOT NULL DEFAULT 4,
+	"comments"	TEXT,
+	"is_active"	INTEGER DEFAULT 1,
+	"created_at"	TEXT DEFAULT CURRENT_TIMESTAMP,
+	"updated_at"	TEXT,
+	PRIMARY KEY("id" AUTOINCREMENT),
+	FOREIGN KEY("vessel_id") REFERENCES "project_fleet"("id") ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS SHOT_TABLE (
 
     id INTEGER PRIMARY KEY AUTOINCREMENT,

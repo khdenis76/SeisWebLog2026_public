@@ -1,7 +1,14 @@
   {% if rows and rows|length > 0 %}
       {% for r in rows %}
       <tr id="sps-row-{{ r.PPLine_FK }}-{{ r.Seq }}-{{ r.Attempt }}"
-          data-ppline="{{ r.PPLine_FK }}">
+          data-ppline="{{ r.PPLine_FK }}"
+          data-id="{{ r.ID }}"
+          data-seq="{{ r.Seq }}"
+          data-vessel="{{ r.vessel_id }}"
+          data-sailline="{{ r.SailLine }}"
+          data-sailline="{{ r.Line }}"
+          data-attempt="{{ r.Attempt }}"
+      >
 
         <td class="sticky-col-0">
           <input class="form-check-input m-0 row-check"
@@ -12,11 +19,12 @@
 
         <td class="sticky-col-1">{{ r.SailLine }}</td>
         <td class="sticky-col-2">{{ r.Line }}</td>
-        <td class="sticky-col-3 num">{{ r.Seq }}</td>
+        <td class="sticky-col-3 num level-{{ r.purpose_id }}">{{ r.Seq|stringformat:"04d" }}</td>
 
-        <td class="num">{{ r.Attempt }}</td>
-        <td>{{ r.Tier }}</td>
-        <td>{{ r.TierLine }}</td>
+        <td class="num{% if r.Attempt == 1 %} text-primary
+                      {% elif r.Attempt == "R" %} text-danger
+                      {% elif r.Attempt == "T" %} text-warning {% endif %}
+        ">{{ r.Attempt }}</td>
         <td class="num">{{ r.FSP }}</td>
         <td class="num">{{ r.LSP }}</td>
         <td class="num">{{ r.FGSP }}</td>
@@ -25,7 +33,6 @@
         <td class="num">{{ r.StartY }}</td>
         <td class="num">{{ r.EndX }}</td>
         <td class="num">{{ r.EndY }}</td>
-        <td class="num">{{ r.Vessel_FK }}</td>
         <td>{{ r.Start_Time }}</td>
         <td>{{ r.End_Time }}</td>
         <td class="num">{{ r.LineLength }}</td>
@@ -33,13 +40,29 @@
         <td>{{ r.End_Production_Time }}</td>
         <td class="num">{{ r.PercentOfLineCompleted }}</td>
         <td class="num">{{ r.PercentOfSeqCompleted }}</td>
-        <td class="num">{{ r.ProductionCount }}</td>
-        <td class="num">{{ r.NonProductionCount }}</td>
-        <td class="num">{{ r.KillCount }}</td>
-        <td class="num">{{ r.MinGunDepth }}</td>
-        <td class="num">{{ r.MaxGunDepth }}</td>
-        <td class="num">{{ r.MinWaterDepth }}</td>
-        <td class="num">{{ r.MaxWaterDepth }}</td>
+        <td class="num text-success fw-bold">{{ r.ProductionCount }}</td>
+        <td class="num text-primary fw-bold">{{ r.NonProductionCount }}</td>
+        <td class="num fw-bold text-danger">
+          {% if r.KillCount == 0  %}
+          {% else %}
+            {{ r.KillCount }}
+          {% endif %}
+        </td>
+        {% if r.MinProdGunDepth < min_depth_limit %}
+              <td class="num text-primary fw-bold">
+                  <i class="fas text-danger fa-triangle-exclamation me-1"></i>
+                  <i class="fas text-primary fa-arrow-down me-1"></i>
+                     {{ r.MinProdGunDepth }}</td>
+        {% elif r.MinProdGunDepth > gun_qc.depth %}
+              <td class="num text-primary"> {{ r.MinProdGunDepth }}</td>
+        {% elif r.MinProdGunDepth < gun_qc.depth %}
+           <td class="num text-warning"> {{ r.MinProdGunDepth }}</td>
+        {% elif r.MinProdGunDepth > max_depth_limit %}
+            <td class="num text-danger"> {{ r.MinProdGunDepth }}</td>
+        {% endif %}
+        <td class="num">{{ r.MaxProdGunDepth }}</td>
+        <td class="num">{{ r.MinProdWaterDepth }}</td>
+        <td class="num">{{ r.MaxProdWaterDepth }}</td>
         <td class="num">{{ r.PP_Length }}</td>
         <td class="num">{{ r.SeqLenPercentage }}</td>
         <td class="num">{{ r.MaxSPI }}</td>

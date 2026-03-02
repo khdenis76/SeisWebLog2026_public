@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Optional
 from core.models import SPSRevision
 from core.project_dataclasses import *
+from datetime import datetime, timezone
+
+
+
 class SourceData:
     def __init__(self, db_path: Path | str):
         self.db_path = Path(db_path)
@@ -439,7 +443,8 @@ class SourceData:
                     PP_Length,
                     SeqLenPercentage,
                     MaxSPI,
-                    MaxSeq
+                    MaxSeq,
+                    purpose_id
                 FROM SLSolution
                 ORDER BY Seq, attempt
             """).fetchall()
@@ -479,28 +484,65 @@ class SourceData:
             attempt: str,
             tier: int,
             vessel_fk: int | None,
+            purpose_id: int | None,
     ) -> int:
         sail_line = (sail_line or "").strip()
         attempt = (attempt or "").strip()[:1].upper() or "X"
-
-        # TierLine (simple stable encoding)
-        tierline = int(tier) * 100000 + int(line)  # or your own encoding
+        tierline = int(tier) * 100000 + int(line)
 
         row = conn.execute(
-            "SELECT ID FROM SLSolution WHERE SailLine=?",
+            """
+            SELECT
+                ID,
+                COALESCE(Vessel_FK, 0)   AS Vessel_FK,
+                COALESCE(purpose_id, 0)  AS purpose_id,
+                COALESCE(File_FK, 0)     AS File_FK
+            FROM SLSolution
+            WHERE SailLine=?
+            """,
             (sail_line,),
         ).fetchone()
-        if row:
-            return int(row[0])
 
+        # ✅ if exists — update vessel_fk / purpose_id / file_fk (only if changed)
+        if row:
+            sl_id = int(row["ID"])
+            old_vessel = int(row["Vessel_FK"] or 0)
+            old_purpose = int(row["purpose_id"] or 0)
+            old_file = int(row["File_FK"] or 0)
+
+            updates = []
+            params = []
+
+            if vessel_fk is not None and int(vessel_fk) != old_vessel:
+                updates.append("Vessel_FK=?")
+                params.append(int(vessel_fk))
+
+            if purpose_id is not None and int(purpose_id) != old_purpose:
+                updates.append("purpose_id=?")
+                params.append(int(purpose_id))
+
+            if int(file_fk) != old_file:
+                updates.append("File_FK=?")
+                params.append(int(file_fk))
+
+            if updates:
+                params.append(sl_id)
+                conn.execute(
+                    f"UPDATE SLSolution SET {', '.join(updates)} WHERE ID=?",
+                    tuple(params),
+                )
+
+            return sl_id
+
+        # ✅ insert new
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO SLSolution
-            (PPLine_FK, File_FK, SailLine, Line, Seq, Attempt, Tier, TierLine, Vessel_FK)
-            VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?)
+            (PPLine_FK, File_FK, SailLine, Line, Seq, Attempt, Tier, TierLine, Vessel_FK, purpose_id)
+            VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (int(file_fk), sail_line, int(line), int(seq), attempt, int(tier), int(tierline), vessel_fk),
+            (int(file_fk), sail_line, int(line), int(seq), attempt, int(tier), int(tierline), vessel_fk, purpose_id),
         )
         return int(cur.lastrowid)
 
@@ -666,6 +708,7 @@ class SourceData:
             microsecond=microsecond or 0,
             year=year,
         )
+
     def load_shot_table_h26_stream_fast(self, file_obj, file_fk: int, chunk_size: int = 50000) -> int:
         """
         High-speed loader for H26 comma-delimited shot table with padded spaces.
@@ -816,6 +859,8 @@ class SourceData:
             default: int | None = None,
             year: int | None = None,
             batch_size: int = 50000,
+            detect_vessel_by_seq: bool = False,
+            auto_year_by_jday: bool = False,
     ) -> dict:
 
         file_name = uploaded_file.name
@@ -852,13 +897,44 @@ class SourceData:
             VALUES ({placeholders})
             """
 
+            # Cache SLSolution IDs by SailLine (string)
             sl_cache: dict[str, int] = {}
+
+            # Cache vessel id by seq (int) when detect mode is ON
+            vessel_by_seq_cache: dict[int, int | None] = {}
+
+            # Cache (vessel_id, purpose_id) by seq
+            assignment_by_seq_cache: dict[int, tuple[int | None, int | None]] = {}
+
+            def _lookup_assignment_by_seq_in_conn(seq_num: int) -> tuple[int | None, int | None]:
+                seq_num = int(seq_num)
+                if seq_num in assignment_by_seq_cache:
+                    return assignment_by_seq_cache[seq_num]
+
+                row = conn.execute(
+                    """
+                    SELECT vessel_id, purpose_id
+                    FROM sequence_vessel_assignment
+                    WHERE is_active = 1
+                      AND ? BETWEEN seq_first AND seq_last
+                    ORDER BY (seq_last - seq_first) ASC, id DESC
+                    LIMIT 1
+                    """,
+                    (seq_num,),
+                ).fetchone()
+
+                vessel_id = int(row[0]) if row and row[0] is not None else None
+                purpose_id = int(row[1]) if row and row[1] is not None else None
+
+                assignment_by_seq_cache[seq_num] = (vessel_id, purpose_id)
+                return vessel_id, purpose_id
 
             batch_tuples: list[tuple] = []
             total = 0
             skipped = 0
             lines_touched: set[int] = set()
-            pplines_touched: set[int] = set()
+
+            last_source_line: int | None = None
 
             for text_line in stream:
                 if not text_line:
@@ -879,28 +955,57 @@ class SourceData:
                     skipped += 1
                     continue
 
-                # get/create SLSolution.ID
+
+                if auto_year_by_jday:
+                    now = datetime.now(timezone.utc).astimezone()  # local tz OK
+                    today_year = now.year
+                    today_jday = int(now.strftime("%j"))
+
+                    try:
+                        pj = int(p.jday or 0)
+                    except Exception:
+                        pj = 0
+
+                    if pj > 0:
+                        p.year = (today_year - 1) if pj > today_jday else today_year
+                # Remember last decoded line for return payload
+                last_source_line = int(p.line)
+
+                # Resolve vessel FK:
+                # - if detect mode ON => lookup by p.seq (decoded from SailLine)
+                # - else => use passed vessel_fk
+                point_vessel_fk = vessel_fk
+                point_purpose_id = None
+
+                if detect_vessel_by_seq:
+                    if not p.seq:
+                        raise ValueError(f"SPS decode produced empty Seq for SailLine '{p.sail_line}'.")
+                    point_vessel_fk, point_purpose_id = _lookup_assignment_by_seq_in_conn(int(p.seq))
+                    if not point_vessel_fk:
+                        raise ValueError(f"No vessel assignment found for Seq {int(p.seq)} (SailLine '{p.sail_line}').")
+
+                # get/create SLSolution.ID (per SailLine)
                 sl_id = sl_cache.get(p.sail_line)
                 if sl_id is None:
                     sl_id = self._get_or_create_sl_solution_id(
                         conn,
                         file_fk=int(file_fk),
                         sail_line=p.sail_line,
-                        line=p.line,
-                        seq=p.seq,
+                        line=int(p.line),
+                        seq=int(p.seq or 0),
                         attempt=p.attempt,
-                        tier=p.tier,
-                        vessel_fk=vessel_fk,
+                        tier=int(p.tier),
+                        vessel_fk=point_vessel_fk,
+                        purpose_id=point_purpose_id,
                     )
                     sl_cache[p.sail_line] = sl_id
 
                 lines_touched.add(sl_id)
 
-
                 # fill FK/meta into point object
                 p.sail_line_fk = sl_id
                 p.ppline_fk = 0
-                p.vessel_fk = vessel_fk
+                p.vessel_fk = point_vessel_fk
                 p.file_fk = int(file_fk)
 
                 batch_tuples.append(p.to_db_tuple())
@@ -922,12 +1027,13 @@ class SourceData:
                 "points": int(total),
                 "skipped": int(skipped),
                 "lines": int(len(lines_touched)),
-                "source_line":int(p.line),
+                "source_line": int(last_source_line or 0),
             }
 
         except Exception:
             conn.rollback()
             raise
+
         finally:
             try:
                 if hasattr(stream, "detach"):
@@ -1501,3 +1607,62 @@ class SourceData:
             raise
         finally:
             conn.close()
+
+    def delete_sps_by_ids(self, ids):
+        """
+        Delete SPS rows from SLSolution by primary key IDs.
+        Ensures SQLite foreign key enforcement is ON for this connection.
+
+        Args:
+            ids: iterable of int/str IDs (SLSolution.ID)
+
+        Returns:
+            int: number of IDs requested for deletion (not necessarily rows deleted if some missing)
+        """
+        if not ids:
+            return 0
+
+        # normalize + dedupe (keep stable order)
+        seen = set()
+        clean_ids = []
+        for x in ids:
+            try:
+                xi = int(x)
+            except Exception:
+                continue
+            if xi not in seen:
+                seen.add(xi)
+                clean_ids.append(xi)
+
+        if not clean_ids:
+            return 0
+
+        placeholders = ",".join("?" for _ in clean_ids)
+        sql = f"DELETE FROM SLSolution WHERE ID IN ({placeholders})"
+
+        with self._connect() as conn:
+            # IMPORTANT: FK enforcement is per-connection in SQLite
+            conn.execute("PRAGMA foreign_keys = ON;")
+
+            # Do the delete inside one transaction
+            cur = conn.execute(sql, clean_ids)
+            conn.commit()
+
+            # sqlite rowcount is reliable for DELETE
+            return cur.rowcount
+
+    def get_source_vessel_id_by_seq(self, seq_num: int):
+        con = self._connect()
+        cur = con.cursor()
+        cur.execute("""
+            SELECT vessel_id
+            FROM sequence_vessel_assignment
+            WHERE is_active = 1
+              AND ? BETWEEN seq_first AND seq_last
+            ORDER BY (seq_last - seq_first) ASC, id DESC
+            LIMIT 1
+        """, (int(seq_num),))
+        row = cur.fetchone()
+        con.close()
+        return int(row[0]) if row else None
+

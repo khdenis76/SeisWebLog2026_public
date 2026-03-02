@@ -1,9 +1,11 @@
+import json
 from datetime import date
 
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect
 from django.core.exceptions import PermissionDenied
 from django.template.loader import render_to_string
+from django.views.decorators.csrf import csrf_protect
 
 from core.projectdb import ProjectDB   # <-- change to your real import
 from core.models import UserSettings,SPSRevision
@@ -26,6 +28,9 @@ def source_home(request):
 
     pdb = ProjectDB(project.db_path)
     sd = SourceData(project.db_path)
+    gun_qc = pdb.get_gun_qc()
+    min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
+    man_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
     shot_table_rows = sd.list_shot_table_summary()
     sps_table_rows =sd.list_sps_files_summary()
     st_summary = render_to_string("source/partials/shot_table_tbody.html",{"rows":shot_table_rows})
@@ -58,9 +63,10 @@ def source_home(request):
             "sps_revisions": sps_revisions,
             "st_summary": st_summary,
             "sps_summary": sps_summary,
+            "gun_qc":gun_qc,
+            'min_depth_limit':min_depth_limit,
+            'man_depth_limit':man_depth_limit,
         },)
-
-
 
 @login_required
 @require_POST
@@ -73,36 +79,40 @@ def source_upload_files(request):
         return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
 
     file_type = (request.POST.get("file_type") or "").strip().upper()
-    files = request.FILES.getlist("files")  # matches <input name="files" ... multiple>
+    files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"ok": False, "error": "No files selected."}, status=400)
 
     sd = SourceData(project.db_path)
     pdb = ProjectDB(project.db_path)
 
-
-    # =========================
-    # SPS metadata (from modal)
-    # =========================
+    # SPS metadata
     sps_revision = None
     tier = 1
     year = None
-    vessel_name = None  # we will resolve from source_vessel_id
+
+    # Detect vessel by Seq (from SPS content)
+    detect_by_seq = str(request.POST.get("detect_vessel_by_seq") or "").strip().lower() in ("1", "true", "on", "yes")
+    auto_year_by_jday = str(request.POST.get("auto_year_by_jday") or "").strip().lower() in ("1", "true", "on", "yes")
+    src_id = None  # selected vessel if detect mode OFF
 
     if file_type == "SPS":
-        # modal fields: source_vessel_id, sps_revision_id, tier, year
         source_vessel_id = (request.POST.get("source_vessel_id") or "").strip()
         sps_revision_id = (request.POST.get("sps_revision_id") or "").strip()
         tier_raw = (request.POST.get("tier") or "").strip()
         year_raw = (request.POST.get("year") or "").strip()
 
-        if not source_vessel_id:
+        # vessel required only if NOT detect
+        if (not detect_by_seq) and (not source_vessel_id):
             return JsonResponse({"ok": False, "error": "Missing Source Vessel."}, status=400)
         if not sps_revision_id:
             return JsonResponse({"ok": False, "error": "Missing SPS Revision."}, status=400)
         if not tier_raw:
             return JsonResponse({"ok": False, "error": "Missing TIER."}, status=400)
-        if not year_raw:
+        auto_year_by_jday = str(request.POST.get("auto_year_by_jday") or "").strip().lower() in (
+        "1", "true", "on", "yes")
+
+        if (not auto_year_by_jday) and (not year_raw):
             return JsonResponse({"ok": False, "error": "Missing Year."}, status=400)
 
         try:
@@ -117,32 +127,33 @@ def source_upload_files(request):
         if tier < 1 or tier > 10:
             return JsonResponse({"ok": False, "error": "TIER must be 1..10."}, status=400)
 
-        try:
-            year = int(year_raw)
-        except Exception:
-            return JsonResponse({"ok": False, "error": "Invalid Year."}, status=400)
 
-        # Resolve vessel_name from project_fleet (ProjectDB)
-        fleet = pdb.list_project_fleet()
-        vessel_row = None
-        try:
-            src_id = int(source_vessel_id)
-        except Exception:
-            return JsonResponse({"ok": False, "error": "Invalid Source Vessel id."}, status=400)
+        year = None
+        if not auto_year_by_jday:
+           try:
+              year = int(year_raw)
+           except Exception:
+              return JsonResponse({"ok": False, "error": "Invalid Year."}, status=400)
 
-        for v in fleet:
-            if int(v.get("id") or 0) == src_id:
-                vessel_row = v
-                break
 
-        if not vessel_row:
-            return JsonResponse({"ok": False, "error": "Source Vessel not found in project fleet."}, status=400)
+        # validate selected vessel ONLY if detect mode OFF
+        if not detect_by_seq:
+            fleet = pdb.list_project_fleet()
+            vessel_row = None
+            try:
+                src_id = int(source_vessel_id)
+            except Exception:
+                return JsonResponse({"ok": False, "error": "Invalid Source Vessel id."}, status=400)
 
-        vessel_name = (vessel_row.get("vessel_name") or "").strip() or None
+            for v in fleet:
+                if int(v.get("id") or 0) == src_id:
+                    vessel_row = v
+                    break
 
-    # =========================
+            if not vessel_row:
+                return JsonResponse({"ok": False, "error": "Source Vessel not found in project fleet."}, status=400)
+
     # Speed: drop indexes once for SHOT
-    # =========================
     dropped_shot = False
     if file_type == "SHOT":
         try:
@@ -152,11 +163,14 @@ def source_upload_files(request):
         except Exception:
             dropped_shot = False
 
+    shot_summary = None
+    sps_summary = None
+
     try:
-        total_inserted= 0
-        file_results =[]
+        total_inserted = 0
+        file_results = []
+
         for f in files:
-            # Files record (unique by FileName) – your function already handles duplicates now
             file_fk = sd.insert_file_record(file_name=f.name, file_type=file_type)
             if not file_fk:
                 return JsonResponse({"ok": False, "error": f"Failed to create Files record for {f.name}."}, status=500)
@@ -171,19 +185,23 @@ def source_upload_files(request):
                 file_results.append({"name": f.name, "file_fk": int(file_fk), "inserted": int(inserted)})
 
             elif file_type == "SPS":
-
-
+                # If detect_by_seq is ON => vessel_fk is resolved INSIDE loader from p.seq
+                # If detect_by_seq is OFF => we pass fixed src_id (one vessel for file)
+                print(f)
                 res = sd.load_source_sps_uploaded_file_fast(
-                    f,  # UploadedFile
+                    f,
                     sps_revision=sps_revision,
-                    vessel_fk=src_id,   # resolved from project_fleet
-                    tier=tier,
                     geometry=pdb.get_geometry(),
+                    vessel_fk=(None if detect_by_seq else src_id),
+                    tier=tier,
                     line_bearing=0.0,
                     default=year,
                     batch_size=50000,
+                    detect_vessel_by_seq=detect_by_seq,
+                    auto_year_by_jday=auto_year_by_jday,
+
                 )
-                # res should include points/skipped/lines/file_fk etc.
+
                 sd.update_slsolution_from_spsolution_timebased(file_fk=res["file_fk"])
                 sd.update_line_maxspi_maxseq(res["source_line"])
                 sd.update_slsolution_from_preplot_timebased(file_fk=res["file_fk"])
@@ -194,6 +212,22 @@ def source_upload_files(request):
             else:
                 return JsonResponse({"ok": False, "error": "Unsupported file type."}, status=400)
 
+        if file_type == "SHOT":
+            shot_table_rows = sd.list_shot_table_summary()
+            shot_summary = render_to_string(
+                "source/partials/shot_table_tbody.html",
+                {"rows": shot_table_rows},
+                request=request
+            )
+
+        elif file_type == "SPS":
+            sps_table_rows = sd.list_sps_files_summary()
+            sps_summary = render_to_string(
+                "source/partials/sps_table_tbody.html",
+                {"rows": sps_table_rows},
+                request=request
+            )
+
     finally:
         if dropped_shot:
             try:
@@ -201,9 +235,53 @@ def source_upload_files(request):
             except Exception:
                 pass
 
-    return JsonResponse({
+    out = {
         "ok": True,
         "file_type": file_type,
         "files": file_results,
         "rows_inserted": int(total_inserted),
-    })
+    }
+
+    if shot_summary is not None:
+        out["shot_summary"] = shot_summary
+    if sps_summary is not None:
+        out["sps_summary"] = sps_summary
+
+    return JsonResponse(out)
+
+@login_required
+@require_POST
+def sps_delete_selected(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        # No active project → go to project list
+        return redirect("projects")
+
+    if not project.can_edit(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    pdb = ProjectDB(project.db_path)
+    sd = SourceData(project.db_path)
+    try:
+        payload = json.loads(request.body or "{}")
+        payload = json.loads(request.body or "{}")
+        ids = payload.get("ids", [])
+        if not ids:
+            return JsonResponse({"ok": False, "error": "No rows selected"}, status=400)
+        # convert to int
+        try:
+            ids = [int(i) for i in ids]
+            del_count = sd.delete_sps_by_ids(ids)
+            rows = sd.list_sps_files_summary()
+            sps_summary = render_to_string("source/partials/sps_table_tbody.html",{"rows": rows})
+            return JsonResponse({"ok": True,"sps_summary": sps_summary})
+
+        except ValueError as e:
+            return JsonResponse({"ok": False, "error": f"Invalid IDs {e}"}, status=400)
+
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+

@@ -82,7 +82,13 @@
                     {% include "source/partials/sps_table.html" %}
                 </div>
             </div>
-
+                  <button type="button"
+                       id="sps-delete-button"
+                       class="btn btn-danger shadow"
+                       data-url="{% url 'sps_delete_selected' %}">
+                            <i class="fas fa-trash-can me-2"></i>DELETE SPS
+                  </button>
+            </div>
         </div>
 
         <!-- STATISTICS TAB -->

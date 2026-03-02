@@ -2,11 +2,14 @@ import {initSourceUploadModal} from "./initSourceUploadModal.js";
 import {initSourceUpload} from "./initSourceUpload.js";
 import {initColumnToggles} from "../../rov/js/initColumnToggles.js";
 import {initSpsTableSelection} from "./initSPSTableSelection.js";
+import {initSpsDelete} from "./initSPSDelete.js";
+
 
 export function initAllJSForSource() {
     initSourceUploadModal();
     initSourceUpload();
     initSpsTableSelection();
+    initSpsDelete();
     initColumnToggles(
     "source_toggle-left-rov-btn",
     "source_left-rov-col",

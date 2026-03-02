@@ -1,4 +1,5 @@
 import { getCSRFToken } from "../../baseproject/js/csrf.js"; // adjust path if needed
+
 export function initSourceUpload() {
   const modalEl   = document.getElementById("sourceUploadModal");
   const form      = document.getElementById("source-upload-form");
@@ -32,6 +33,20 @@ export function initSourceUpload() {
     return { isJson: false, data: null, text };
   }
 
+  function applyReturnedTableHtml(data) {
+    // SHOT table
+    if (data.shot_summary) {
+      const shotTbody = document.getElementById("shot-table-tbody");
+      if (shotTbody) shotTbody.innerHTML = data.shot_summary;
+    }
+
+    // SPS table
+    if (data.sps_summary) {
+      const spsTbody = document.getElementById("sps-table-tbody");
+      if (spsTbody) spsTbody.innerHTML = data.sps_summary;
+    }
+  }
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -41,14 +56,13 @@ export function initSourceUpload() {
 
     const originalBtnHtml = submitBtn.innerHTML;
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Working...';
-    console.log("POST URL:", form.action);
-    //console.log("Response status:", res.status, "Final URL:", res.url);
+
     try {
       const res = await fetch(form.action, {
         method: "POST",
         headers: { "X-CSRFToken": getCSRFToken() },
         body: formData,
-        credentials: "same-origin",   // IMPORTANT
+        credentials: "same-origin",
       });
 
       const parsed = await readResponse(res);
@@ -57,7 +71,6 @@ export function initSourceUpload() {
         if (parsed.isJson) {
           throw new Error(parsed.data?.error || `Request failed (${res.status})`);
         }
-        // HTML error/redirect page
         const snippet = (parsed.text || "").slice(0, 300).replace(/\s+/g, " ").trim();
         throw new Error(`Server returned HTML (${res.status}). ${snippet}`);
       }
@@ -73,6 +86,9 @@ export function initSourceUpload() {
         throw new Error(data.error || "Upload failed.");
       }
 
+      // Update table tbody immediately (SHOT or SPS) if server returned HTML
+      applyReturnedTableHtml(data);
+
       setAlert("success", "Inserted rows: " + (data.rows_inserted || 0));
 
       setTimeout(() => {
@@ -82,6 +98,7 @@ export function initSourceUpload() {
         form.reset();
         msgWrap.classList.add("d-none");
 
+        // Optional: keep your hook if you still want it for other UI updates
         if (typeof refreshSourceData === "function") {
           refreshSourceData(data);
         }

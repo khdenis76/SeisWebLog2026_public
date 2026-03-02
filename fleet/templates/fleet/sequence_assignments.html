@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h5 class="mb-0">Sequence → Vessel Association</h5>
+    <button class="btn btn-sm btn-success" id="btn-add">
+      <i class="fas fa-plus me-1"></i>Add
+    </button>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle" id="tbl-assign">
+      <thead class="table-dark">
+        <tr>
+          <th style="width:70px;">ID</th>
+          <th style="width:120px;">Seq First</th>
+          <th style="width:120px;">Seq Last</th>
+          <th>Vessel</th>
+          <th style="width:220px;">Purpose</th>
+          <th>Comments</th>
+          <th style="width:90px;">Active</th>
+          <th style="width:160px;" class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="assignModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h6 class="modal-title" id="modalTitle">Add Assignment</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="alert alert-danger d-none" id="modalErr"></div>
+
+        <input type="hidden" id="row-id">
+
+        <div class="row g-2">
+          <div class="col-md-3">
+            <label class="form-label">Seq First</label>
+            <input type="number" class="form-control form-control-sm" id="seq-first" min="1">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Seq Last</label>
+            <input type="number" class="form-control form-control-sm" id="seq-last" min="1">
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Vessel</label>
+            <select class="form-select form-select-sm" id="vessel-id"></select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Purpose</label>
+            <select class="form-select form-select-sm" id="purpose"></select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Comments</label>
+            <input type="text" class="form-control form-control-sm" id="comments" maxlength="500">
+          </div>
+
+          <div class="col-md-4">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" id="is-active" checked>
+              <label class="form-check-label" for="is-active">Active</label>
+            </div>
+          </div>
+
+          <div class="col-md-8">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" id="allow-overlap">
+              <label class="form-check-label" for="allow-overlap">
+                Allow overlap (not recommended)
+              </label>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-sm btn-primary" id="btn-save">
+          <i class="fas fa-save me-1"></i>Save
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  window.SEQ_API = {
+    list: "{% url 'fleet:api_seq_assign_list' %}",
+    add: "{% url 'fleet:api_seq_assign_add' %}",
+    update: "{% url 'fleet:api_seq_assign_update' %}",
+    del: "{% url 'fleet:api_seq_assign_delete' %}",
+    csrf: "{{ csrf_token }}",
+  };
+</script>
+{% endblock %}

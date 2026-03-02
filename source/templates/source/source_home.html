@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}SOURCE (SPS,SHOT TABLE ETC) — {{ project.name }}{% endblock %}
 {% block content %}
+
 <div class="container-fluid">
    <div class="card shadow-sm mb-3">
          <div class="card-header clearfix">
@@ -55,4 +56,6 @@
   </div>
 </div>
 {% include "source/modals/source_upload_modal.html" %}
+{% include "source/modals/delete_sps_modal.html" %}
+
 {% endblock %}
