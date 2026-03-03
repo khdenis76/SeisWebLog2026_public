@@ -28,5 +28,5 @@ env/
 Thumbs.db
 /tests/
 /ftpsync/ftp_sync_config.json
-*.json
+
 
