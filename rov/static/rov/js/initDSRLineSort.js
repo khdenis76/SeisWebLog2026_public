@@ -1,6 +1,9 @@
-// DSRLineSort.js
+// initDSRLineSort.js
 // Sorts rows inside tbody#dsr-line-table-body using <tr data-...> attributes.
-// Supported keys: line, daymax, preplot, deployment, retrieval, total
+// Supported keys: line, vessel, daymax, preplot, deployment, retrieval, total
+//
+// NOTE: For vessel sorting to work, your <tr> must have:
+//   data-vessel="{{ r.Vessel_name|default_if_none:'' }}"
 
 export function initDSRLineSort() {
   const tbody = document.getElementById("dsr-line-table-body");
@@ -28,8 +31,13 @@ export function initDSRLineSort() {
     return Number.isNaN(n) ? 0 : n;
   };
 
+  const str = (v) => (v === null || v === undefined ? "" : String(v)).trim();
+
   const getKey = (tr, key) => {
     if (key === "line") return num(tr.dataset.line);
+
+    // NEW: vessel sort (string)
+    if (key === "vessel") return str(tr.dataset.vessel).toLowerCase();
 
     if (key === "daymax") {
       // prefer LastDeployTime / Last activity; fallback to start
@@ -43,7 +51,7 @@ export function initDSRLineSort() {
 
     if (key === "preplot") return num(tr.dataset.preplotNodes);
 
-    // NEW: hours
+    // hours
     if (key === "deployment") return num(tr.dataset.deploymentHours);
     if (key === "retrieval") return num(tr.dataset.retrievalHours);
     if (key === "total") return num(tr.dataset.totalHours);
@@ -59,8 +67,20 @@ export function initDSRLineSort() {
       const ka = getKey(a, key);
       const kb = getKey(b, key);
 
-      if (ka < kb) return -1 * mult;
-      if (ka > kb) return 1 * mult;
+      // String sort (vessel)
+      if (typeof ka === "string" && typeof kb === "string") {
+        // Optional: push empty vessel to bottom
+        const aEmpty = ka === "";
+        const bEmpty = kb === "";
+        if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+
+        const c = ka.localeCompare(kb);
+        if (c !== 0) return c * mult;
+      } else {
+        // Numeric/date sort
+        if (ka < kb) return -1 * mult;
+        if (ka > kb) return 1 * mult;
+      }
 
       // stable tie-breakers:
       // 1) line asc

@@ -13,6 +13,7 @@
     data-deployment-hours="{{ r.DeploymentHours|default_if_none:0 }}"
     data-retrieval-hours="{{ r.RetrievalHours|default_if_none:0 }}"
     data-total-hours="{{ r.TotalOperationHours|default_if_none:0 }}"
+    data-vessel ="{{ r.Vessel_name }}"
 >
     <!-- Line recovered 1 or not 0    data-completely-recovered="1"
          Survey manager loaded 1 or not 0 data-sm-loaded="1"
@@ -29,7 +30,7 @@
     <input type="checkbox" class="dsr-line-checkbox" value="{{ r.Line }}">
   </td>
 
-  <td class="sticky-col sticky-col-2">
+  <td class="sticky-col sticky-col-2 ship ship-{{ r.ID }}" title="Deployed by: {{ r.Vessel_name }} ROVs=({{ r.rov1_name }},{{ r.rov2_name }})">
       <i class="dsr-line-click text-success fas fa-square-check me-1{% if r.isLineClicked != 1 %} d-none{% endif %}"></i>
       {{ r.Line }}
       {% if r.Stations < r.PlannedPoints %}

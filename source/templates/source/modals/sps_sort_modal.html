@@ -1,10 +1,139 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="modal fade" id="spsSortModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-sort me-2"></i>SPS Sort</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="alert alert-secondary py-2 mb-3">
+          <div class="small">
+            Choose sort priority (1 = main). You can sort up to 4 levels.
+          </div>
+          <div class="small">
+            <b>Attempt order</b> in ASC: <code>R</code> → <code>L</code> → others.
+          </div>
+        </div>
+
+        <div class="row g-2 align-items-end mb-2">
+          <div class="col-12 col-md-2"><label class="form-label mb-0">Priority</label></div>
+          <div class="col-12 col-md-7"><label class="form-label mb-0">Field</label></div>
+          <div class="col-12 col-md-3"><label class="form-label mb-0">Direction</label></div>
+        </div>
+
+        <!-- Priority 1 -->
+        <div class="row g-2 align-items-center mb-2">
+          <div class="col-12 col-md-2"><span class="badge bg-primary">1</span></div>
+          <div class="col-12 col-md-7">
+            <select class="form-select" id="spss-key-1">
+              <option value="">(none)</option>
+              <option value="sailline">SailLine</option>
+              <option value="line">Line</option>
+              <option value="seq">Seq</option>
+              <option value="attempt">Attempt</option>
+              <option value="vesselName">Vessel Name</option>
+              <option value="purpose">Purpose</option>
+              <option value="maxspi">MAX SPI</option>
+              <option value="wd">WaterDepth QC (Ok/Error)</option>
+              <option value="gd">GunDepth QC (Ok/Error)</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <select class="form-select" id="spss-dir-1">
+              <option value="asc">ASC</option>
+              <option value="desc">DESC</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Priority 2 -->
+        <div class="row g-2 align-items-center mb-2">
+          <div class="col-12 col-md-2"><span class="badge bg-secondary">2</span></div>
+          <div class="col-12 col-md-7">
+            <select class="form-select" id="spss-key-2">
+              <option value="">(none)</option>
+              <option value="sailline">SailLine</option>
+              <option value="line">Line</option>
+              <option value="seq">Seq</option>
+              <option value="attempt">Attempt</option>
+              <option value="vesselName">Vessel Name</option>
+              <option value="purpose">Purpose</option>
+              <option value="maxspi">MAX SPI</option>
+              <option value="wd">WaterDepth QC (Ok/Error)</option>
+              <option value="gd">GunDepth QC (Ok/Error)</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <select class="form-select" id="spss-dir-2">
+              <option value="asc">ASC</option>
+              <option value="desc">DESC</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Priority 3 -->
+        <div class="row g-2 align-items-center mb-2">
+          <div class="col-12 col-md-2"><span class="badge bg-secondary">3</span></div>
+          <div class="col-12 col-md-7">
+            <select class="form-select" id="spss-key-3">
+              <option value="">(none)</option>
+              <option value="sailline">SailLine</option>
+              <option value="line">Line</option>
+              <option value="seq">Seq</option>
+              <option value="attempt">Attempt</option>
+              <option value="vesselName">Vessel Name</option>
+              <option value="purpose">Purpose</option>
+              <option value="maxspi">MAX SPI</option>
+              <option value="wd">WaterDepth QC (Ok/Error)</option>
+              <option value="gd">GunDepth QC (Ok/Error)</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <select class="form-select" id="spss-dir-3">
+              <option value="asc">ASC</option>
+              <option value="desc">DESC</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Priority 4 -->
+        <div class="row g-2 align-items-center mb-2">
+          <div class="col-12 col-md-2"><span class="badge bg-secondary">4</span></div>
+          <div class="col-12 col-md-7">
+            <select class="form-select" id="spss-key-4">
+              <option value="">(none)</option>
+              <option value="sailline">SailLine</option>
+              <option value="line">Line</option>
+              <option value="seq">Seq</option>
+              <option value="attempt">Attempt</option>
+              <option value="vesselName">Vessel Name</option>
+              <option value="purpose">Purpose</option>
+              <option value="maxspi">MAX SPI</option>
+              <option value="wd">WaterDepth QC (Ok/Error)</option>
+              <option value="gd">GunDepth QC (Ok/Error)</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <select class="form-select" id="spss-dir-4">
+              <option value="asc">ASC</option>
+              <option value="desc">DESC</option>
+            </select>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="spss-reset">
+          <i class="fas fa-rotate-left me-1"></i> Reset
+        </button>
+
+        <button type="button" class="btn btn-primary" id="spss-apply" data-bs-dismiss="modal">
+          <i class="fas fa-check me-1"></i> Apply Sort
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

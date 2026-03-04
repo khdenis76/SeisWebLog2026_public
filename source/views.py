@@ -30,11 +30,16 @@ def source_home(request):
     sd = SourceData(project.db_path)
     gun_qc = pdb.get_gun_qc()
     min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
-    man_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
+    max_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
     shot_table_rows = sd.list_shot_table_summary()
     sps_table_rows =sd.list_sps_files_summary()
     st_summary = render_to_string("source/partials/shot_table_tbody.html",{"rows":shot_table_rows})
-    sps_summary = render_to_string("source/partials/sps_table_tbody.html",{"rows":sps_table_rows})
+    sps_summary = render_to_string("source/partials/sps_table_tbody.html",
+                                   {"rows":sps_table_rows,
+                                    "min_depth_limit":min_depth_limit,
+                                    "max_depth_limit":max_depth_limit,
+                                    "gun_qc":gun_qc,
+                                    })
 
 
     # Project fleet (project-specific)
@@ -64,10 +69,8 @@ def source_home(request):
             "st_summary": st_summary,
             "sps_summary": sps_summary,
             "gun_qc":gun_qc,
-            'min_depth_limit':min_depth_limit,
-            'man_depth_limit':man_depth_limit,
-        },)
 
+        },)
 @login_required
 @require_POST
 def source_upload_files(request):
@@ -109,9 +112,8 @@ def source_upload_files(request):
             return JsonResponse({"ok": False, "error": "Missing SPS Revision."}, status=400)
         if not tier_raw:
             return JsonResponse({"ok": False, "error": "Missing TIER."}, status=400)
-        auto_year_by_jday = str(request.POST.get("auto_year_by_jday") or "").strip().lower() in (
-        "1", "true", "on", "yes")
 
+        auto_year_by_jday = str(request.POST.get("auto_year_by_jday") or "").strip().lower() in ("1", "true", "on", "yes")
         if (not auto_year_by_jday) and (not year_raw):
             return JsonResponse({"ok": False, "error": "Missing Year."}, status=400)
 
@@ -127,14 +129,12 @@ def source_upload_files(request):
         if tier < 1 or tier > 10:
             return JsonResponse({"ok": False, "error": "TIER must be 1..10."}, status=400)
 
-
         year = None
         if not auto_year_by_jday:
-           try:
-              year = int(year_raw)
-           except Exception:
-              return JsonResponse({"ok": False, "error": "Invalid Year."}, status=400)
-
+            try:
+                year = int(year_raw)
+            except Exception:
+                return JsonResponse({"ok": False, "error": "Invalid Year."}, status=400)
 
         # validate selected vessel ONLY if detect mode OFF
         if not detect_by_seq:
@@ -163,8 +163,9 @@ def source_upload_files(request):
         except Exception:
             dropped_shot = False
 
-    shot_summary = None
+    shot_summary = None  # kept for compatibility, but SPS will not set it
     sps_summary = None
+    sps_extras = None
 
     try:
         total_inserted = 0
@@ -185,8 +186,6 @@ def source_upload_files(request):
                 file_results.append({"name": f.name, "file_fk": int(file_fk), "inserted": int(inserted)})
 
             elif file_type == "SPS":
-                # If detect_by_seq is ON => vessel_fk is resolved INSIDE loader from p.seq
-                # If detect_by_seq is OFF => we pass fixed src_id (one vessel for file)
                 print(f)
                 res = sd.load_source_sps_uploaded_file_fast(
                     f,
@@ -199,7 +198,6 @@ def source_upload_files(request):
                     batch_size=50000,
                     detect_vessel_by_seq=detect_by_seq,
                     auto_year_by_jday=auto_year_by_jday,
-
                 )
 
                 sd.update_slsolution_from_spsolution_timebased(file_fk=res["file_fk"])
@@ -212,6 +210,7 @@ def source_upload_files(request):
             else:
                 return JsonResponse({"ok": False, "error": "Unsupported file type."}, status=400)
 
+        # ---- Render partials for frontend refresh ----
         if file_type == "SHOT":
             shot_table_rows = sd.list_shot_table_summary()
             shot_summary = render_to_string(
@@ -221,12 +220,36 @@ def source_upload_files(request):
             )
 
         elif file_type == "SPS":
+            # Gun QC limits
+            gun_qc = pdb.get_gun_qc()
+            min_depth_limit = None
+            max_depth_limit = None
+
+            if gun_qc and getattr(gun_qc, "depth", None) is not None and getattr(gun_qc, "depth_tolerance", None) is not None:
+                min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
+                max_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
+
             sps_table_rows = sd.list_sps_files_summary()
             sps_summary = render_to_string(
                 "source/partials/sps_table_tbody.html",
-                {"rows": sps_table_rows},
+                {
+                    "rows": sps_table_rows,
+                    "gun_qc": gun_qc,
+                    "min_depth_limit": min_depth_limit,
+                    "max_depth_limit": max_depth_limit,
+                },
                 request=request
             )
+
+            # Extras for JS / frontend
+            sps_extras = {
+                "gun_qc": {
+                    "depth": getattr(gun_qc, "depth", None) if gun_qc else None,
+                    "depth_tolerance": getattr(gun_qc, "depth_tolerance", None) if gun_qc else None,
+                },
+                "min_depth_limit": min_depth_limit,
+                "max_depth_limit": max_depth_limit,
+            }
 
     finally:
         if dropped_shot:
@@ -246,6 +269,10 @@ def source_upload_files(request):
         out["shot_summary"] = shot_summary
     if sps_summary is not None:
         out["sps_summary"] = sps_summary
+
+    # Add SPS extras only for SPS
+    if file_type == "SPS" and sps_extras:
+        out.update(sps_extras)
 
     return JsonResponse(out)
 

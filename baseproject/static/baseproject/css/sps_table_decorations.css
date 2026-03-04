@@ -1,0 +1,55 @@
+/* Base style for all sequence kinds */
+[class^="seq-kind-"]::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900; /* solid */
+    margin-right: 6px;
+    display: inline-block;
+}
+
+/* 1 */
+.seq-kind-1::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    content: "\f85e";
+    margin-right: 6px;
+}
+
+/* 2 */
+.seq-kind-2::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    content: "\f70c";
+    color: #20c997;   /* teal */
+}
+
+/* 3 */
+.seq-kind-3::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    content: "\f575";
+    color: #ffc107;   /* yellow */
+}
+
+/* 4 */
+.seq-kind-4::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    content: "\f576";
+    color: #fd7e14;   /* orange */
+}
+
+/* 5 */
+.seq-kind-5::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    content: "\e4f3";
+    color: #dc3545;   /* red */
+}
+
+/* 6 */
+.seq-kind-6::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    content: "\e597";
+    color: #6f42c1;   /* purple */
+}

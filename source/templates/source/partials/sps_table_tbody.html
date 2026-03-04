@@ -1,13 +1,18 @@
   {% if rows and rows|length > 0 %}
       {% for r in rows %}
       <tr id="sps-row-{{ r.PPLine_FK }}-{{ r.Seq }}-{{ r.Attempt }}"
-          data-ppline="{{ r.PPLine_FK }}"
-          data-id="{{ r.ID }}"
-          data-seq="{{ r.Seq }}"
-          data-vessel="{{ r.vessel_id }}"
-          data-sailline="{{ r.SailLine }}"
-          data-sailline="{{ r.Line }}"
-          data-attempt="{{ r.Attempt }}"
+           data-ppline="{{ r.PPLine_FK }}"
+           data-id="{{ r.ID }}"
+           data-seq="{{ r.Seq }}"
+           data-vessel="{{ r.Vessel_FK }}"
+           data-vessel-name="{{ r.VesselName }}"
+           data-sailline="{{ r.SailLine }}"
+           data-line="{{ r.Line }}"
+           data-attempt="{{ r.Attempt }}"
+           data-purpose="{{ r.purpose }}"
+           data-maxspi ="{{ r.MaxSPI }}"
+           {% if r.MinProdWaterDepth > 0 %}data-wd="Ok"{% else %}data-wd="Error"{% endif %}
+           {% if min_depth_limit <= r.MinProdGunDepth <= max_depth_limit %}data-gd="Ok"{% else %}data-gd="Error"{% endif %}
       >
 
         <td class="sticky-col-0">
@@ -19,25 +24,19 @@
 
         <td class="sticky-col-1">{{ r.SailLine }}</td>
         <td class="sticky-col-2">{{ r.Line }}</td>
-        <td class="sticky-col-3 num level-{{ r.purpose_id }}">{{ r.Seq|stringformat:"04d" }}</td>
+        <td class="sticky-col-3 num seq-kind-{{ r.purpose_id }}"title ="{{ r.purpose }}">{{ r.Seq|stringformat:"04d" }}</td>
 
         <td class="num{% if r.Attempt == 1 %} text-primary
                       {% elif r.Attempt == "R" %} text-danger
                       {% elif r.Attempt == "T" %} text-warning {% endif %}
         ">{{ r.Attempt }}</td>
         <td class="num">{{ r.FSP }}</td>
+        <td class="num fw-bold text-danger">{{ r.FGSP }}</td>
+        <td class="num fw-bold text-danger">{{ r.LGSP }}</td>
         <td class="num">{{ r.LSP }}</td>
-        <td class="num">{{ r.FGSP }}</td>
-        <td class="num">{{ r.LGSP }}</td>
-        <td class="num">{{ r.StartX }}</td>
-        <td class="num">{{ r.StartY }}</td>
-        <td class="num">{{ r.EndX }}</td>
-        <td class="num">{{ r.EndY }}</td>
-        <td>{{ r.Start_Time }}</td>
-        <td>{{ r.End_Time }}</td>
-        <td class="num">{{ r.LineLength }}</td>
-        <td>{{ r.Start_Production_Time }}</td>
-        <td>{{ r.End_Production_Time }}</td>
+
+        <td class="num">{{ r.LineLength|floatformat:1 }}</td>
+        <td class="num">{{ r.PP_Length|floatformat:1 }}</td>
         <td class="num">{{ r.PercentOfLineCompleted }}</td>
         <td class="num">{{ r.PercentOfSeqCompleted }}</td>
         <td class="num text-success fw-bold">{{ r.ProductionCount }}</td>
@@ -48,24 +47,52 @@
             {{ r.KillCount }}
           {% endif %}
         </td>
-        {% if r.MinProdGunDepth < min_depth_limit %}
-              <td class="num text-primary fw-bold">
-                  <i class="fas text-danger fa-triangle-exclamation me-1"></i>
-                  <i class="fas text-primary fa-arrow-down me-1"></i>
-                     {{ r.MinProdGunDepth }}</td>
-        {% elif r.MinProdGunDepth > gun_qc.depth %}
-              <td class="num text-primary"> {{ r.MinProdGunDepth }}</td>
-        {% elif r.MinProdGunDepth < gun_qc.depth %}
-           <td class="num text-warning"> {{ r.MinProdGunDepth }}</td>
-        {% elif r.MinProdGunDepth > max_depth_limit %}
-            <td class="num text-danger"> {{ r.MinProdGunDepth }}</td>
+          {% if min_depth_limit is not None and max_depth_limit is not None and r.MinProdGunDepth is not None %}
+  {% if min_depth_limit <= r.MinProdGunDepth and r.MinProdGunDepth <= max_depth_limit %}
+    <td class="num fw-bold">
+      <i class="text-success fas fa-check me-1"></i> {{ r.MinProdGunDepth }}
+    </td>
+  {% else %}
+    <td class="num fw-bold text-danger">
+      <i class="text-danger fas fa-triangle-exclamation me-1"></i> {{ r.MinProdGunDepth }}
+    </td>
+  {% endif %}
+{% else %}
+  <td class="num text-muted">—</td>
+{% endif %}
+
+{% if min_depth_limit is not None and max_depth_limit is not None and r.MaxProdGunDepth is not None %}
+  {% if min_depth_limit <= r.MaxProdGunDepth and r.MaxProdGunDepth <= max_depth_limit %}
+    <td class="num fw-bold">
+      <i class="text-success fas fa-check me-1"></i> {{ r.MaxProdGunDepth }}
+    </td>
+  {% else %}
+    <td class="num fw-bold text-danger">
+      <i class="text-danger fas fa-triangle-exclamation me-1"></i> {{ r.MaxProdGunDepth }}
+    </td>
+  {% endif %}
+{% else %}
+  <td class="num text-muted">—</td>
+{% endif %}
+        {% if r.MinProdWaterDepth > 0 %}
+            <td class="num text-primary text-nowrap"><i class="text-success fas fa-check me-1"></i>{{ r.MinProdWaterDepth }}</td>
+        {% else %}
+            <td class="num text-danger text-nowrap"><i class="fas fa-triangle-exclamation me-1"></i>{{ r.MinProdWaterDepth }}</td>
         {% endif %}
-        <td class="num">{{ r.MaxProdGunDepth }}</td>
-        <td class="num">{{ r.MinProdWaterDepth }}</td>
         <td class="num">{{ r.MaxProdWaterDepth }}</td>
-        <td class="num">{{ r.PP_Length }}</td>
-        <td class="num">{{ r.SeqLenPercentage }}</td>
-        <td class="num">{{ r.MaxSPI }}</td>
+
+        <td class="num">{{ r.SeqLenPercentage|floatformat:1 }}</td>
+        <td class="num">{{ r.MaxSPI|floatformat:1 }}</td>
+        <td class="num">{{ r.StartX|floatformat:1 }}</td>
+        <td class="num">{{ r.StartY|floatformat:1 }}</td>
+        <td class="num">{{ r.EndX|floatformat:1 }}</td>
+        <td class="num">{{ r.EndY|floatformat:1 }}</td>
+        <td class="date text-nowrap fw-bold text-primary">{{ r.Start_Time }}</td>
+        <td class="date text-nowrap fw-bold text-primary">{{ r.End_Time }}</td>
+        <td class="date text-nowrap fw-bold text-danger">{{ r.End_Production_Time }}</td>
+        <td class="date text-nowrap fw-bold text-danger">{{ r.Start_Production_Time }}</td>
+
+
       </tr>
       {% endfor %}
   {% else %}

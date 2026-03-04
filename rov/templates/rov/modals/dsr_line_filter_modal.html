@@ -1,3 +1,4 @@
+<!-- dsr_line_filter_modal.html -->
 <div class="modal fade" id="dsrFilterModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
@@ -16,7 +17,7 @@
           </div>
 
           <small class="opacity-75 d-block mt-1">
-            Combine status + day + time + line range (all filters work together).
+            Combine status + day + time + line range + vessel (all filters work together).
           </small>
         </div>
 
@@ -186,6 +187,27 @@
                 <div class="form-text">Select from list or type manually</div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Section: Vessel -->
+        <div class="dsr-section">
+          <div class="dsr-section-head">
+            <span class="dsr-badge">
+              <span class="dsr-dot"
+                    style="background:linear-gradient(135deg,#198754,#20c997);
+                           box-shadow:0 0 0 4px rgba(25,135,84,.18);"></span>
+              Vessel
+            </span>
+            <span class="text-muted small">optional</span>
+          </div>
+
+          <div class="dsr-section-body">
+            <label class="form-label fw-semibold">Select Vessel</label>
+            <select class="form-select" id="dsrFilterVessel">
+              <option value="">— any vessel —</option>
+            </select>
+            <div class="form-text">Matches <code>data-vessel</code></div>
           </div>
         </div>
 

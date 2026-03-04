@@ -28,4 +28,9 @@ urlpatterns = [
     path("dsr/line_qc_plot",load_min_max_line_qc,name="load_min_max_line_qc"),
     path("bbox/plot/item/", bbox_plot_item, name="bbox_plot_item"),
     path("project/rov/dsr/line/qc/plot-item/", dsr_line_qc_plot_item, name="dsr_line_qc_plot_item"),
+    path("bbox/config/delete/<int:config_id>/", bbox_config_delete, name="bbox_config_delete"),
+    path("bbox/config/export-all-json/", bbox_config_export_all_json, name="bbox_config_export_all_json"),
+    path("bbox/config/import-json/", bbox_config_import_json, name="bbox_config_import_json"),
+    #path("bbox/config/export-file/", bbox_config_export_to_file, name="bbox_config_export_file"),
+    path("bbox/config/import-file/", bbox_config_import_from_file, name="bbox_config_import_file"),
 ]

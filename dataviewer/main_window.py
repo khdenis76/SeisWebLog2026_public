@@ -312,9 +312,13 @@ class MainWindow(QtWidgets.QMainWindow):
             depth_df, st_col = self._make_station_depth_df(self.dsr_line_df)
             # BlackBox subset in Date1 window for this line
             try:
+                self.bb_configs = pdb.get_blackbox_configs_by_dsr_line(line)
                 self.bb_line_df = pdb.read_blackbox_for_line_by_date1_window(line)
+                cfg_id = self.bb_configs[0][0]  # first row, first column (ID)
+                self.bb_line_df = self.bb_line_df[self.bb_line_df["config_id"] == cfg_id]
 
-            except Exception:
+            except Exception as e:
+                print(e)
                 self.bb_line_df = None
 
             # plot tracks on map (vessel / rov ins / usbl)
@@ -682,14 +686,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def plot_blackbox_tracks(self, bb_df):
         if not hasattr(self, "bb_layers"):
             self.bb_layers = {}
-
+        vessel_name = bb_df['vessel_name'].iloc[0]
+        rov1_name = bb_df['rov1_name'].iloc[0]
+        rov2_name = bb_df['rov2_name'].iloc[0]
         # Vessel
         self._add_bb_track(
             bb_df,
             x_col="VesselEasting",
             y_col="VesselNorthing",
             layer_key="bb_vessel",
-            label="Vessel",
+            label= vessel_name, #vessel name
             point_color="yellow",
             line_color="yellow",
             point_size=4,
@@ -702,7 +708,7 @@ class MainWindow(QtWidgets.QMainWindow):
             x_col="ROV1_INS_Easting",
             y_col="ROV1_INS_Northing",
             layer_key="bb_rov1_ins",
-            label="ROV1 INS",
+            label=f"{rov1_name} INS",
             point_color="cyan",
             line_color="cyan",
             point_size=4,
@@ -715,7 +721,7 @@ class MainWindow(QtWidgets.QMainWindow):
             x_col="ROV2_INS_Easting",
             y_col="ROV2_INS_Northing",
             layer_key="bb_rov2_ins",
-            label="ROV2 INS",
+            label=f"{rov2_name} INS",
             point_color="magenta",
             line_color="magenta",
             point_size=4,
@@ -728,7 +734,7 @@ class MainWindow(QtWidgets.QMainWindow):
             x_col="ROV1_USBL_Easting",
             y_col="ROV1_USBL_Northing",
             layer_key="bb_rov1_usbl",
-            label="ROV1 USBL",
+            label=f"{rov1_name} USBL",
             point_color="lime",
             line_color="lime",
             point_size=4,
@@ -741,7 +747,7 @@ class MainWindow(QtWidgets.QMainWindow):
             x_col="ROV2_USBL_Easting",
             y_col="ROV2_USBL_Northing",
             layer_key="bb_rov2_usbl",
-            label="ROV2 USBL",
+            label=f"{rov1_name} USBL",
             point_color="orange",
             line_color="orange",
             point_size=4,

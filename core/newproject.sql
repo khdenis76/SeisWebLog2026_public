@@ -1195,13 +1195,13 @@ dsr_by_line AS (
         SUM(CASE WHEN d.Solution_FK = 6 THEN 1 ELSE 0 END) AS Overlap,
 
         -- Delta statistics
-        AVG(d.DeltaEprimarytosecondary) AS AvgDeltaE,
-        MIN(d.DeltaEprimarytosecondary) AS MinDeltaE,
-        MAX(d.DeltaEprimarytosecondary) AS MaxDeltaE,
+        AVG(d.DeltaEprimarytosecondary)  AS AvgDeltaE,
+        MIN(d.DeltaEprimarytosecondary)  AS MinDeltaE,
+        MAX(d.DeltaEprimarytosecondary)  AS MaxDeltaE,
 
-        AVG(d.DeltaNprimarytosecondary) AS AvgDeltaN,
-        MIN(d.DeltaNprimarytosecondary) AS MinDeltaN,
-        MAX(d.DeltaNprimarytosecondary) AS MaxDeltaN,
+        AVG(d.DeltaNprimarytosecondary)  AS AvgDeltaN,
+        MIN(d.DeltaNprimarytosecondary)  AS MinDeltaN,
+        MAX(d.DeltaNprimarytosecondary)  AS MaxDeltaN,
 
         AVG(d.DeltaEprimarytosecondary1) AS AvgDeltaE1,
         MIN(d.DeltaEprimarytosecondary1) AS MinDeltaE1,
@@ -1228,26 +1228,41 @@ dsr_by_line AS (
         MIN(d.Sigma3) AS MinSigma3,
         MAX(d.Sigma3) AS MaxSigma3,
 
-        -- NEW: Radial Offset (RangeToPreplot) statistics
+        -- Radial Offset (RangeToPreplot) statistics
         AVG(d.RangetoPrePlot) AS AvgRadOffset,
         MIN(d.RangetoPrePlot) AS MinRadOffset,
         MAX(d.RangetoPrePlot) AS MaxRadOffset,
 
-        -- NEW: Range Primary to Secondary statistics
+        -- Range Primary to Secondary statistics
         AVG(d.Rangeprimarytosecondary) AS AvgRangePrimToSec,
         MIN(d.Rangeprimarytosecondary) AS MinRangePrimToSec,
         MAX(d.Rangeprimarytosecondary) AS MaxRangePrimToSec,
 
-        AVG(d.PrimaryElevation) AS AvgPrimaryElevation,
-        MIN(d.PrimaryElevation) AS MinPrimaryElevation,
-        MAX(d.PrimaryElevation) AS MaxPrimaryElevation,
+        -- Elevation stats
+        AVG(d.PrimaryElevation)   AS AvgPrimaryElevation,
+        MIN(d.PrimaryElevation)   AS MinPrimaryElevation,
+        MAX(d.PrimaryElevation)   AS MaxPrimaryElevation,
 
-		AVG(d.SecondaryElevation) AS AvgPrimaryElevation,
-        MIN(d.SecondaryElevation) AS MinPrimaryElevation,
-        MAX(d.SecondaryElevation) AS MaxPrimaryElevation
+        AVG(d.SecondaryElevation) AS AvgSecondaryElevation,
+        MIN(d.SecondaryElevation) AS MinSecondaryElevation,
+        MAX(d.SecondaryElevation) AS MaxSecondaryElevation
+
     FROM DSR d
     LEFT JOIN RLPreplot rl
       ON rl.Line = d.Line
+    GROUP BY d.Line
+),
+
+-- ✅ NEW: exactly one config per line (deterministic pick)
+config_per_line AS (
+    SELECT
+        d.Line,
+        MIN(bcl.ID) AS ConfigID
+    FROM DSR d
+    JOIN BBox_Configs_List bcl
+      ON TRIM(d.ROV) = bcl.rov1_name
+      OR TRIM(d.ROV) = bcl.rov2_name
+    WHERE d.ROV IS NOT NULL AND TRIM(d.ROV) <> ''
     GROUP BY d.Line
 )
 
@@ -1310,11 +1325,18 @@ SELECT
 
     -- NEW outputs
     s.AvgRadOffset, s.MinRadOffset, s.MaxRadOffset,
-    s.AvgRangePrimToSec, s.MinRangePrimToSec, s.MaxRangePrimToSec
+    s.AvgRangePrimToSec, s.MinRangePrimToSec, s.MaxRangePrimToSec,
+
+    -- ✅ Config fields (one config per line)
+    bcl.*
 
 FROM dsr_by_line s
 LEFT JOIN rec_by_line r
-  ON r.Line = s.Line;
+  ON r.Line = s.Line
+LEFT JOIN config_per_line cpl
+  ON cpl.Line = s.Line
+LEFT JOIN BBox_Configs_List bcl
+  ON bcl.ID = cpl.ConfigID;
 DROP VIEW IF EXISTS DEPLOY_ROV_Summary;
 CREATE VIEW IF NOT EXISTS DEPLOY_ROV_Summary AS
 WITH base AS (

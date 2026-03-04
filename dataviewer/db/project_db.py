@@ -127,6 +127,96 @@ class ProjectDb:
             df = pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY ID", conn)
 
         return df
+
+    def get_blackbox_configs_by_dsr_line(self, line, rov_column="ROV"):
+        """
+        1) Get distinct DSR.<rov_column> values for given Line
+        2) Return DISTINCT * from BBox_Configs_List
+           where rov1_name or rov2_name matches those ROVs
+        """
+
+        if not line:
+            return []
+
+        line = str(line).strip()
+        if not line:
+            return []
+
+        # basic safety check for column name (prevent SQL injection)
+        if not rov_column.isidentifier():
+            raise ValueError("Invalid column name")
+
+        with self._connect() as conn:
+            cur = conn.cursor()
+
+            # 1️⃣ Get distinct ROV list from DSR
+            sql_rov = f"""
+                SELECT DISTINCT TRIM({rov_column}) AS ROV
+                FROM DSR
+                WHERE Line = ?
+                  AND {rov_column} IS NOT NULL
+                  AND TRIM({rov_column}) <> ''
+            """
+
+            cur.execute(sql_rov, (line,))
+            rov_list = [r[0] for r in cur.fetchall() if r and r[0]]
+
+            if not rov_list:
+                return []
+
+            # 2️⃣ Query BBox_Configs_List by those ROVs
+            placeholders = ",".join(["?"] * len(rov_list))
+
+            sql_bbox = f"""
+                SELECT DISTINCT *
+                FROM BBox_Configs_List
+                WHERE rov1_name IN ({placeholders})
+                   OR rov2_name IN ({placeholders})
+                ORDER BY Name
+            """
+
+            params = rov_list + rov_list
+            cur.execute(sql_bbox, params)
+            rows = cur.fetchall()
+
+        return rows
+    def get_blackbox_configs_by_rovs(self, rov_list):
+        """
+        Returns list of unique BBox_Configs_List.Name
+        where any ROV in rov_list matches rov1_name or rov2_name
+        """
+
+        if not rov_list:
+            return []
+
+        # normalize input (remove None / empty / trim)
+        rov_list = [
+            str(r).strip()
+            for r in rov_list
+            if r and str(r).strip()
+        ]
+
+        if not rov_list:
+            return []
+
+        # create placeholders (?, ?, ?)
+        placeholders = ",".join(["?"] * len(rov_list))
+
+        sql = f"""
+            SELECT DISTINCT *
+            FROM BBox_Configs_List
+            WHERE rov1_name IN ({placeholders})
+               OR rov2_name IN ({placeholders})
+            ORDER BY Name
+        """
+
+        params = rov_list + rov_list  # for rov1 and rov2
+
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return rows
     def load_bbox_data(
         self,
         # selection
@@ -359,11 +449,28 @@ class ProjectDb:
 
             df = pd.read_sql_query(
                 """
-                SELECT *
-                FROM BlackBox
-                WHERE datetime(TimeStamp) >= datetime(?)
-                  AND datetime(TimeStamp) <= datetime(?)
-                ORDER BY datetime(TimeStamp)
+                SELECT
+                        bb.*,                        -- All BlackBox columns (includes bb.ID)
+                        bf.ID        AS file_id,
+                        bf.Config_FK AS file_config_fk,
+                        bf.FileName  AS file_name,
+                        bcl.ID       AS config_id,
+                        bcl.Name     AS config_name,
+                        bcl.Vessel_name as vessel_name,
+                        bcl.rov1_name,
+                        bcl.rov2_name,
+                        bcl.Depth1_name,
+                        bcl.Depth2_name,
+                        bcl.gnss1_name,
+                        bcl.gnss2_name
+                    FROM BlackBox AS bb
+                    LEFT JOIN BlackBox_Files AS bf
+                           ON bf.ID = bb.File_FK
+                    LEFT JOIN BBox_Configs_List AS bcl
+                           ON bcl.ID = bf.Config_FK
+                    WHERE bb.TimeStamp BETWEEN ? AND ?
+                    ORDER BY bb.TimeStamp;
+
                 """,
                 conn,
                 params=(tmin, tmax),

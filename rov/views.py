@@ -16,6 +16,7 @@ from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.template.loader import render_to_string
+from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST, require_GET
 
 from core.models import UserSettings
@@ -1436,3 +1437,101 @@ def dsr_line_qc_plot_item(request):
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
+@login_required
+@require_POST
+@csrf_protect
+def bbox_config_delete(request, config_id: int):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
+    dsr = DSRDB(project.db_path)                              # use your real init
+
+    out = dsr.delete_bbox_config(int(config_id))
+    status = 200 if out.get("ok") else 400
+    return JsonResponse(out, status=status)
+@login_required
+@require_POST
+@csrf_protect
+def bbox_config_import_json(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"ok": False, "error": "Invalid JSON body"}, status=400)
+
+    cfg = payload.get("config") or {}
+    mapping = payload.get("mapping") or {}
+
+    name = (cfg.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"ok": False, "error": "Config name is required"}, status=400)
+
+    # TODO: use your real project DB path getter (same as your other bbox endpoints)
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
+    dsr = DSRDB(project.db_path)
+
+    try:
+        config_id = dsr.save_bbox_config(
+            name=name,
+            vessel_name=(cfg.get("vessel_name") or "").strip(),
+            rov1_name=(cfg.get("rov1_name") or "").strip(),
+            rov2_name=(cfg.get("rov2_name") or "").strip(),
+            gnss1_name=(cfg.get("gnss1_name") or "").strip(),
+            gnss2_name=(cfg.get("gnss2_name") or "").strip(),
+            depth1_name=(cfg.get("depth1_name") or "").strip(),
+            depth2_name=(cfg.get("depth2_name") or "").strip(),
+            mapping=mapping,
+            is_default=bool(cfg.get("is_default", False)),
+        )
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+    return JsonResponse({"ok": True, "config_id": config_id})
+@login_required
+@require_GET
+def bbox_config_export_all_json(request):
+    # Use your real project DB path getter (same as other bbox endpoints)
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
+    dsr = DSRDB(project.db_path)
+    data = dsr.export_all_bbox_configs(project.export_dir)
+    return JsonResponse(data, json_dumps_params={"ensure_ascii": False, "indent": 2})
+from django.views.decorators.http import require_POST
+
+@login_required
+@require_POST
+def bbox_config_import_from_file(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
+    dsr = DSRDB(project.db_path)
+    filename = request.POST.get("filename")
+    result = dsr.import_bbox_configs_from_file(filename)
+    return JsonResponse(result)
+@login_required
+def bbox_config_export_to_file(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
+    dsr = DSRDB(project.db_path)
+
+    result = dsr.export_all_bbox_configs_to_file()
+
+    return JsonResponse(result)

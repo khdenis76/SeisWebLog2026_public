@@ -1,6 +1,8 @@
 import csv
 import hashlib
 import io
+import json
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -2419,6 +2421,191 @@ WHERE Area IS NOT NULL
         """
         with self._connect() as conn:
             return pd.read_sql_query(sql, conn, params=tuple(selected_lines))
+
+    def delete_bbox_config(self, config_id: int) -> dict:
+        """
+        Delete config from BBox_Configs_List and its mapping rows in BBox_Config.
+
+        Rules:
+          - cannot delete last remaining config
+          - if deleting default and others exist -> first pick another config and set it default
+        """
+        self.ensure_bbox_config_schema()
+
+        cid = int(config_id or 0)
+        if cid <= 0:
+            return {"ok": False, "error": "Invalid config id"}
+
+        with self._connect() as conn:
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("BEGIN IMMEDIATE")
+
+            row = conn.execute(
+                "SELECT ID, Name, IsDefault FROM BBox_Configs_List WHERE ID=?",
+                (cid,),
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return {"ok": False, "error": f"Config ID={cid} not found"}
+
+            total = int(conn.execute("SELECT COUNT(*) FROM BBox_Configs_List").fetchone()[0])
+            if total <= 1:
+                conn.rollback()
+                return {"ok": False, "error": "Cannot delete the last remaining configuration"}
+
+            is_default = int(row["IsDefault"] or 0) == 1
+
+            # If deleting default, choose a new default first (triggers keep singleton)
+            if is_default:
+                new_row = conn.execute(
+                    "SELECT ID FROM BBox_Configs_List WHERE ID <> ? ORDER BY IsDefault DESC, Name COLLATE NOCASE LIMIT 1",
+                    (cid,),
+                ).fetchone()
+                if new_row:
+                    conn.execute("UPDATE BBox_Configs_List SET IsDefault=1 WHERE ID=?", (int(new_row["ID"]),))
+
+            # delete children first due to FK RESTRICT
+            conn.execute("DELETE FROM BBox_Config WHERE CONFIG_FK=?", (cid,))
+            conn.execute("DELETE FROM BBox_Configs_List WHERE ID=?", (cid,))
+
+            conn.commit()
+
+        return {"ok": True}
+
+    def export_all_bbox_configs(self, export_dir: str) -> dict:
+        """
+        Export all BBox configs to:
+
+            <export_dir>/bbox_configs.json
+
+        - export_dir is required (absolute or relative path)
+        - creates directory if missing
+        - filename is constant
+        """
+        if not export_dir:
+            return {"ok": False, "error": "export_dir is required"}
+
+        self.ensure_bbox_config_schema()
+
+        def _find_col(cols, *candidates):
+            cols_l = {c.lower(): c for c in cols}
+            for cand in candidates:
+                if cand.lower() in cols_l:
+                    return cols_l[cand.lower()]
+            return None
+
+        with self._connect() as conn:
+            conn.execute("PRAGMA foreign_keys = ON;")
+
+            cfg_rows = conn.execute("""
+                SELECT
+                    ID, Name, IsDefault,
+                    Vessel_name,
+                    ROV1_name, ROV2_name,
+                    GNSS1_name, GNSS2_name,
+                    Depth1_name, Depth2_name
+                FROM BBox_Configs_List
+                ORDER BY IsDefault DESC, Name COLLATE NOCASE
+            """).fetchall()
+
+            info = conn.execute("PRAGMA table_info(BBox_Config)").fetchall()
+            cols = [r[1] for r in info]
+
+            cfg_fk_col = _find_col(cols, "CONFIG_FK", "config_fk", "Config_FK")
+            field_col = _find_col(cols, "field_name", "FieldName", "FIELD_NAME")
+            col_col = _find_col(cols, "col_name", "ColName", "COL_NAME")
+
+            if not (cfg_fk_col and field_col and col_col):
+                return {"ok": False, "error": "BBox_Config columns not found"}
+
+            sql = f"""
+                SELECT {cfg_fk_col}, {field_col}, {col_col}
+                FROM BBox_Config
+                ORDER BY {cfg_fk_col}, {field_col}
+            """
+            map_rows = conn.execute(sql).fetchall()
+
+        # ---- build mapping dict ----
+        mapping_by_cfg = {}
+        for cid, field_name, col_name in map_rows:
+            mapping_by_cfg.setdefault(int(cid), {})[str(field_name)] = (
+                "" if col_name is None else str(col_name)
+            )
+
+        configs = []
+        for r in cfg_rows:
+            cid = int(r[0])
+            configs.append({
+                "id": cid,
+                "name": r[1],
+                "is_default": int(r[2] or 0),
+                "vessel_name": r[3] or "",
+                "rov1_name": r[4] or "",
+                "rov2_name": r[5] or "",
+                "gnss1_name": r[6] or "",
+                "gnss2_name": r[7] or "",
+                "depth1_name": r[8] or "",
+                "depth2_name": r[9] or "",
+                "mapping": mapping_by_cfg.get(cid, {}),
+            })
+
+        payload = {
+            "schema": "SeisWebLog.BBoxConfigs.v1",
+            "exported_at": datetime.utcnow().isoformat() + "Z",
+            "configs": configs,
+        }
+
+        # ---- ensure export directory exists ----
+        try:
+            os.makedirs(export_dir, exist_ok=True)
+        except Exception as e:
+            return {"ok": False, "error": f"Cannot create export directory: {e}"}
+
+        file_path = os.path.join(export_dir, "bbox_configs.json")
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            return {"ok": False, "error": f"Failed to write file: {e}"}
+
+        return {
+            "ok": True,
+            "path": file_path,
+            "configs_count": len(configs),
+        }
+
+    def import_bbox_configs_from_file(self, filename: str) -> dict:
+        """
+        Import configs from JSON file inside <project_db_folder>/exports/
+        """
+
+        base_dir = os.path.dirname(self.db_path)
+        filepath = os.path.join(base_dir, "exports", filename)
+
+        if not os.path.exists(filepath):
+            return {"ok": False, "error": "File not found"}
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        configs = data.get("configs", [])
+
+        for item in configs:
+            self.save_bbox_config(
+                name=item.get("name"),
+                vessel_name=item.get("vessel_name", ""),
+                rov1_name=item.get("rov1_name", ""),
+                rov2_name=item.get("rov2_name", ""),
+                gnss1_name=item.get("gnss1_name", ""),
+                gnss2_name=item.get("gnss2_name", ""),
+                depth1_name=item.get("depth1_name", ""),
+                depth2_name=item.get("depth2_name", ""),
+                mapping=item.get("mapping", {}),
+                is_default=bool(item.get("is_default", False)),
+            )
+
+        return {"ok": True, "imported": len(configs)}
 
 
 

@@ -3,6 +3,8 @@ import {initSourceUpload} from "./initSourceUpload.js";
 import {initColumnToggles} from "../../rov/js/initColumnToggles.js";
 import {initSpsTableSelection} from "./initSPSTableSelection.js";
 import {initSpsDelete} from "./initSPSDelete.js";
+import {initSpsTableFilterModal} from "./initSPSFilterModal.js";
+import {initSpsTableSortModal} from "./initSPSTableSortModal.js";
 
 
 export function initAllJSForSource() {
@@ -10,12 +12,19 @@ export function initAllJSForSource() {
     initSourceUpload();
     initSpsTableSelection();
     initSpsDelete();
+    initSpsTableFilterModal();
+    initSpsTableSortModal({
+    tableId: "sps-table",
+    tbodyId: "sps-table-tbody",
+    modalId: "spsSortModal",
+    labelId: "sps-sort-label",
+    });
     initColumnToggles(
     "source_toggle-left-rov-btn",
     "source_left-rov-col",
     "source_left-rov-toggle-icon",
     { toggleElId: "source_right-rov-col", divOn: "col-12", divOff: "col-4" }
-  );
+    );
 
   initColumnToggles(
     "source_toggle-right-rov-btn",

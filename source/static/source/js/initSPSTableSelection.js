@@ -1,45 +1,58 @@
-export function initSpsTableSelection() {
+// static/source/js/initSPSTableSelection.js
+export function initSpsTableSelection(options = {}) {
+  const tableId = options.tableId || "sps-table";
+  const tbodyId = options.tbodyId || "sps-table-tbody";
+  const checkAllId = options.checkAllId || "sps-check-all";
 
-    const table = document.getElementById("sps-table");
-    const checkAll = document.getElementById("sps-check-all");
+  const table = document.getElementById(tableId);
+  const tbody = document.getElementById(tbodyId);
+  const checkAll = document.getElementById(checkAllId);
 
-    if (!table || !checkAll) return;
+  if (!table || !tbody || !checkAll) return;
 
-    const getChecks = () =>
-        Array.from(table.querySelectorAll("tbody .row-check"));
+  // prevent double init
+  if (table.dataset.spsSelectionInit === "1") return;
+  table.dataset.spsSelectionInit = "1";
 
-    function updateHeaderState() {
-        const checks = getChecks();
-        const total = checks.length;
-        const checked = checks.filter(c => c.checked).length;
+  function getVisibleChecks() {
+    return Array.from(
+      tbody.querySelectorAll("tr:not(.d-none) input.row-check[type='checkbox']")
+    );
+  }
 
-        if (total === 0) {
-            checkAll.checked = false;
-            checkAll.indeterminate = false;
-            return;
-        }
+  function updateHeaderState() {
+    const visible = getVisibleChecks();
+    const total = visible.length;
+    const checked = visible.filter(cb => cb.checked).length;
 
-        checkAll.checked = (checked === total);
-        checkAll.indeterminate = (checked > 0 && checked < total);
+    if (total === 0) {
+      checkAll.checked = false;
+      checkAll.indeterminate = false;
+      return;
     }
 
-    // remove old listeners if re-init (important for ajax reloads)
-    checkAll.onchange = null;
-    table.onchange = null;
+    checkAll.checked = (checked === total);
+    checkAll.indeterminate = (checked > 0 && checked < total);
+  }
 
-    // Header checkbox
-    checkAll.addEventListener("change", function () {
-        const checks = getChecks();
-        checks.forEach(c => c.checked = checkAll.checked);
-        checkAll.indeterminate = false;
-    });
+  // ✅ check all only visible
+  checkAll.addEventListener("change", () => {
+    const visible = getVisibleChecks();
+    visible.forEach(cb => { cb.checked = checkAll.checked; });
+    checkAll.indeterminate = false;
+  });
 
-    // Row checkbox change
-    table.addEventListener("change", function (e) {
-        if (e.target && e.target.classList.contains("row-check")) {
-            updateHeaderState();
-        }
-    });
+  // row checkbox change
+  tbody.addEventListener("change", (e) => {
+    if (e.target && e.target.matches("input.row-check[type='checkbox']")) {
+      updateHeaderState();
+    }
+  });
 
+  // filter changed -> just recalc header state
+  tbody.addEventListener("sps:filtered", () => {
     updateHeaderState();
+  });
+
+  updateHeaderState();
 }

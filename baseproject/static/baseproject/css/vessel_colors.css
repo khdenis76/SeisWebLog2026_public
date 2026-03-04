@@ -1,0 +1,18 @@
+/* Base: adds the icon after text */
+td.ship::before{
+  display: inline-block;
+  margin-left: .5rem;
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;              /* solid icons */
+  content: "\f21a";              /* fa-ship */
+  line-height: 1;
+}
+
+/* Colors per ship */
+
+td.ship.ship-1::before { color: #1f77b4;font-family:"Font Awesome 6 Free"; font-weight: 900; content: "\f21a"; }
+td.ship.ship-2::before { color: #ff7f0e;font-family:"Font Awesome 6 Free"; font-weight: 900; content: "\f21a"; }
+td.ship.ship-3::before { color: #2ca02c;font-family:"Font Awesome 6 Free"; font-weight: 900; content: "\f21a"; }
+td.ship.ship-4::before { color: #d62728;font-family:"Font Awesome 6 Free"; font-weight: 900; content: "\f21a"; }
+td.ship.ship-5::before { color: #9467bd;font-family:"Font Awesome 6 Free"; font-weight: 900; content: "\f21a"; }
+td.ship.ship-6::before { color: #8c564b;font-family:"Font Awesome 6 Free"; font-weight: 900; content: "\f21a"; }
