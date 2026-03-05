@@ -40,6 +40,14 @@ def source_home(request):
                                     "max_depth_limit":max_depth_limit,
                                     "gun_qc":gun_qc,
                                     })
+    res = sd.read_vessel_purpose_summary()
+    project_summary = render_to_string(
+        "source/partials/vessel_purpose_summary.html",
+        {"rows": res["rows"], "totals": res["totals"]},
+        request=request)
+    data = sd.get_shot_line_summary()  # or your existing read method
+    shot_line_summary = render_to_string(
+        "source/partials/_shot_line_summary_tbody.html",{"rows": data["rows"]})
 
 
     # Project fleet (project-specific)
@@ -69,6 +77,8 @@ def source_home(request):
             "st_summary": st_summary,
             "sps_summary": sps_summary,
             "gun_qc":gun_qc,
+            "project_summary":project_summary,
+            "shot_line_summary":shot_line_summary,
 
         },)
 @login_required
@@ -177,7 +187,7 @@ def source_upload_files(request):
                 return JsonResponse({"ok": False, "error": f"Failed to create Files record for {f.name}."}, status=500)
 
             if file_type == "SHOT":
-                inserted = sd.load_shot_table_h26_stream_fast(
+                inserted = sd.load_shot_table_h26_replace_all_fast(
                     f.file,
                     file_fk=file_fk,
                     chunk_size=50000,
@@ -201,7 +211,7 @@ def source_upload_files(request):
                 )
 
                 sd.update_slsolution_from_spsolution_timebased(file_fk=res["file_fk"])
-                sd.update_line_maxspi_maxseq(res["source_line"])
+                sd.update_seq_maxspi(production_code=pdb.get_geometry().production_code,seq=res["seq"])
                 sd.update_slsolution_from_preplot_timebased(file_fk=res["file_fk"])
 
                 total_inserted += int(res.get("points") or 0)

@@ -1,0 +1,104 @@
+<div class="table-responsive" style="overflow-x:auto;">
+<table class="table table-sm table-striped table-hover align-middle text-nowrap">
+
+<thead class="table-dark">
+<tr>
+    <th>Vessel</th>
+    <th>Purpose</th>
+
+    <th class="text-end">SailLines</th>
+    <th class="text-end">Lines</th>
+    <th class="text-end">Seq</th>
+    <th class="text-end">Line+Seq</th>
+
+    <th class="text-end">Production</th>
+    <th class="text-end">NonProd</th>
+    <th class="text-end">Kill</th>
+
+    <th>First Start</th>
+    <th>Last End</th>
+
+    <th class="text-end">Line Length</th>
+    <th class="text-end">Max SPI</th>
+
+    <th class="text-end">GunDepth Min</th>
+    <th class="text-end">GunDepth Max</th>
+
+    <th class="text-end">WaterDepth Min</th>
+    <th class="text-end">WaterDepth Max</th>
+</tr>
+</thead>
+
+
+<tbody>
+
+{% for r in rows %}
+<tr>
+
+<td>{{ r.vessel_name }}</td>
+<td>{{ r.purpose }}</td>
+
+<td class="text-end">{{ r.SailLines }}</td>
+<td class="text-end">{{ r.DistinctLines }}</td>
+<td class="text-end">{{ r.DistinctSeqs }}</td>
+<td class="text-end">{{ r.DistinctLineSeq }}</td>
+
+<td class="text-end">{{ r.ProductionTotal }}</td>
+<td class="text-end">{{ r.NonProductionTotal }}</td>
+<td class="text-end">{{ r.KillTotal }}</td>
+
+<td>{{ r.FirstStartTime|default_if_none:"" }}</td>
+<td>{{ r.LastEndTime|default_if_none:"" }}</td>
+
+<td class="text-end">{{ r.LineLengthTotal|floatformat:1 }}</td>
+<td class="text-end">{{ r.MaxSPI|floatformat:1 }}</td>
+
+<td class="text-end">{{ r.MinProdGunDepth|default_if_none:""|floatformat:2 }}</td>
+<td class="text-end">{{ r.MaxProdGunDepth|default_if_none:""|floatformat:2 }}</td>
+
+<td class="text-end">{{ r.MinProdWaterDepth|default_if_none:""|floatformat:1 }}</td>
+<td class="text-end">{{ r.MaxProdWaterDepth|default_if_none:""|floatformat:1 }}</td>
+
+</tr>
+{% empty %}
+<tr>
+<td colspan="17" class="text-center text-muted">No data</td>
+</tr>
+{% endfor %}
+
+</tbody>
+
+
+<tfoot class="table-secondary fw-semibold">
+
+<tr>
+
+<td colspan="2">Project Total</td>
+
+<td class="text-end">{{ totals.SailLines }}</td>
+<td class="text-end">{{ totals.DistinctLines }}</td>
+<td class="text-end">{{ totals.DistinctSeqs }}</td>
+<td class="text-end">{{ totals.DistinctLineSeq }}</td>
+
+<td class="text-end">{{ totals.ProductionTotal }}</td>
+<td class="text-end">{{ totals.NonProductionTotal }}</td>
+<td class="text-end">{{ totals.KillTotal }}</td>
+
+<td>{{ totals.FirstStartTime|default_if_none:"" }}</td>
+<td>{{ totals.LastEndTime|default_if_none:"" }}</td>
+
+<td class="text-end">{{ totals.LineLengthTotal|floatformat:1 }}</td>
+<td class="text-end">{{ totals.MaxSPI|floatformat:1 }}</td>
+
+<td class="text-end">{{ totals.MinProdGunDepth|default_if_none:""|floatformat:2 }}</td>
+<td class="text-end">{{ totals.MaxProdGunDepth|default_if_none:""|floatformat:2 }}</td>
+
+<td class="text-end">{{ totals.MinProdWaterDepth|default_if_none:""|floatformat:1 }}</td>
+<td class="text-end">{{ totals.MaxProdWaterDepth|default_if_none:""|floatformat:1 }}</td>
+
+</tr>
+
+</tfoot>
+
+</table>
+</div>

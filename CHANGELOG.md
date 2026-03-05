@@ -20,7 +20,7 @@
 ### Fixed
    
 ### Changed
-## [2026.1.0.4] - 2026-04-02
+## [2026.1.0.4] - 2026-03-04
 ### Added
    -Vessel filter for DSR table
    -Vessel sort for DSR table
@@ -30,6 +30,17 @@
    -Max SPI(shot point interval) sort updated 
 ### Fixed
    -DSR vie shows vessel  
-   
 ### Changed
+## [2026.1.0.5] - 2026-03-04
+### Added
+SHOT_TABLE QC & comparison with SPS files
+Source SPS sorting
+SPS project statistics 
+### Fixed
+Calculation of production/non-production per line
+Shot table upload fixed 
+
+### Changed
+
+
    

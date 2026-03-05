@@ -74,6 +74,24 @@ class SourceData:
 
         return line, attempt, seq
 
+    def to_int(self,x):
+        x = (x or "").strip()
+        if not x:
+            return None
+        try:
+            return int(x)
+        except ValueError:
+            return None
+
+    def to_float(self, x):
+        x = (x or "").strip()
+        if not x:
+            return None
+        try:
+            return float(x)
+        except ValueError:
+            return None
+
     def insert_file_record(self, file_name: str, file_type: str | None = None) -> int:
         conn = self._connect()
         try:
@@ -780,15 +798,6 @@ class SourceData:
         """
         if not file_fk:
             raise ValueError("file_fk is required (NOT NULL)")
-
-        def to_int(x):
-            x = (x or "").strip()
-            return int(x) if x else None
-
-        def to_float(x):
-            x = (x or "").strip()
-            return float(x) if x else None
-
         conn = self._connect()
         text_stream = None
         try:
@@ -902,40 +911,40 @@ class SourceData:
                 # Sail line: "S 99999" or "99999"
                 parts = first.split()
                 if len(parts) == 2 and parts[0].upper() == "S":
-                    sail_line = to_int(parts[1])
+                    sail_line = self.to_int(parts[1])
                 else:
-                    sail_line = to_int(first)
+                    sail_line = self.to_int(first)
 
-                shot_station = to_int(row[1])
-                shot_index = to_int(row[2])
-                shot_status = to_int(row[3])
+                shot_station = self.to_int(row[1])
+                shot_index = self.to_int(row[2])
+                shot_status = self.to_int(row[3])
 
                 post_point_code = (row[4] or "").strip() or None
                 fire_code = post_point_code[0].upper() if post_point_code else None
 
-                gun_depth = to_float(row[5])
-                water_depth = to_float(row[6])
+                gun_depth = self.to_float(row[5])
+                water_depth = self.to_float(row[6])
 
-                shot_x = to_float(row[7])
-                shot_y = to_float(row[8])
+                shot_x = self.to_float(row[7])
+                shot_y = self.to_float(row[8])
 
-                shot_day = to_int(row[9])
-                shot_hour = to_int(row[10])
-                shot_minute = to_int(row[11])
-                shot_second = to_int(row[12])
-                shot_microsecond = to_int(row[13])
-                shot_year = to_int(row[14])
+                shot_day = self.to_int(row[9])
+                shot_hour = self.to_int(row[10])
+                shot_minute = self.to_int(row[11])
+                shot_second = self.to_int(row[12])
+                shot_microsecond = self.to_int(row[13])
+                shot_year = self.to_int(row[14])
 
                 vessel = (row[15] or "").strip() or None
                 array_id = (row[16] or "").strip() or None
-                source_id = to_int(row[17])
+                source_id = self.to_int(row[17])
 
                 nav_line_code = (row[18] or "").strip() or None
                 nav_line, attempt, seq = self.decode_nav_line(nav_line_code or "")
 
-                nav_station = to_int(row[19])
-                shot_group_id = to_int(row[20])
-                elevation = to_float(row[21])
+                nav_station = self.to_int(row[19])
+                shot_group_id = self.to_int(row[20])
+                elevation = self.to_float(row[21])
 
                 batch.append((
                     int(file_fk),
@@ -1138,6 +1147,248 @@ class SourceData:
                 pass
             conn.close()
 
+    def load_shot_table_h26_replace_all_fast(
+            self,
+            file_obj,
+            file_fk: int,
+            chunk_size: int = 100000,
+            lock_timeout_s: int = 10,  # FAIL FAST
+    ) -> int:
+
+        print("\n[SHOT_IMPORT] started", flush=True)
+        t0 = time.time()
+
+        if not file_fk:
+            raise ValueError("file_fk is required (NOT NULL)")
+
+        conn = self._connect()
+        text_stream = None
+
+        try:
+            # ---- one-writer-many-readers setup ----
+            # WAL: readers can continue while we write
+            # synchronous NORMAL: good balance of speed/safety
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
+            except Exception:
+                # if DB is locked for this PRAGMA, continue (not critical)
+                pass
+
+            conn.execute("PRAGMA foreign_keys=OFF;")
+            conn.execute("PRAGMA busy_timeout=250;")  # short waits per attempt
+            self._set_fast_import_pragmas(conn, aggressive=False)
+
+            cur = conn.cursor()
+
+            # optional debug: confirm DB file
+            try:
+                dbs = conn.execute("PRAGMA database_list;").fetchall()
+                for _, name, path in dbs:
+                    print(f"[SHOT_IMPORT] db_file({name})={path}", flush=True)
+            except Exception:
+                pass
+
+            # -------------------------------------------------
+            # DROP ALL INDEXES ON SHOT_TABLE
+            # -------------------------------------------------
+            print("[SHOT_IMPORT] dropping existing SHOT_TABLE indexes...", flush=True)
+
+            indexes = cur.execute("""
+                SELECT name
+                FROM sqlite_master
+                WHERE type='index'
+                  AND tbl_name='SHOT_TABLE'
+                  AND name NOT LIKE 'sqlite_autoindex%';
+            """).fetchall()
+
+            for (name,) in indexes:
+                cur.execute(f'DROP INDEX IF EXISTS "{name}"')
+
+            print(f"[SHOT_IMPORT] dropped {len(indexes)} indexes", flush=True)
+
+            # -------------------------------------------------
+            # ACQUIRE WRITE LOCK (FAIL FAST)
+            # -------------------------------------------------
+            print("[SHOT_IMPORT] acquiring write lock...", flush=True)
+
+            t_lock = time.time()
+            while True:
+                try:
+                    cur.execute("BEGIN IMMEDIATE;")
+                    break
+                except sqlite3.OperationalError as e:
+                    if "locked" not in str(e).lower():
+                        raise
+                    waited = time.time() - t_lock
+                    if waited >= lock_timeout_s:
+                        raise sqlite3.OperationalError(
+                            f"database is locked (waited {waited:.0f}s). "
+                            "Close DB Browser / DataViewer / auto-refresh pages and retry."
+                        )
+                    time.sleep(0.5)
+
+            print(f"[SHOT_IMPORT] transaction started (lock in {time.time() - t_lock:.1f}s)", flush=True)
+
+            # -------------------------------------------------
+            # CLEAR TABLE
+            # -------------------------------------------------
+            print("[SHOT_IMPORT] clearing SHOT_TABLE...", flush=True)
+            cur.execute("DELETE FROM SHOT_TABLE;")
+
+            # -------------------------------------------------
+            # INSERT SQL
+            # -------------------------------------------------
+            insert_sql = """
+            INSERT INTO SHOT_TABLE (
+                File_FK,
+                sail_line, shot_station, shot_index, shot_status,
+                nav_line_code, nav_line, attempt, seq,
+                post_point_code, fire_code,
+                gun_depth, water_depth,
+                shot_x, shot_y,
+                shot_day, shot_hour, shot_minute, shot_second, shot_microsecond, shot_year,
+                vessel, array_id, source_id,
+                nav_station, shot_group_id, elevation
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """
+
+            probe = file_obj.read(0)
+            if isinstance(probe, (bytes, bytearray)):
+                text_stream = io.TextIOWrapper(file_obj, encoding="utf-8", errors="ignore", newline="")
+            else:
+                text_stream = file_obj
+
+            reader = csv.reader(text_stream, delimiter=",", skipinitialspace=True)
+
+            processed = 0
+            batch = []
+
+            # speed tricks (local bindings)
+            decode_nav = self.decode_nav_line
+            to_int = self.to_int
+            to_float = self.to_float
+            file_fk_i = int(file_fk)
+            executemany = cur.executemany
+            batch_append = batch.append
+
+            last_print = time.time()
+
+            for row in reader:
+                if not row:
+                    continue
+
+                first = (row[0] or "").strip()
+                if not first or first[:1] in ("H", "h"):
+                    continue
+                if len(row) < 22:
+                    continue
+
+                parts = first.split()
+                sail_line = to_int(parts[1]) if (len(parts) == 2 and parts[0].upper() == "S") else to_int(first)
+
+                shot_station = to_int(row[1])
+                shot_index = to_int(row[2])
+                shot_status = to_int(row[3])
+
+                post_point_code = (row[4] or "").strip() or None
+                fire_code = post_point_code[0].upper() if post_point_code else None
+
+                gun_depth = to_float(row[5])
+                water_depth = to_float(row[6])
+
+                shot_x = to_float(row[7])
+                shot_y = to_float(row[8])
+
+                shot_day = to_int(row[9])
+                shot_hour = to_int(row[10])
+                shot_minute = to_int(row[11])
+                shot_second = to_int(row[12])
+                shot_microsecond = to_int(row[13])
+                shot_year = to_int(row[14])
+
+                vessel = (row[15] or "").strip() or None
+                array_id = (row[16] or "").strip() or None
+                source_id = to_int(row[17])
+
+                nav_line_code = (row[18] or "").strip() or None
+                nav_line, attempt, seq = decode_nav(nav_line_code or "")
+
+                nav_station = to_int(row[19])
+                shot_group_id = to_int(row[20])
+                elevation = to_float(row[21])
+
+                batch_append((
+                    file_fk_i,
+                    sail_line, shot_station, shot_index, shot_status,
+                    nav_line_code, nav_line, attempt, seq,
+                    post_point_code, fire_code,
+                    gun_depth, water_depth,
+                    shot_x, shot_y,
+                    shot_day, shot_hour, shot_minute, shot_second, shot_microsecond, shot_year,
+                    vessel, array_id, source_id,
+                    nav_station, shot_group_id, elevation
+                ))
+
+                if len(batch) >= chunk_size:
+                    executemany(insert_sql, batch)
+                    processed += len(batch)
+                    batch.clear()
+
+                    now = time.time()
+                    if now - last_print >= 2.0:
+                        elapsed = now - t0
+                        print(
+                            f"[SHOT_IMPORT] rows={processed:,}  "
+                            f"time={elapsed:.1f}s  "
+                            f"speed={processed / elapsed:,.0f} rows/sec",
+                            flush=True
+                        )
+                        last_print = now
+
+            if batch:
+                executemany(insert_sql, batch)
+                processed += len(batch)
+
+            # -------------------------------------------------
+            # CREATE ONLY ONE INDEX
+            # -------------------------------------------------
+            print("[SHOT_IMPORT] creating final index idx_shot_line_attempt_seq...", flush=True)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq
+                ON SHOT_TABLE(nav_line, attempt, seq);
+            """)
+
+            conn.commit()
+
+            total_time = time.time() - t0
+            print(
+                f"[SHOT_IMPORT] FINISHED rows={processed:,} "
+                f"time={total_time:.1f}s "
+                f"speed={processed / total_time:,.0f} rows/sec",
+                flush=True
+            )
+            return processed
+
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print("[SHOT_IMPORT] ERROR:", e, flush=True)
+            raise
+
+        finally:
+            try:
+                if text_stream is not None and hasattr(text_stream, "detach"):
+                    text_stream.detach()
+            except Exception:
+                pass
+            try:
+                conn.execute("PRAGMA foreign_keys=ON;")
+            except Exception:
+                pass
+            conn.close()
     def load_source_sps_uploaded_file_fast(
             self,
             uploaded_file,  # Django UploadedFile
@@ -1226,7 +1477,7 @@ class SourceData:
             lines_touched: set[int] = set()
 
             last_source_line: int | None = None
-
+            last_seq: int | None = None
             for text_line in stream:
                 if not text_line:
                     continue
@@ -1261,6 +1512,7 @@ class SourceData:
                         p.year = (today_year - 1) if pj > today_jday else today_year
                 # Remember last decoded line for return payload
                 last_source_line = int(p.line)
+                last_seq=int(p.seq)
 
                 # Resolve vessel FK:
                 # - if detect mode ON => lookup by p.seq (decoded from SailLine)
@@ -1319,6 +1571,7 @@ class SourceData:
                 "skipped": int(skipped),
                 "lines": int(len(lines_touched)),
                 "source_line": int(last_source_line or 0),
+                "seq": int(last_seq or 0),
             }
 
         except Exception:
@@ -1457,6 +1710,93 @@ class SourceData:
 
             conn.commit()
             return {"line": line, "MaxSPI": round(maxspi, 3), "MaxSeq": int(maxseq)}
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def update_seq_maxspi(self, seq: int, production_code: str) -> dict:
+        """
+        Update ONLY SLSolution.MaxSPI for a selected Seq (not Line).
+
+        MaxSPI = max distance between neighbouring production points
+                 (FireCode contained in `production_code`),
+                 ordered by Point, PointIdx, computed within each SailLine_FK,
+                 then max across all SailLine_FK that belong to this Seq.
+
+        Inputs:
+          - seq: sequence number (SLSolution.Seq)
+          - production_code: string containing allowed production fire codes
+                             (same "instr(production_code, s.FireCode) > 0" logic
+                              as your old function)
+
+        Returns:
+          {"seq": <seq>, "MaxSPI": <rounded max gap>}
+        """
+        seq = int(seq)
+        prod_codes = (production_code or "").strip()
+
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("BEGIN IMMEDIATE;")
+
+            # If no production codes -> set MaxSPI = 0 for this Seq
+            if not prod_codes:
+                cur.execute(
+                    "UPDATE SLSolution SET MaxSPI=0 WHERE Seq=?",
+                    (seq,),
+                )
+                conn.commit()
+                return {"seq": seq, "MaxSPI": 0.0}
+
+            # Compute MaxSPI across all sail lines for this Seq
+            sql_maxspi = """
+            WITH prod AS (
+                SELECT
+                    s.SailLine_FK,
+                    s.Easting AS x,
+                    s.Northing AS y,
+                    LAG(s.Easting) OVER (
+                        PARTITION BY s.SailLine_FK
+                        ORDER BY s.Point, COALESCE(s.PointIdx,0)
+                    ) AS px,
+                    LAG(s.Northing) OVER (
+                        PARTITION BY s.SailLine_FK
+                        ORDER BY s.Point, COALESCE(s.PointIdx,0)
+                    ) AS py
+                FROM SPSolution s
+                JOIN SLSolution l ON l.ID = s.SailLine_FK
+                WHERE l.Seq = ?
+                  AND s.FireCode IS NOT NULL
+                  AND instr(?, s.FireCode) > 0
+                  AND s.Easting IS NOT NULL
+                  AND s.Northing IS NOT NULL
+            ),
+            gaps AS (
+                SELECT
+                    SailLine_FK,
+                    sqrt((x-px)*(x-px) + (y-py)*(y-py)) AS d
+                FROM prod
+                WHERE px IS NOT NULL
+            )
+            SELECT COALESCE(MAX(d), 0) FROM gaps;
+            """
+
+            maxspi = cur.execute(sql_maxspi, (seq, prod_codes)).fetchone()[0]
+            maxspi = float(maxspi or 0.0)
+
+            # Update only the selected Seq
+            cur.execute(
+                "UPDATE SLSolution SET MaxSPI=? WHERE Seq=?",
+                (maxspi, seq),
+            )
+
+            conn.commit()
+            return {"seq": seq, "MaxSPI": round(maxspi, 3)}
 
         except Exception:
             conn.rollback()
@@ -1701,7 +2041,7 @@ class SourceData:
                     StartX = COALESCE(
                         (SELECT Easting FROM SPSolution p
                          WHERE p.SailLine_FK=SLSolution.ID
-                           AND p.Point=(SELECT fgsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                           AND p.Point=(SELECT FGSP FROM picks x WHERE x.line_id=SLSolution.ID)
                          ORDER BY COALESCE(p.PointIdx,0) ASC LIMIT 1),
                         (SELECT Easting FROM SPSolution p
                          WHERE p.SailLine_FK=SLSolution.ID
@@ -1711,7 +2051,7 @@ class SourceData:
                     StartY = COALESCE(
                         (SELECT Northing FROM SPSolution p
                          WHERE p.SailLine_FK=SLSolution.ID
-                           AND p.Point=(SELECT fgsp FROM picks x WHERE x.line_id=SLSolution.ID)
+                           AND p.Point=(SELECT FGSP FROM picks x WHERE x.line_id=SLSolution.ID)
                          ORDER BY COALESCE(p.PointIdx,0) ASC LIMIT 1),
                         (SELECT Northing FROM SPSolution p
                          WHERE p.SailLine_FK=SLSolution.ID
@@ -1957,3 +2297,100 @@ class SourceData:
         con.close()
         return int(row[0]) if row else None
 
+    def read_vessel_purpose_summary(self, file_fk: int | None = None) -> dict:
+        """
+        Read V_SLSolution_VesselPurposeSummary and project totals.
+        Returns dict ready for Django templates.
+        """
+
+        sql_rows = """
+        SELECT *
+        FROM V_SLSolution_VesselPurposeSummary
+        ORDER BY vessel_name, purpose_id
+        """
+
+        sql_totals = """
+        SELECT
+            COUNT(*) AS SailLines,
+            COUNT(DISTINCT Line) AS DistinctLines,
+            COUNT(DISTINCT Seq)  AS DistinctSeqs,
+            COUNT(DISTINCT printf('%d|%d', COALESCE(Line,-1), COALESCE(Seq,-1))) AS DistinctLineSeq,
+
+            SUM(COALESCE(ProductionCount,0))    AS ProductionTotal,
+            SUM(COALESCE(NonProductionCount,0)) AS NonProductionTotal,
+            SUM(COALESCE(KillCount,0))          AS KillTotal,
+
+            MIN(Start_Time) AS FirstStartTime,
+            MAX(End_Time)   AS LastEndTime,
+
+            SUM(COALESCE(LineLength,0)) AS LineLengthTotal,
+            MAX(COALESCE(MaxSPI,0))     AS MaxSPI,
+
+            MIN(NULLIF(MinProdGunDepth,0))   AS MinProdGunDepth,
+            MAX(NULLIF(MaxProdGunDepth,0))   AS MaxProdGunDepth,
+
+            MIN(NULLIF(MinProdWaterDepth,0)) AS MinProdWaterDepth,
+            MAX(NULLIF(MaxProdWaterDepth,0)) AS MaxProdWaterDepth
+
+        FROM SLSolution
+        """
+
+        with self._connect() as conn:
+            conn.row_factory = None
+            cur = conn.cursor()
+
+            # rows
+            cur.execute(sql_rows)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+            # totals
+            cur.execute(sql_totals)
+            tcols = [d[0] for d in cur.description]
+            trow = cur.fetchone()
+            totals = dict(zip(tcols, trow)) if trow else {}
+
+        return {
+            "rows": rows,
+            "totals": totals
+        }
+
+    def get_shot_line_summary(self) -> dict:
+        """
+        Read V_SHOT_LineSummary and return:
+          - rows: list[dict]
+          - totals: dict (sum of numeric columns across all rows)
+          - total_count: int
+        """
+        conn = self._connect()
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            rows = cur.execute("""
+                SELECT *
+                FROM V_SHOT_LineSummary
+                ORDER BY nav_line, attempt, seq
+            """).fetchall()
+
+            rows = [dict(r) for r in rows]
+            total_count = len(rows)
+
+            # totals for numeric columns (ignore text)
+            totals = {}
+            if rows:
+                # pick numeric keys from first row
+                for k, v in rows[0].items():
+                    if isinstance(v, (int, float)) and k not in ("nav_line", "attempt", "seq"):
+                        totals[k] = 0
+
+                for r in rows:
+                    for k in list(totals.keys()):
+                        val = r.get(k)
+                        if isinstance(val, (int, float)):
+                            totals[k] += val
+
+            return {"rows": rows, "totals": totals, "total_count": total_count}
+
+        finally:
+            conn.close()

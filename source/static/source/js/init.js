@@ -5,7 +5,7 @@ import {initSpsTableSelection} from "./initSPSTableSelection.js";
 import {initSpsDelete} from "./initSPSDelete.js";
 import {initSpsTableFilterModal} from "./initSPSFilterModal.js";
 import {initSpsTableSortModal} from "./initSPSTableSortModal.js";
-
+import { initShotLineSort } from "./shot_line_sort.js";
 
 export function initAllJSForSource() {
     initSourceUploadModal();
@@ -19,6 +19,7 @@ export function initAllJSForSource() {
     modalId: "spsSortModal",
     labelId: "sps-sort-label",
     });
+    initShotLineSort({ tbodyId: "shot-summary-tbody" }); // <-- your tbody id
     initColumnToggles(
     "source_toggle-left-rov-btn",
     "source_left-rov-col",

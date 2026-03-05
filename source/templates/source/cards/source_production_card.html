@@ -62,9 +62,15 @@
                                 id="shot-table-filter-btn">
                             <i class="fas fa-filter"></i>
                         </button>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-primary"
+                                data-bs-toggle="modal"
+                                data-bs-target="#shotSortModal">
+                          <i class="fas fa-sort me-1"></i> Sort
+                        </button>
                     </div>
                     <div id="shot-summary-container">
-                        {% include 'source/partials/shot_table.html' %}
+                        {% include "source/partials/shot_line_summary_table.html" %}
                     </div>
                 </div>
             </div>
@@ -133,4 +139,3 @@
 
 </div>
     </div>
-</div>
