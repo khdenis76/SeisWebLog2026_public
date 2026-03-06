@@ -39,8 +39,16 @@ SPS project statistics
 ### Fixed
 Calculation of production/non-production per line
 Shot table upload fixed 
-
 ### Changed
-
+## [2026.1.0.6] - 2026-03-05
+### Added
+Source progress map plot added
+Source sunbirst diagram added 
+Source day by Day production added
+### Fixed
+Fixed migration removed wrong migration from folder  
+Dataviewer fixed error when viewer crushed if bbox_config not exists  or bbox_file was not uploaded for this line 
+### Changed
+Source summary moved to Statistics tab 
 
    

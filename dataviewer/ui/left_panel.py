@@ -77,8 +77,8 @@ class LeftPanel(QtWidgets.QFrame):
 
         # LEFT: Lines table
         self.tbl_dsr_lines = QtWidgets.QTableWidget()
-        self.tbl_dsr_lines.setColumnCount(3)
-        self.tbl_dsr_lines.setHorizontalHeaderLabels(["", "Line", "Stations"])
+        self.tbl_dsr_lines.setColumnCount(6)
+        self.tbl_dsr_lines.setHorizontalHeaderLabels(["", "Line", "Stations","Vessel","ROV 1","ROV 2"])
         self.tbl_dsr_lines.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_dsr_lines.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl_dsr_lines.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -311,6 +311,9 @@ class LeftPanel(QtWidgets.QFrame):
         for r in range(len(df)):
             line_val = df.iloc[r]["Line"]
             st_val = df.iloc[r][stations_col]
+            vessel_val = df.iloc[r]["Vessel_name"]
+            rov1_val=df.iloc[r]["rov1_name"]
+            rov2_val=df.iloc[r]["rov2_name"]
 
             chk = QtWidgets.QTableWidgetItem()
             chk.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
@@ -319,7 +322,9 @@ class LeftPanel(QtWidgets.QFrame):
 
             self.tbl_dsr_lines.setItem(r, 1, QtWidgets.QTableWidgetItem("" if pd.isna(line_val) else str(line_val)))
             self.tbl_dsr_lines.setItem(r, 2, QtWidgets.QTableWidgetItem("" if pd.isna(st_val) else str(st_val)))
-
+            self.tbl_dsr_lines.setItem(r, 3, QtWidgets.QTableWidgetItem("" if pd.isna(vessel_val) else str(vessel_val)))
+            self.tbl_dsr_lines.setItem(r, 4, QtWidgets.QTableWidgetItem("" if pd.isna(rov1_val) else str(rov1_val)))
+            self.tbl_dsr_lines.setItem(r, 5, QtWidgets.QTableWidgetItem("" if pd.isna(rov2_val) else str(rov2_val)))
         self.tbl_dsr_lines.resizeColumnsToContents()
         self.tbl_dsr_lines.setColumnWidth(0, 28)
         self.tbl_dsr_lines.blockSignals(False)

@@ -6,6 +6,9 @@ import {initSpsDelete} from "./initSPSDelete.js";
 import {initSpsTableFilterModal} from "./initSPSFilterModal.js";
 import {initSpsTableSortModal} from "./initSPSTableSortModal.js";
 import { initShotLineSort } from "./shot_line_sort.js";
+import {initSourceQCMap} from "./initSourceQCMap.js";
+import {initSourceQCStats} from "./initSourceQCStats.js";
+import {initDailyProductionTab} from "./initSourceDailyProduction.js";
 
 export function initAllJSForSource() {
     initSourceUploadModal();
@@ -13,12 +16,15 @@ export function initAllJSForSource() {
     initSpsTableSelection();
     initSpsDelete();
     initSpsTableFilterModal();
+    initSourceQCMap();
     initSpsTableSortModal({
     tableId: "sps-table",
     tbodyId: "sps-table-tbody",
     modalId: "spsSortModal",
     labelId: "sps-sort-label",
     });
+    initSourceQCStats();
+    initDailyProductionTab()
     initShotLineSort({ tbodyId: "shot-summary-tbody" }); // <-- your tbody id
     initColumnToggles(
     "source_toggle-left-rov-btn",

@@ -686,9 +686,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def plot_blackbox_tracks(self, bb_df):
         if not hasattr(self, "bb_layers"):
             self.bb_layers = {}
-        vessel_name = bb_df['vessel_name'].iloc[0]
-        rov1_name = bb_df['rov1_name'].iloc[0]
-        rov2_name = bb_df['rov2_name'].iloc[0]
+        if not bb_df.empty:
+            vessel_name = bb_df['vessel_name'].iloc[0]
+            rov1_name = bb_df['rov1_name'].iloc[0]
+            rov2_name = bb_df['rov2_name'].iloc[0]
+        else:
+            vessel_name = "Unknown Vessel"
+            rov1_name = "ROV1"
+            rov2_name = "ROV2"
         # Vessel
         self._add_bb_track(
             bb_df,
@@ -1020,6 +1025,5 @@ class MainWindow(QtWidgets.QMainWindow):
             self.right.set_rov1_heading(45)
             self.right.set_rov2_heading(120)
 
-            QtWidgets.QMessageBox.information(self, "Test", "Heading test executed ✅")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Test ERROR", repr(e))

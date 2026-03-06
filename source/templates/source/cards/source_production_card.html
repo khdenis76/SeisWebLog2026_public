@@ -10,27 +10,28 @@
 
         <li class="nav-item" role="presentation">
             <button class="nav-link active"
-                    id="summary-tab"
-                    data-bs-toggle="tab"
-                    data-bs-target="#summary-pane"
-                    type="button"
-                    role="tab">
-                <i class="fas fa-table me-1"></i>
-                Summary
-            </button>
-        </li>
-
-        <li class="nav-item" role="presentation">
-            <button class="nav-link"
                     id="shots-tab"
                     data-bs-toggle="tab"
                     data-bs-target="#shots-pane"
                     type="button"
                     role="tab">
                 <i class="fas fa-crosshairs me-1"></i>
-                Shots
+                   SOURCE SPS
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link"
+                    id="summary-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#summary-pane"
+                    type="button"
+                    role="tab">
+                <i class="fas fa-table me-1"></i>
+                <i class="fas fa-gun me-2"></i> SHOT TABLE
+            </button>
+        </li>
+
+
 
         <li class="nav-item" role="presentation">
             <button class="nav-link"
@@ -49,8 +50,8 @@
     <!-- Tab Content -->
     <div class="tab-content mt-3" id="sourceTabContent">
 
-        <!-- SUMMARY TAB -->
-        <div class="tab-pane fade show active"
+        <!-- SHOT-TABLE TAB -->
+        <div class="tab-pane fade"
              id="summary-pane"
              role="tabpanel">
 
@@ -77,11 +78,8 @@
 
         </div>
 
-        <!-- SHOTS TAB -->
-        <div class="tab-pane fade"
-             id="shots-pane"
-             role="tabpanel">
-
+        <!--SOURCE SPS TAB -->
+        <div class="tab-pane fade show active" id="shots-pane" role="tabpanel">
             <div class="card shadow-sm">
                 <div class="card-body">
                     <h5>Shot Data</h5>
@@ -108,7 +106,7 @@
                     </button>
                     {% include "source/partials/sps_table.html" %}
                 </div>
-            </div>
+                <div class="card-footer">
                   <button type="button"
                        id="sps-delete-button"
                        class="btn btn-danger shadow"
@@ -116,26 +114,24 @@
                             <i class="fas fa-trash-can me-2"></i>DELETE SPS
                   </button>
                   <span class="small text-muted" id="sps-sort-label"></span>
+                </div>
             </div>
         </div>
 
         <!-- STATISTICS TAB -->
-        <div class="tab-pane fade"
-             id="stats-pane"
-             role="tabpanel">
-
+        <div class="tab-pane fade" id="stats-pane" role="tabpanel">
             <div class="card shadow-sm">
                 <div class="card-body">
                     <h5>Shot Statistics</h5>
                     <div id="shot-stats-container">
-                        <!-- charts here -->
+                        {{ project_summary|safe }}
                     </div>
                 </div>
             </div>
-
         </div>
 
     </div>
 
 </div>
     </div>
+</div>

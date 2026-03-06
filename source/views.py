@@ -13,6 +13,8 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 import re
 from .source_data import SourceData   # adjust path
+from .source_map_graph import SourceMapGraphics
+
 
 @login_required
 def source_home(request):
@@ -320,5 +322,91 @@ def sps_delete_selected(request):
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
+from django.http import JsonResponse
+from django.contrib.auth.decorators import login_required
+
+@login_required
+def source_qc_progress_map_json(request):
+    # build your SourceData / whatever class you use
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        # No active project → go to project list
+        return redirect("projects")
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+    pdb = ProjectDB(project.db_path)
+    smd = SourceMapGraphics(project.db_path)  # adapt to your project
+    item = smd.build_source_progress_map(
+        production_only=True,
+        use_tiles=True,          # or False
+        is_show=False,
+        json_return=True,
+        show_shapes=True,
+        show_layers=True,
+        default_epsg=pdb.get_main().epsg,  # adapt
+        max_csv_labels=5,
+    )
+    return JsonResponse(item)
+@login_required
+def source_qc_sunburst_json(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return redirect("projects")
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    # optional theme from querystring: ?theme=dark|light
+    theme = (request.GET.get("theme") or "light").strip().lower()
+    if theme not in ("light", "dark"):
+        theme = "light"
+
+    smd = SourceMapGraphics(project.db_path)
+
+    item = smd.build_source_sunburst(
+        is_show=False,
+        json_return=True,
+        theme=theme,      # <-- you added this earlier
+        drop_zeros=True,
+        title="Source — Vessel → Purpose → Shot totals",
+    )
+    return JsonResponse(item)
+@login_required
+def source_daybyday_production_json(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"error": "No active project selected."}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    production_code = request.GET.get("production_code", "K")
+    non_production_code = request.GET.get("non_production_code", "")
+    kill_code = request.GET.get("kill_code", "X")
+    include_other = request.GET.get("include_other", "0") in ("1", "true", "True", "yes")
+    max_days = request.GET.get("max_days")
+
+    try:
+        max_days = int(max_days) if max_days not in (None, "", "null") else None
+    except ValueError:
+        max_days = None
+
+    smd = SourceMapGraphics(project.db_path)
+    pdb = ProjectDB(project.db_path)
+    item = smd.build_daybyday_source_production(
+        production_code=pdb.get_geometry().production_code,
+        non_production_code=pdb.get_geometry().non_production_code,
+        kill_code=pdb.get_geometry().kill_code,
+        is_show=False,
+        include_other=False,
+        json_return=True,
+        title="Day-by-Day Source Production",
+    )
+
+    return JsonResponse(item)
 
 
