@@ -1390,27 +1390,23 @@ class SourceData:
     def load_shot_table_h26_replace_all_fast(
             self,
             file_obj,
-            file_fk: int,
-            chunk_size: int = 100,
+            chunk_size: int = 10000,
             lock_timeout_s: int = 120,
             conn=None,
     ) -> int:
         """
-        Import SHOT H26 CSV and insert only NEW rows.
+        Full replace SHOT_TABLE from one H26 CSV file.
 
-        Requires UNIQUE index on:
-            (nav_line_code, nav_station, post_point_code)
+        New SHOT_TABLE schema has NO File_FK.
+        Strategy:
+        - DELETE all rows from SHOT_TABLE
+        - INSERT in batches
+        - COMMIT every chunk
+
+        Returns inserted row count.
         """
-        import csv
-        import io
-        import sqlite3
-        import time
-
         print("\n[SHOT_IMPORT] started", flush=True)
         t0 = time.time()
-
-        if not file_fk:
-            raise ValueError("file_fk is required (NOT NULL)")
 
         own_conn = conn is None
         print(f"[SHOT_IMPORT] own_conn={own_conn}", flush=True)
@@ -1421,21 +1417,22 @@ class SourceData:
 
         text_stream = None
 
-        def _begin_immediate_retry(cursor, timeout_s=120, sleep_s=1.0):
+        def _execute_retry(cursor, sql, params=None, timeout_s=120, sleep_s=1.0):
             t1 = time.time()
             while True:
                 try:
-                    cursor.execute("BEGIN IMMEDIATE;")
-                    return
+                    if params is None:
+                        return cursor.execute(sql)
+                    return cursor.execute(sql, params)
                 except sqlite3.OperationalError as e:
                     if "locked" not in str(e).lower():
                         raise
                     waited = time.time() - t1
                     if waited >= timeout_s:
                         raise sqlite3.OperationalError(
-                            f"database is locked (waited {waited:.0f}s) while starting transaction."
+                            f"database is locked (waited {waited:.0f}s) during execute."
                         )
-                    print(f"[SHOT_IMPORT] waiting for BEGIN IMMEDIATE... {waited:.1f}s", flush=True)
+                    print(f"[SHOT_IMPORT] waiting during execute... waited={waited:.1f}s", flush=True)
                     time.sleep(sleep_s)
 
         def _executemany_retry(cursor, sql, rows, timeout_s=120, sleep_s=1.0):
@@ -1459,6 +1456,8 @@ class SourceData:
                     time.sleep(sleep_s)
 
         try:
+            # make sure schema is correct
+            self.ensure_shot_table_schema(conn=conn)
             cur = conn.cursor()
 
             try:
@@ -1477,12 +1476,17 @@ class SourceData:
                 pass
 
             try:
-                cur.execute("PRAGMA busy_timeout=10000;")
+                cur.execute("PRAGMA temp_store=MEMORY;")
             except Exception:
                 pass
 
             try:
-                self._set_fast_import_pragmas(conn, aggressive=False)
+                cur.execute("PRAGMA cache_size=-200000;")
+            except Exception:
+                pass
+
+            try:
+                cur.execute(f"PRAGMA busy_timeout={int(lock_timeout_s * 1000)};")
             except Exception:
                 pass
 
@@ -1497,23 +1501,40 @@ class SourceData:
             except Exception:
                 pass
 
-            if own_conn:
-                print("[SHOT_IMPORT] acquiring write lock...", flush=True)
-                _begin_immediate_retry(cur, timeout_s=lock_timeout_s, sleep_s=1.0)
-                print("[SHOT_IMPORT] transaction started", flush=True)
+            print("[SHOT_IMPORT] deleting existing SHOT_TABLE rows...", flush=True)
+            _execute_retry(cur, "DELETE FROM SHOT_TABLE", timeout_s=lock_timeout_s)
+            conn.commit()
+            print("[SHOT_IMPORT] delete committed", flush=True)
 
             insert_sql = """
-            INSERT OR IGNORE INTO SHOT_TABLE (
-                File_FK,
-                sail_line, shot_station, shot_index, shot_status,
-                nav_line_code, nav_line, attempt, seq,
-                post_point_code, fire_code,
-                gun_depth, water_depth,
-                shot_x, shot_y,
-                shot_day, shot_hour, shot_minute, shot_second, shot_microsecond, shot_year,
-                vessel, array_id, source_id,
-                nav_station, shot_group_id, elevation
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO SHOT_TABLE (
+                sail_line,
+                shot_station,
+                shot_index,
+                shot_status,
+                nav_line_code,
+                nav_line,
+                attempt,
+                seq,
+                post_point_code,
+                fire_code,
+                gun_depth,
+                water_depth,
+                shot_x,
+                shot_y,
+                shot_day,
+                shot_hour,
+                shot_minute,
+                shot_second,
+                shot_microsecond,
+                shot_year,
+                vessel,
+                array_id,
+                source_id,
+                nav_station,
+                shot_group_id,
+                elevation
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """
 
             probe = file_obj.read(0)
@@ -1531,12 +1552,12 @@ class SourceData:
 
             processed = 0
             attempted = 0
+            skipped = 0
             batch = []
 
             decode_nav = self.decode_nav_line
             to_int = self.to_int
             to_float = self.to_float
-            file_fk_i = int(file_fk)
             batch_append = batch.append
 
             last_print = time.time()
@@ -1547,9 +1568,15 @@ class SourceData:
                     continue
 
                 first = (row[0] or "").strip()
-                if not first or first[:1] in ("H", "h"):
+                if not first:
                     continue
+
+                # skip header / H-lines
+                if first[:1] in ("H", "h"):
+                    continue
+
                 if len(row) < 22:
+                    skipped += 1
                     continue
 
                 parts = first.split()
@@ -1601,15 +1628,32 @@ class SourceData:
                 elevation = to_float(row[21])
 
                 batch_append((
-                    file_fk_i,
-                    sail_line, shot_station, shot_index, shot_status,
-                    nav_line_code, nav_line, attempt, seq,
-                    post_point_code, fire_code,
-                    gun_depth, water_depth,
-                    shot_x, shot_y,
-                    shot_day, shot_hour, shot_minute, shot_second, shot_microsecond, shot_year,
-                    vessel, array_id, source_id,
-                    nav_station, shot_group_id, elevation
+                    sail_line,
+                    shot_station,
+                    shot_index,
+                    shot_status,
+                    nav_line_code,
+                    nav_line,
+                    attempt,
+                    seq,
+                    post_point_code,
+                    fire_code,
+                    gun_depth,
+                    water_depth,
+                    shot_x,
+                    shot_y,
+                    shot_day,
+                    shot_hour,
+                    shot_minute,
+                    shot_second,
+                    shot_microsecond,
+                    shot_year,
+                    vessel,
+                    array_id,
+                    source_id,
+                    nav_station,
+                    shot_group_id,
+                    elevation
                 ))
                 attempted += 1
 
@@ -1618,25 +1662,23 @@ class SourceData:
                         f"[SHOT_IMPORT] inserting batch size={len(batch)} attempted={attempted:,}",
                         flush=True
                     )
+
                     before = conn.total_changes
-                    _executemany_retry(cur, insert_sql, batch, timeout_s=lock_timeout_s, sleep_s=1.0)
+                    _executemany_retry(cur, insert_sql, batch, timeout_s=lock_timeout_s)
                     inserted_now = conn.total_changes - before
                     processed += inserted_now
                     batch.clear()
 
-                    if own_conn:
-                        print("[SHOT_IMPORT] committing batch...", flush=True)
-                        conn.commit()
-                        _begin_immediate_retry(cur, timeout_s=lock_timeout_s, sleep_s=1.0)
-
-                    print(f"[SHOT_IMPORT] batch done inserted_total={processed:,}", flush=True)
+                    print("[SHOT_IMPORT] committing batch...", flush=True)
+                    conn.commit()
 
                     now = time.time()
                     if now - last_print >= 2.0:
                         elapsed = now - t0
                         print(
                             f"[SHOT_IMPORT] progress inserted={processed:,} attempted={attempted:,} "
-                            f"time={elapsed:.1f}s speed={attempted / elapsed:,.0f} rows/sec",
+                            f"skipped={skipped:,} time={elapsed:.1f}s "
+                            f"speed={attempted / max(elapsed, 1):,.0f} rows/sec",
                             flush=True
                         )
                         last_print = now
@@ -1646,39 +1688,30 @@ class SourceData:
                     f"[SHOT_IMPORT] inserting final batch size={len(batch)} attempted={attempted:,}",
                     flush=True
                 )
+
                 before = conn.total_changes
-                _executemany_retry(cur, insert_sql, batch, timeout_s=lock_timeout_s, sleep_s=1.0)
+                _executemany_retry(cur, insert_sql, batch, timeout_s=lock_timeout_s)
                 inserted_now = conn.total_changes - before
                 processed += inserted_now
                 batch.clear()
 
-                if own_conn:
-                    print("[SHOT_IMPORT] committing final batch...", flush=True)
-                    conn.commit()
-
-                print(f"[SHOT_IMPORT] final batch done inserted_total={processed:,}", flush=True)
-
-            elif own_conn:
-                try:
-                    conn.commit()
-                except Exception:
-                    pass
+                print("[SHOT_IMPORT] committing final batch...", flush=True)
+                conn.commit()
 
             total_time = time.time() - t0
             print(
                 f"[SHOT_IMPORT] FINISHED inserted={processed:,} attempted={attempted:,} "
-                f"time={total_time:.1f}s speed={attempted / total_time:,.0f} rows/sec",
+                f"skipped={skipped:,} time={total_time:.1f}s "
+                f"speed={attempted / max(total_time, 1):,.0f} rows/sec",
                 flush=True
             )
-            print("[SHOT_IMPORT] leaving function", flush=True)
             return processed
 
         except Exception as e:
-            if own_conn:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             print("[SHOT_IMPORT] ERROR:", e, flush=True)
             raise
 
@@ -2717,3 +2750,119 @@ class SourceData:
             print("DB LOCKED:", e)
 
         conn.close()
+
+    def ensure_shot_table_schema(self, conn=None):
+        """
+        Ensure SHOT_TABLE exists with the expected schema.
+        If schema differs, the table will be dropped and recreated.
+        """
+
+        expected_cols = [
+            "id",
+            "sail_line",
+            "shot_station",
+            "shot_index",
+            "shot_status",
+            "nav_line_code",
+            "nav_line",
+            "attempt",
+            "seq",
+            "post_point_code",
+            "fire_code",
+            "gun_depth",
+            "water_depth",
+            "shot_x",
+            "shot_y",
+            "shot_day",
+            "shot_hour",
+            "shot_minute",
+            "shot_second",
+            "shot_microsecond",
+            "shot_year",
+            "vessel",
+            "array_id",
+            "source_id",
+            "nav_station",
+            "shot_group_id",
+            "elevation",
+        ]
+
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+
+            # check if table exists
+            row = cur.execute("""
+                SELECT name
+                FROM sqlite_master
+                WHERE type='table'
+                  AND name='SHOT_TABLE'
+            """).fetchone()
+
+            recreate = False
+
+            if row:
+                # read existing columns
+                cols = cur.execute("PRAGMA table_info(SHOT_TABLE)").fetchall()
+                existing_cols = [c[1] for c in cols]
+
+                if existing_cols != expected_cols:
+                    print("[SHOT_TABLE] schema mismatch, recreating table")
+                    recreate = True
+            else:
+                recreate = True
+
+            if recreate:
+                cur.execute("DROP TABLE IF EXISTS SHOT_TABLE")
+
+                cur.execute("""
+                CREATE TABLE SHOT_TABLE (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                    sail_line INTEGER,
+                    shot_station INTEGER,
+                    shot_index INTEGER,
+                    shot_status INTEGER,
+
+                    nav_line_code TEXT,
+
+                    nav_line INTEGER,
+                    attempt TEXT,
+                    seq INTEGER,
+
+                    post_point_code TEXT,
+                    fire_code TEXT,
+
+                    gun_depth REAL,
+                    water_depth REAL,
+
+                    shot_x REAL,
+                    shot_y REAL,
+
+                    shot_day INTEGER,
+                    shot_hour INTEGER,
+                    shot_minute INTEGER,
+                    shot_second INTEGER,
+                    shot_microsecond INTEGER,
+                    shot_year INTEGER,
+
+                    vessel TEXT,
+                    array_id TEXT,
+                    source_id INTEGER,
+
+                    nav_station INTEGER,
+                    shot_group_id INTEGER,
+                    elevation REAL
+                )
+                """)
+
+                print("[SHOT_TABLE] created")
+
+            conn.commit()
+
+        finally:
+            if own_conn:
+                conn.close()

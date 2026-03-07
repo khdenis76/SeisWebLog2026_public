@@ -947,12 +947,7 @@ CREATE TABLE IF NOT EXISTS "sequence_vessel_assignment" (
 	FOREIGN KEY("vessel_id") REFERENCES "project_fleet"("id") ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS SHOT_TABLE (
-
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    -- Link to Files table
-    File_FK INTEGER NOT NULL,
-
     -- H26 main fields
     sail_line INTEGER,
     shot_station INTEGER,
@@ -990,13 +985,7 @@ CREATE TABLE IF NOT EXISTS SHOT_TABLE (
 
     nav_station INTEGER,
     shot_group_id INTEGER,
-    elevation REAL,
-
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-
-    FOREIGN KEY (File_FK)
-        REFERENCES Files(id)
-        ON DELETE CASCADE
+    elevation REAL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_shot_unique
 ON SHOT_TABLE (

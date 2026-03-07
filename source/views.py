@@ -30,6 +30,7 @@ def source_home(request):
 
     pdb = ProjectDB(project.db_path)
     sd = SourceData(project.db_path)
+    sd.ensure_shot_table_schema()
     gun_qc = pdb.get_gun_qc()
     min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
     max_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
@@ -104,15 +105,13 @@ def source_upload_files(request):
     sd = SourceData(project.db_path)
     pdb = ProjectDB(project.db_path)
 
-    # SPS metadata
     sps_revision = None
     tier = 1
     year = None
+    src_id = None
 
-    # Detect vessel by Seq (from SPS content)
     detect_by_seq = str(request.POST.get("detect_vessel_by_seq") or "").strip().lower() in ("1", "true", "on", "yes")
     auto_year_by_jday = str(request.POST.get("auto_year_by_jday") or "").strip().lower() in ("1", "true", "on", "yes")
-    src_id = None  # selected vessel if detect mode OFF
 
     if file_type == "SPS":
         source_vessel_id = (request.POST.get("source_vessel_id") or "").strip()
@@ -127,7 +126,6 @@ def source_upload_files(request):
         if not tier_raw:
             return JsonResponse({"ok": False, "error": "Missing TIER."}, status=400)
 
-        auto_year_by_jday = str(request.POST.get("auto_year_by_jday") or "").strip().lower() in ("1", "true", "on", "yes")
         if (not auto_year_by_jday) and (not year_raw):
             return JsonResponse({"ok": False, "error": "Missing Year."}, status=400)
 
@@ -140,10 +138,10 @@ def source_upload_files(request):
             tier = int(tier_raw)
         except Exception:
             return JsonResponse({"ok": False, "error": "Invalid TIER."}, status=400)
+
         if tier < 1 or tier > 10:
             return JsonResponse({"ok": False, "error": "TIER must be 1..10."}, status=400)
 
-        year = None
         if not auto_year_by_jday:
             try:
                 year = int(year_raw)
@@ -152,81 +150,47 @@ def source_upload_files(request):
 
         if not detect_by_seq:
             fleet = pdb.list_project_fleet()
-            vessel_row = None
             try:
                 src_id = int(source_vessel_id)
             except Exception:
                 return JsonResponse({"ok": False, "error": "Invalid Source Vessel id."}, status=400)
 
-            for v in fleet:
-                if int(v.get("id") or 0) == src_id:
-                    vessel_row = v
-                    break
-
+            vessel_row = next((v for v in fleet if int(v.get("id") or 0) == src_id), None)
             if not vessel_row:
                 return JsonResponse({"ok": False, "error": "Source Vessel not found in project fleet."}, status=400)
-
-    shot_summary = None
-    sps_summary = None
-    sps_extras = None
 
     try:
         total_inserted = 0
         file_results = []
+        target_tbody = None
+        tbody_html = None
+        extras = {}
 
-        # ---------------------------------------------------------
-        # SHOT: ONE CONNECTION / ONE TRANSACTION FOR WHOLE IMPORT
-        # ---------------------------------------------------------
         if file_type == "SHOT":
-            conn = sd._connect()
-            try:
-                cur = conn.cursor()
-                cur.execute("BEGIN IMMEDIATE;")
+            # full replace shot table
+            inserted = 0
+            for f in files:
+                inserted = sd.load_shot_table_h26_replace_all_fast(
+                    f.file,
+                    chunk_size=10000,
+                    conn=None,
+                )
+                total_inserted += int(inserted)
+                file_results.append({
+                    "name": f.name,
+                    "inserted": int(inserted),
+                })
 
-                sd.create_shot_table(conn=conn)
-                sd.drop_shot_table_indexes(conn=conn)
+            shot_table_rows = sd.list_shot_table_summary()
+            tbody_html = render_to_string(
+                "source/partials/shot_table_tbody.html",
+                {"rows": shot_table_rows},
+                request=request,
+            )
+            target_tbody = "shot-table-tbody"
 
-                for f in files:
-                    file_fk = sd.insert_file_record(
-                        file_name=f.name,
-                        file_type=file_type,
-                        conn=conn,
-                    )
-                    if not file_fk:
-                        raise RuntimeError(f"Failed to create Files record for {f.name}.")
-                    sd.check_db_lock()
-                    inserted = sd.load_shot_table_h26_replace_all_fast(
-                        f.file,
-                        file_fk=file_fk,
-                        chunk_size=3000,
-                        conn=conn,  # if using shared connection
-                    )
-
-                    total_inserted += int(inserted)
-                    file_results.append({
-                        "name": f.name,
-                        "file_fk": int(file_fk),
-                        "inserted": int(inserted),
-                    })
-
-                sd.create_shot_table_indexes(conn=conn)
-                conn.commit()
-
-            except Exception:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                raise
-            finally:
-                conn.close()
-
-        # ---------------------------------------------------------
-        # SPS: KEEP EXISTING FLOW
-        # ---------------------------------------------------------
         elif file_type == "SPS":
             for f in files:
-                print(f)
                 res = sd.load_source_sps_uploaded_file_fast(
                     f,
                     sps_revision=sps_revision,
@@ -243,36 +207,22 @@ def source_upload_files(request):
                 sd.update_slsolution_from_spsolution_timebased(file_fk=res["file_fk"])
                 sd.update_seq_maxspi(
                     production_code=pdb.get_geometry().production_code,
-                    seq=res["seq"]
+                    seq=res["seq"],
                 )
                 sd.update_slsolution_from_preplot_timebased(file_fk=res["file_fk"])
 
                 total_inserted += int(res.get("points") or 0)
                 file_results.append({"name": f.name, **res})
 
-        else:
-            return JsonResponse({"ok": False, "error": "Unsupported file type."}, status=400)
-
-        # ---- Render partials for frontend refresh ----
-        if file_type == "SHOT":
-            shot_table_rows = sd.list_shot_table_summary()
-            shot_summary = render_to_string(
-                "source/partials/shot_table_tbody.html",
-                {"rows": shot_table_rows},
-                request=request
-            )
-
-        elif file_type == "SPS":
             gun_qc = pdb.get_gun_qc()
             min_depth_limit = None
             max_depth_limit = None
-
             if gun_qc and getattr(gun_qc, "depth", None) is not None and getattr(gun_qc, "depth_tolerance", None) is not None:
                 min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
                 max_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
 
             sps_table_rows = sd.list_sps_files_summary()
-            sps_summary = render_to_string(
+            tbody_html = render_to_string(
                 "source/partials/sps_table_tbody.html",
                 {
                     "rows": sps_table_rows,
@@ -280,10 +230,11 @@ def source_upload_files(request):
                     "min_depth_limit": min_depth_limit,
                     "max_depth_limit": max_depth_limit,
                 },
-                request=request
+                request=request,
             )
+            target_tbody = "sps-table-tbody"
 
-            sps_extras = {
+            extras = {
                 "gun_qc": {
                     "depth": getattr(gun_qc, "depth", None) if gun_qc else None,
                     "depth_tolerance": getattr(gun_qc, "depth_tolerance", None) if gun_qc else None,
@@ -292,25 +243,23 @@ def source_upload_files(request):
                 "max_depth_limit": max_depth_limit,
             }
 
+        else:
+            return JsonResponse({"ok": False, "error": "Unsupported file type."}, status=400)
+
+        out = {
+            "ok": True,
+            "file_type": file_type,
+            "files": file_results,
+            "rows_inserted": int(total_inserted),
+            "target_tbody": target_tbody,
+            "tbody_html": tbody_html,
+        }
+        out.update(extras)
+
+        return JsonResponse(out)
+
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
-
-    out = {
-        "ok": True,
-        "file_type": file_type,
-        "files": file_results,
-        "rows_inserted": int(total_inserted),
-    }
-
-    if shot_summary is not None:
-        out["shot_summary"] = shot_summary
-    if sps_summary is not None:
-        out["sps_summary"] = sps_summary
-
-    if file_type == "SPS" and sps_extras:
-        out.update(sps_extras)
-
-    return JsonResponse(out)
 
 @login_required
 @require_POST
