@@ -49,6 +49,18 @@ Source day by Day production added
 Fixed migration removed wrong migration from folder  
 Dataviewer fixed error when viewer crushed if bbox_config not exists  or bbox_file was not uploaded for this line 
 ### Changed
-Source summary moved to Statistics tab 
+Source summary moved to Statistics tab
+## [2026.1.0.7] - 2026-03-06
+### Added
+In Source QC  Source Line Map plot added 
+In dataviewer to DSR table added Vessel and ROVs  
+Source day by Day production added
+On sps line click line map opened
+### Fixed
+Compare shot table and SPS 
+Fixed sps sort   
+Export/Import/Delete BlackBox config  
+### Changed
+ 
 
    

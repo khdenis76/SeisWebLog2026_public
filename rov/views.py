@@ -926,6 +926,7 @@ def dsr_export_sm(request):
 
 
 
+
 # rov/views.py
 
 @require_POST
@@ -1478,22 +1479,11 @@ def bbox_config_import_json(request):
     dsr = DSRDB(project.db_path)
 
     try:
-        config_id = dsr.save_bbox_config(
-            name=name,
-            vessel_name=(cfg.get("vessel_name") or "").strip(),
-            rov1_name=(cfg.get("rov1_name") or "").strip(),
-            rov2_name=(cfg.get("rov2_name") or "").strip(),
-            gnss1_name=(cfg.get("gnss1_name") or "").strip(),
-            gnss2_name=(cfg.get("gnss2_name") or "").strip(),
-            depth1_name=(cfg.get("depth1_name") or "").strip(),
-            depth2_name=(cfg.get("depth2_name") or "").strip(),
-            mapping=mapping,
-            is_default=bool(cfg.get("is_default", False)),
-        )
+        dsr.import_all_bbox_configs(project.export_dir)
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
 
-    return JsonResponse({"ok": True, "config_id": config_id})
+    return JsonResponse({"ok": True})
 @login_required
 @require_GET
 def bbox_config_export_all_json(request):

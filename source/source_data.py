@@ -3,7 +3,9 @@ import datetime
 import io
 import re
 import sqlite3
+import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Optional
 from core.models import SPSRevision
@@ -16,22 +18,36 @@ class SourceData:
     def __init__(self, db_path: Path | str):
         self.db_path = Path(db_path)
 
-    def _connect(self) -> sqlite3.Connection:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.db_path))
+    def _connect(self):
+        conn = sqlite3.connect(
+            self.db_path,
+            timeout=20,
+            isolation_level=None,
+            check_same_thread=False
+        )
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+
+        # debug only
+        # print(f"[DB_CONNECT] db={self.db_path}", flush=True)
+        # traceback.print_stack(limit=6)
+
         return conn
 
-    def drop_shot_table_indexes(self) -> int:
+    def drop_shot_table_indexes(self, conn=None) -> int:
         """
         Drops all user-created indexes for SHOT_TABLE.
         Returns number of dropped indexes.
         """
-        conn = self._connect()
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
         try:
             cur = conn.cursor()
 
-            # Get all user-created indexes (exclude SQLite auto indexes)
             indexes = cur.execute("""
                 SELECT name
                 FROM sqlite_master
@@ -43,15 +59,26 @@ class SourceData:
             dropped = 0
 
             for row in indexes:
-                index_name = row["name"]
+                index_name = row["name"] if hasattr(row, "keys") else row[0]
                 cur.execute(f'DROP INDEX IF EXISTS "{index_name}"')
                 dropped += 1
 
-            conn.commit()
+            if own_conn:
+                conn.commit()
+
             return dropped
 
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
         finally:
-            conn.close()
+            if own_conn:
+                conn.close()
 
     @staticmethod
     def decode_nav_line(code: str):
@@ -92,12 +119,14 @@ class SourceData:
         except ValueError:
             return None
 
-    def insert_file_record(self, file_name: str, file_type: str | None = None) -> int:
-        conn = self._connect()
+    def insert_file_record(self, file_name: str, file_type: str | None = None, conn=None) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
         try:
             cur = conn.cursor()
 
-            # 1️⃣ Check if file already exists
             cur.execute(
                 "SELECT id FROM Files WHERE FileName = ?",
                 (file_name,)
@@ -105,15 +134,27 @@ class SourceData:
             row = cur.fetchone()
 
             if row:
-                # File already exists → reuse ID
-                return int(row["id"])
+                return int(row["id"] if hasattr(row, "keys") else row[0])
 
-            # 2️⃣ Insert new record
-            cur.execute(
-                "INSERT INTO Files (FileName) VALUES (?)",
-                (file_name,)
-            )
-            conn.commit()
+            if file_type is not None:
+                try:
+                    cur.execute(
+                        "INSERT INTO Files (FileName) VALUES (?)",
+                        (file_name)
+                    )
+                except Exception:
+                    cur.execute(
+                        "INSERT INTO Files (FileName) VALUES (?)",
+                        (file_name,)
+                    )
+            else:
+                cur.execute(
+                    "INSERT INTO Files (FileName) VALUES (?)",
+                    (file_name,)
+                )
+
+            if own_conn:
+                conn.commit()
 
             file_fk = cur.lastrowid
             if not file_fk:
@@ -121,38 +162,19 @@ class SourceData:
 
             return int(file_fk)
 
-        finally:
-            conn.close()
-
-    def create_shot_table_indexes(self):
-        conn = self._connect()
-        try:
-            cur = conn.cursor()
-
-            cur.executescript("""
-            CREATE INDEX IF NOT EXISTS idx_shot_file_fk
-            ON SHOT_TABLE (File_FK);
-
-            CREATE INDEX IF NOT EXISTS idx_shot_line
-            ON SHOT_TABLE (sail_line);
-
-            CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq
-            ON SHOT_TABLE (nav_line, attempt, seq);
-
-            CREATE INDEX IF NOT EXISTS idx_shot_seq
-            ON SHOT_TABLE (seq);
-
-            CREATE INDEX IF NOT EXISTS idx_shot_time
-            ON SHOT_TABLE (shot_year, shot_day);
-
-            CREATE INDEX IF NOT EXISTS idx_shot_xy
-            ON SHOT_TABLE (shot_x, shot_y);
-            """)
-
-            conn.commit()
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
 
         finally:
-            conn.close()
+            if own_conn:
+                conn.close()
+
+
 
 
 
@@ -325,8 +347,11 @@ class SourceData:
                 pass
             conn.close()
 
-    def create_shot_table(self):
-        conn = self._connect()
+    def create_shot_table(self, conn=None):
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
         try:
             cur = conn.cursor()
 
@@ -379,10 +404,71 @@ class SourceData:
             );
             """)
 
-            conn.commit()
+            if own_conn:
+                conn.commit()
+
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
 
         finally:
-            conn.close()
+            if own_conn:
+                conn.close()
+
+    def create_shot_table_indexes(self, conn=None) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+
+            cur.execute("""
+                DELETE FROM SHOT_TABLE
+                WHERE id NOT IN (
+                    SELECT MAX(id)
+                    FROM SHOT_TABLE
+                    GROUP BY
+                        nav_line_code,
+                        nav_station,
+                        post_point_code
+                );
+            """)
+
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq
+                ON SHOT_TABLE(nav_line, attempt, seq);
+            """)
+
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_shot_unique
+                ON SHOT_TABLE(
+                    nav_line_code,
+                    nav_station,
+                    post_point_code
+                );
+            """)
+
+            if own_conn:
+                conn.commit()
+
+            return 2
+
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
+        finally:
+            if own_conn:
+                conn.close()
 
     def list_shot_table_summary(self) -> list[dict]:
         """
@@ -419,11 +505,165 @@ class SourceData:
         finally:
             conn.close()
 
-    def list_sps_files_summary(self) -> list[dict]:
+    def list_sps_files_summary(
+            self,
+            *,
+            search: str = "",
+            vessel_fk: int | None = None,
+            purpose: str = "",
+            sailline: str = "",
+            attempt: str = "",
+            line_from: int | None = None,
+            line_to: int | None = None,
+            seq_from: int | None = None,
+            seq_to: int | None = None,
+            wd: str = "",  # "", "Ok", "Error"
+            gd: str = "",  # "", "Ok", "Error"
+            min_depth_limit: float | None = None,
+            max_depth_limit: float | None = None,
+            sort_by: str = "seq",
+            sort_dir: str = "asc",
+    ) -> list[dict]:
         conn = self._connect()
         try:
             cur = conn.cursor()
-            rows = cur.execute("""
+
+            where = []
+            params = []
+
+            # -----------------------------
+            # text search
+            # -----------------------------
+            search = (search or "").strip().lower()
+            if search:
+                like = f"%{search}%"
+                where.append("""
+                    (
+                        lower(COALESCE(sl.SailLine, '')) LIKE ?
+                        OR lower(COALESCE(pv.vessel_name, '')) LIKE ?
+                        OR lower(COALESCE(p.purpose, '')) LIKE ?
+                        OR CAST(COALESCE(sl.Line, '') AS TEXT) LIKE ?
+                        OR CAST(COALESCE(sl.Seq, '') AS TEXT) LIKE ?
+                        OR CAST(COALESCE(sl.Attempt, '') AS TEXT) LIKE ?
+                        OR CAST(COALESCE(sl.MaxSPI, '') AS TEXT) LIKE ?
+                        OR CAST(COALESCE(sl.ProductionCount, '') AS TEXT) LIKE ?
+                        OR CAST(COALESCE(sl.NonProductionCount, '') AS TEXT) LIKE ?
+                        OR CAST(COALESCE(sl.KillCount, '') AS TEXT) LIKE ?
+                    )
+                """)
+                params.extend([like, like, like, like, like, like, like, like, like, like])
+
+            # -----------------------------
+            # exact filters
+            # -----------------------------
+            if vessel_fk is not None:
+                where.append("COALESCE(sl.Vessel_FK, 0) = ?")
+                params.append(int(vessel_fk))
+
+            purpose = (purpose or "").strip()
+            if purpose:
+                where.append("COALESCE(p.purpose, '') = ?")
+                params.append(purpose)
+
+            sailline = (sailline or "").strip()
+            if sailline:
+                where.append("COALESCE(sl.SailLine, '') = ?")
+                params.append(sailline)
+
+            attempt = (attempt or "").strip()
+            if attempt:
+                where.append("CAST(COALESCE(sl.Attempt, '') AS TEXT) = ?")
+                params.append(attempt)
+
+            if line_from is not None:
+                where.append("COALESCE(sl.Line, 0) >= ?")
+                params.append(int(line_from))
+
+            if line_to is not None:
+                where.append("COALESCE(sl.Line, 0) <= ?")
+                params.append(int(line_to))
+
+            if seq_from is not None:
+                where.append("COALESCE(sl.Seq, 0) >= ?")
+                params.append(int(seq_from))
+
+            if seq_to is not None:
+                where.append("COALESCE(sl.Seq, 0) <= ?")
+                params.append(int(seq_to))
+
+            # -----------------------------
+            # WD status
+            # template logic:
+            # if MinProdWaterDepth > 0 => Ok else Error
+            # -----------------------------
+            wd = (wd or "").strip()
+            if wd == "Ok":
+                where.append("COALESCE(sl.MinProdWaterDepth, 0) > 0")
+            elif wd == "Error":
+                where.append("COALESCE(sl.MinProdWaterDepth, 0) <= 0")
+
+            # -----------------------------
+            # GD status
+            # template logic:
+            # min_depth_limit <= MinProdGunDepth <= max_depth_limit => Ok
+            # -----------------------------
+            gd = (gd or "").strip()
+            if gd and min_depth_limit is not None and max_depth_limit is not None:
+                if gd == "Ok":
+                    where.append("COALESCE(sl.MinProdGunDepth, 0) BETWEEN ? AND ?")
+                    params.extend([float(min_depth_limit), float(max_depth_limit)])
+                elif gd == "Error":
+                    where.append("""
+                        (
+                            COALESCE(sl.MinProdGunDepth, 0) < ?
+                            OR COALESCE(sl.MinProdGunDepth, 0) > ?
+                        )
+                    """)
+                    params.extend([float(min_depth_limit), float(max_depth_limit)])
+
+            # -----------------------------
+            # safe order by map
+            # -----------------------------
+            sort_map = {
+                "id": "sl.ID",
+                "ppline": "sl.PPLine_FK",
+                "sailline": "sl.SailLine",
+                "line": "sl.Line",
+                "seq": "sl.Seq",
+                "attempt": "sl.Attempt",
+                "tier": "sl.Tier",
+                "tierline": "sl.TierLine",
+                "fsp": "sl.FSP",
+                "lsp": "sl.LSP",
+                "fgsp": "sl.FGSP",
+                "lgsp": "sl.LGSP",
+                "vessel": "pv.vessel_name",
+                "source": "pv.vessel_name",
+                "purpose": "p.purpose",
+                "start_time": "sl.Start_Time",
+                "end_time": "sl.End_Time",
+                "linelength": "sl.LineLength",
+                "prodstart": "sl.Start_Production_Time",
+                "prodend": "sl.End_Production_Time",
+                "percentline": "sl.PercentOfLineCompleted",
+                "percentseq": "sl.PercentOfSeqCompleted",
+                "production": "sl.ProductionCount",
+                "nonproduction": "sl.NonProductionCount",
+                "kill": "sl.KillCount",
+                "gdmin": "sl.MinProdGunDepth",
+                "gdmax": "sl.MaxProdGunDepth",
+                "wdmin": "sl.MinProdWaterDepth",
+                "wdmax": "sl.MaxProdWaterDepth",
+                "pplength": "sl.PP_Length",
+                "seqlenpercentage": "sl.SeqLenPercentage",
+                "maxspi": "sl.MaxSPI",
+                "maxseq": "sl.MaxSeq",
+            }
+
+            order_col = sort_map.get((sort_by or "").strip().lower(), "sl.Seq")
+            order_dir = "DESC" if (sort_dir or "").strip().lower() == "desc" else "ASC"
+
+            sql = f"""
                 SELECT
                     sl.ID,
                     sl.PPLine_FK,
@@ -473,10 +713,13 @@ class SourceData:
                   ON sl.purpose_id = p.purpose_id
                 LEFT JOIN project_fleet pv
                   ON sl.Vessel_FK = pv.id
-                ORDER BY sl.Seq, sl.Attempt;
-            """).fetchall()
+                {"WHERE " + " AND ".join(where) if where else ""}
+                ORDER BY {order_col} {order_dir}, sl.Seq ASC, sl.Attempt ASC;
+            """
 
+            rows = cur.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
+
         finally:
             conn.close()
     #=============================================================================================
@@ -759,9 +1002,6 @@ class SourceData:
             cur.execute("PRAGMA journal_mode = WAL;")
 
         conn.commit()
-
-    import sqlite3
-    import time
 
     def _ensure_shot_unique_index(self, conn, tries=10, sleep_s=0.5):
         conn.execute("PRAGMA busy_timeout = 60000;")
@@ -1151,9 +1391,20 @@ class SourceData:
             self,
             file_obj,
             file_fk: int,
-            chunk_size: int = 100000,
-            lock_timeout_s: int = 10,  # FAIL FAST
+            chunk_size: int = 100,
+            lock_timeout_s: int = 120,
+            conn=None,
     ) -> int:
+        """
+        Import SHOT H26 CSV and insert only NEW rows.
+
+        Requires UNIQUE index on:
+            (nav_line_code, nav_station, post_point_code)
+        """
+        import csv
+        import io
+        import sqlite3
+        import time
 
         print("\n[SHOT_IMPORT] started", flush=True)
         t0 = time.time()
@@ -1161,86 +1412,98 @@ class SourceData:
         if not file_fk:
             raise ValueError("file_fk is required (NOT NULL)")
 
-        conn = self._connect()
+        own_conn = conn is None
+        print(f"[SHOT_IMPORT] own_conn={own_conn}", flush=True)
+        print(f"[SHOT_IMPORT] chunk_size={chunk_size}", flush=True)
+
+        if own_conn:
+            conn = self._connect()
+
         text_stream = None
 
-        try:
-            # ---- one-writer-many-readers setup ----
-            # WAL: readers can continue while we write
-            # synchronous NORMAL: good balance of speed/safety
-            try:
-                conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute("PRAGMA synchronous=NORMAL;")
-            except Exception:
-                # if DB is locked for this PRAGMA, continue (not critical)
-                pass
-
-            conn.execute("PRAGMA foreign_keys=OFF;")
-            conn.execute("PRAGMA busy_timeout=250;")  # short waits per attempt
-            self._set_fast_import_pragmas(conn, aggressive=False)
-
-            cur = conn.cursor()
-
-            # optional debug: confirm DB file
-            try:
-                dbs = conn.execute("PRAGMA database_list;").fetchall()
-                for _, name, path in dbs:
-                    print(f"[SHOT_IMPORT] db_file({name})={path}", flush=True)
-            except Exception:
-                pass
-
-            # -------------------------------------------------
-            # DROP ALL INDEXES ON SHOT_TABLE
-            # -------------------------------------------------
-            print("[SHOT_IMPORT] dropping existing SHOT_TABLE indexes...", flush=True)
-
-            indexes = cur.execute("""
-                SELECT name
-                FROM sqlite_master
-                WHERE type='index'
-                  AND tbl_name='SHOT_TABLE'
-                  AND name NOT LIKE 'sqlite_autoindex%';
-            """).fetchall()
-
-            for (name,) in indexes:
-                cur.execute(f'DROP INDEX IF EXISTS "{name}"')
-
-            print(f"[SHOT_IMPORT] dropped {len(indexes)} indexes", flush=True)
-
-            # -------------------------------------------------
-            # ACQUIRE WRITE LOCK (FAIL FAST)
-            # -------------------------------------------------
-            print("[SHOT_IMPORT] acquiring write lock...", flush=True)
-
-            t_lock = time.time()
+        def _begin_immediate_retry(cursor, timeout_s=120, sleep_s=1.0):
+            t1 = time.time()
             while True:
                 try:
-                    cur.execute("BEGIN IMMEDIATE;")
-                    break
+                    cursor.execute("BEGIN IMMEDIATE;")
+                    return
                 except sqlite3.OperationalError as e:
                     if "locked" not in str(e).lower():
                         raise
-                    waited = time.time() - t_lock
-                    if waited >= lock_timeout_s:
+                    waited = time.time() - t1
+                    if waited >= timeout_s:
                         raise sqlite3.OperationalError(
-                            f"database is locked (waited {waited:.0f}s). "
-                            "Close DB Browser / DataViewer / auto-refresh pages and retry."
+                            f"database is locked (waited {waited:.0f}s) while starting transaction."
                         )
-                    time.sleep(0.5)
+                    print(f"[SHOT_IMPORT] waiting for BEGIN IMMEDIATE... {waited:.1f}s", flush=True)
+                    time.sleep(sleep_s)
 
-            print(f"[SHOT_IMPORT] transaction started (lock in {time.time() - t_lock:.1f}s)", flush=True)
+        def _executemany_retry(cursor, sql, rows, timeout_s=120, sleep_s=1.0):
+            t1 = time.time()
+            while True:
+                try:
+                    return cursor.executemany(sql, rows)
+                except sqlite3.OperationalError as e:
+                    if "locked" not in str(e).lower():
+                        raise
+                    waited = time.time() - t1
+                    if waited >= timeout_s:
+                        raise sqlite3.OperationalError(
+                            f"database is locked (waited {waited:.0f}s) during batch insert."
+                        )
+                    print(
+                        f"[SHOT_IMPORT] waiting during batch insert... "
+                        f"rows={len(rows)} waited={waited:.1f}s",
+                        flush=True
+                    )
+                    time.sleep(sleep_s)
 
-            # -------------------------------------------------
-            # CLEAR TABLE
-            # -------------------------------------------------
-            print("[SHOT_IMPORT] clearing SHOT_TABLE...", flush=True)
-            cur.execute("DELETE FROM SHOT_TABLE;")
+        try:
+            cur = conn.cursor()
 
-            # -------------------------------------------------
-            # INSERT SQL
-            # -------------------------------------------------
+            try:
+                cur.execute("PRAGMA journal_mode=WAL;")
+            except Exception:
+                pass
+
+            try:
+                cur.execute("PRAGMA synchronous=NORMAL;")
+            except Exception:
+                pass
+
+            try:
+                cur.execute("PRAGMA foreign_keys=OFF;")
+            except Exception:
+                pass
+
+            try:
+                cur.execute("PRAGMA busy_timeout=10000;")
+            except Exception:
+                pass
+
+            try:
+                self._set_fast_import_pragmas(conn, aggressive=False)
+            except Exception:
+                pass
+
+            try:
+                dbs = cur.execute("PRAGMA database_list;").fetchall()
+                for db_row in dbs:
+                    if isinstance(db_row, sqlite3.Row):
+                        print(f"[SHOT_IMPORT] db_file({db_row['name']})={db_row['file']}", flush=True)
+                    else:
+                        _, name, path = db_row
+                        print(f"[SHOT_IMPORT] db_file({name})={path}", flush=True)
+            except Exception:
+                pass
+
+            if own_conn:
+                print("[SHOT_IMPORT] acquiring write lock...", flush=True)
+                _begin_immediate_retry(cur, timeout_s=lock_timeout_s, sleep_s=1.0)
+                print("[SHOT_IMPORT] transaction started", flush=True)
+
             insert_sql = """
-            INSERT INTO SHOT_TABLE (
+            INSERT OR IGNORE INTO SHOT_TABLE (
                 File_FK,
                 sail_line, shot_station, shot_index, shot_status,
                 nav_line_code, nav_line, attempt, seq,
@@ -1255,24 +1518,29 @@ class SourceData:
 
             probe = file_obj.read(0)
             if isinstance(probe, (bytes, bytearray)):
-                text_stream = io.TextIOWrapper(file_obj, encoding="utf-8", errors="ignore", newline="")
+                text_stream = io.TextIOWrapper(
+                    file_obj,
+                    encoding="utf-8",
+                    errors="ignore",
+                    newline=""
+                )
             else:
                 text_stream = file_obj
 
             reader = csv.reader(text_stream, delimiter=",", skipinitialspace=True)
 
             processed = 0
+            attempted = 0
             batch = []
 
-            # speed tricks (local bindings)
             decode_nav = self.decode_nav_line
             to_int = self.to_int
             to_float = self.to_float
             file_fk_i = int(file_fk)
-            executemany = cur.executemany
             batch_append = batch.append
 
             last_print = time.time()
+            print("[SHOT_IMPORT] entering CSV loop...", flush=True)
 
             for row in reader:
                 if not row:
@@ -1285,14 +1553,21 @@ class SourceData:
                     continue
 
                 parts = first.split()
-                sail_line = to_int(parts[1]) if (len(parts) == 2 and parts[0].upper() == "S") else to_int(first)
+                sail_line = (
+                    to_int(parts[1])
+                    if (len(parts) == 2 and parts[0].upper() == "S")
+                    else to_int(first)
+                )
 
                 shot_station = to_int(row[1])
                 shot_index = to_int(row[2])
                 shot_status = to_int(row[3])
 
-                post_point_code = (row[4] or "").strip() or None
-                fire_code = post_point_code[0].upper() if post_point_code else None
+                post_point_code = (row[4] or "").strip().upper()
+                if not post_point_code:
+                    post_point_code = ""
+
+                fire_code = post_point_code[:1] if post_point_code else ""
 
                 gun_depth = to_float(row[5])
                 water_depth = to_float(row[6])
@@ -1311,10 +1586,17 @@ class SourceData:
                 array_id = (row[16] or "").strip() or None
                 source_id = to_int(row[17])
 
-                nav_line_code = (row[18] or "").strip() or None
-                nav_line, attempt, seq = decode_nav(nav_line_code or "")
+                nav_line_code = (row[18] or "").strip()
+                if not nav_line_code:
+                    nav_line_code = ""
+
+                nav_line, attempt, seq = decode_nav(nav_line_code)
+                attempt = "" if attempt is None else str(attempt)
 
                 nav_station = to_int(row[19])
+                if nav_station is None:
+                    nav_station = 0
+
                 shot_group_id = to_int(row[20])
                 elevation = to_float(row[21])
 
@@ -1329,52 +1611,74 @@ class SourceData:
                     vessel, array_id, source_id,
                     nav_station, shot_group_id, elevation
                 ))
+                attempted += 1
 
                 if len(batch) >= chunk_size:
-                    executemany(insert_sql, batch)
-                    processed += len(batch)
+                    print(
+                        f"[SHOT_IMPORT] inserting batch size={len(batch)} attempted={attempted:,}",
+                        flush=True
+                    )
+                    before = conn.total_changes
+                    _executemany_retry(cur, insert_sql, batch, timeout_s=lock_timeout_s, sleep_s=1.0)
+                    inserted_now = conn.total_changes - before
+                    processed += inserted_now
                     batch.clear()
+
+                    if own_conn:
+                        print("[SHOT_IMPORT] committing batch...", flush=True)
+                        conn.commit()
+                        _begin_immediate_retry(cur, timeout_s=lock_timeout_s, sleep_s=1.0)
+
+                    print(f"[SHOT_IMPORT] batch done inserted_total={processed:,}", flush=True)
 
                     now = time.time()
                     if now - last_print >= 2.0:
                         elapsed = now - t0
                         print(
-                            f"[SHOT_IMPORT] rows={processed:,}  "
-                            f"time={elapsed:.1f}s  "
-                            f"speed={processed / elapsed:,.0f} rows/sec",
+                            f"[SHOT_IMPORT] progress inserted={processed:,} attempted={attempted:,} "
+                            f"time={elapsed:.1f}s speed={attempted / elapsed:,.0f} rows/sec",
                             flush=True
                         )
                         last_print = now
 
             if batch:
-                executemany(insert_sql, batch)
-                processed += len(batch)
+                print(
+                    f"[SHOT_IMPORT] inserting final batch size={len(batch)} attempted={attempted:,}",
+                    flush=True
+                )
+                before = conn.total_changes
+                _executemany_retry(cur, insert_sql, batch, timeout_s=lock_timeout_s, sleep_s=1.0)
+                inserted_now = conn.total_changes - before
+                processed += inserted_now
+                batch.clear()
 
-            # -------------------------------------------------
-            # CREATE ONLY ONE INDEX
-            # -------------------------------------------------
-            print("[SHOT_IMPORT] creating final index idx_shot_line_attempt_seq...", flush=True)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq
-                ON SHOT_TABLE(nav_line, attempt, seq);
-            """)
+                if own_conn:
+                    print("[SHOT_IMPORT] committing final batch...", flush=True)
+                    conn.commit()
 
-            conn.commit()
+                print(f"[SHOT_IMPORT] final batch done inserted_total={processed:,}", flush=True)
+
+            elif own_conn:
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
 
             total_time = time.time() - t0
             print(
-                f"[SHOT_IMPORT] FINISHED rows={processed:,} "
-                f"time={total_time:.1f}s "
-                f"speed={processed / total_time:,.0f} rows/sec",
+                f"[SHOT_IMPORT] FINISHED inserted={processed:,} attempted={attempted:,} "
+                f"time={total_time:.1f}s speed={attempted / total_time:,.0f} rows/sec",
                 flush=True
             )
+            print("[SHOT_IMPORT] leaving function", flush=True)
             return processed
 
         except Exception as e:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             print("[SHOT_IMPORT] ERROR:", e, flush=True)
             raise
 
@@ -1384,11 +1688,14 @@ class SourceData:
                     text_stream.detach()
             except Exception:
                 pass
+
             try:
                 conn.execute("PRAGMA foreign_keys=ON;")
             except Exception:
                 pass
-            conn.close()
+
+            if own_conn:
+                conn.close()
     def load_source_sps_uploaded_file_fast(
             self,
             uploaded_file,  # Django UploadedFile
@@ -2394,3 +2701,19 @@ class SourceData:
 
         finally:
             conn.close()
+
+    def check_db_lock(self):
+        import sqlite3
+        import time
+
+        conn = sqlite3.connect(self.db_path, timeout=1)
+        cur = conn.cursor()
+
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+            conn.rollback()
+            print("DB is FREE")
+        except sqlite3.OperationalError as e:
+            print("DB LOCKED:", e)
+
+        conn.close()

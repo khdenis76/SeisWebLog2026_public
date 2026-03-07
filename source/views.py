@@ -34,8 +34,9 @@ def source_home(request):
     min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
     max_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
     shot_table_rows = sd.list_shot_table_summary()
-    sps_table_rows =sd.list_sps_files_summary()
+
     st_summary = render_to_string("source/partials/shot_table_tbody.html",{"rows":shot_table_rows})
+    sps_table_rows = sd.list_sps_files_summary()
     sps_summary = render_to_string("source/partials/sps_table_tbody.html",
                                    {"rows":sps_table_rows,
                                     "min_depth_limit":min_depth_limit,
@@ -85,6 +86,8 @@ def source_home(request):
         },)
 @login_required
 @require_POST
+@login_required
+@require_POST
 def source_upload_files(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -117,7 +120,6 @@ def source_upload_files(request):
         tier_raw = (request.POST.get("tier") or "").strip()
         year_raw = (request.POST.get("year") or "").strip()
 
-        # vessel required only if NOT detect
         if (not detect_by_seq) and (not source_vessel_id):
             return JsonResponse({"ok": False, "error": "Missing Source Vessel."}, status=400)
         if not sps_revision_id:
@@ -148,7 +150,6 @@ def source_upload_files(request):
             except Exception:
                 return JsonResponse({"ok": False, "error": "Invalid Year."}, status=400)
 
-        # validate selected vessel ONLY if detect mode OFF
         if not detect_by_seq:
             fleet = pdb.list_project_fleet()
             vessel_row = None
@@ -165,17 +166,7 @@ def source_upload_files(request):
             if not vessel_row:
                 return JsonResponse({"ok": False, "error": "Source Vessel not found in project fleet."}, status=400)
 
-    # Speed: drop indexes once for SHOT
-    dropped_shot = False
-    if file_type == "SHOT":
-        try:
-            sd.create_shot_table()
-            sd.drop_shot_table_indexes()
-            dropped_shot = True
-        except Exception:
-            dropped_shot = False
-
-    shot_summary = None  # kept for compatibility, but SPS will not set it
+    shot_summary = None
     sps_summary = None
     sps_extras = None
 
@@ -183,21 +174,58 @@ def source_upload_files(request):
         total_inserted = 0
         file_results = []
 
-        for f in files:
-            file_fk = sd.insert_file_record(file_name=f.name, file_type=file_type)
-            if not file_fk:
-                return JsonResponse({"ok": False, "error": f"Failed to create Files record for {f.name}."}, status=500)
+        # ---------------------------------------------------------
+        # SHOT: ONE CONNECTION / ONE TRANSACTION FOR WHOLE IMPORT
+        # ---------------------------------------------------------
+        if file_type == "SHOT":
+            conn = sd._connect()
+            try:
+                cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE;")
 
-            if file_type == "SHOT":
-                inserted = sd.load_shot_table_h26_replace_all_fast(
-                    f.file,
-                    file_fk=file_fk,
-                    chunk_size=50000,
-                )
-                total_inserted += int(inserted)
-                file_results.append({"name": f.name, "file_fk": int(file_fk), "inserted": int(inserted)})
+                sd.create_shot_table(conn=conn)
+                sd.drop_shot_table_indexes(conn=conn)
 
-            elif file_type == "SPS":
+                for f in files:
+                    file_fk = sd.insert_file_record(
+                        file_name=f.name,
+                        file_type=file_type,
+                        conn=conn,
+                    )
+                    if not file_fk:
+                        raise RuntimeError(f"Failed to create Files record for {f.name}.")
+                    sd.check_db_lock()
+                    inserted = sd.load_shot_table_h26_replace_all_fast(
+                        f.file,
+                        file_fk=file_fk,
+                        chunk_size=3000,
+                        conn=conn,  # if using shared connection
+                    )
+
+                    total_inserted += int(inserted)
+                    file_results.append({
+                        "name": f.name,
+                        "file_fk": int(file_fk),
+                        "inserted": int(inserted),
+                    })
+
+                sd.create_shot_table_indexes(conn=conn)
+                conn.commit()
+
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                conn.close()
+
+        # ---------------------------------------------------------
+        # SPS: KEEP EXISTING FLOW
+        # ---------------------------------------------------------
+        elif file_type == "SPS":
+            for f in files:
                 print(f)
                 res = sd.load_source_sps_uploaded_file_fast(
                     f,
@@ -213,14 +241,17 @@ def source_upload_files(request):
                 )
 
                 sd.update_slsolution_from_spsolution_timebased(file_fk=res["file_fk"])
-                sd.update_seq_maxspi(production_code=pdb.get_geometry().production_code,seq=res["seq"])
+                sd.update_seq_maxspi(
+                    production_code=pdb.get_geometry().production_code,
+                    seq=res["seq"]
+                )
                 sd.update_slsolution_from_preplot_timebased(file_fk=res["file_fk"])
 
                 total_inserted += int(res.get("points") or 0)
                 file_results.append({"name": f.name, **res})
 
-            else:
-                return JsonResponse({"ok": False, "error": "Unsupported file type."}, status=400)
+        else:
+            return JsonResponse({"ok": False, "error": "Unsupported file type."}, status=400)
 
         # ---- Render partials for frontend refresh ----
         if file_type == "SHOT":
@@ -232,7 +263,6 @@ def source_upload_files(request):
             )
 
         elif file_type == "SPS":
-            # Gun QC limits
             gun_qc = pdb.get_gun_qc()
             min_depth_limit = None
             max_depth_limit = None
@@ -253,7 +283,6 @@ def source_upload_files(request):
                 request=request
             )
 
-            # Extras for JS / frontend
             sps_extras = {
                 "gun_qc": {
                     "depth": getattr(gun_qc, "depth", None) if gun_qc else None,
@@ -263,12 +292,8 @@ def source_upload_files(request):
                 "max_depth_limit": max_depth_limit,
             }
 
-    finally:
-        if dropped_shot:
-            try:
-                sd.create_shot_table_indexes()
-            except Exception:
-                pass
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
     out = {
         "ok": True,
@@ -282,7 +307,6 @@ def source_upload_files(request):
     if sps_summary is not None:
         out["sps_summary"] = sps_summary
 
-    # Add SPS extras only for SPS
     if file_type == "SPS" and sps_extras:
         out.update(sps_extras)
 
@@ -322,8 +346,6 @@ def sps_delete_selected(request):
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
-from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
 
 @login_required
 def source_qc_progress_map_json(request):
@@ -408,5 +430,145 @@ def source_daybyday_production_json(request):
     )
 
     return JsonResponse(item)
+def _to_int_or_none(v):
+    try:
+        v = str(v or "").strip()
+        return int(v) if v != "" else None
+    except Exception:
+        return None
+
+
+def _to_float_or_none(v):
+    try:
+        s = str(v).strip()
+        if s == "":
+            return None
+        return float(s)
+    except Exception:
+        return None
+
+
+def _norm_str(v):
+    return str(v or "").strip()
+
+
+def _row_text_for_search(row):
+    parts = []
+    for val in row.values():
+        if val is None:
+            continue
+        parts.append(str(val))
+    return " ".join(parts).lower()
+
+
+@login_required
+def source_sps_table_data(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    pdb = ProjectDB(project.db_path)
+    sd = SourceData(project.db_path)
+
+    gun_qc = pdb.get_gun_qc()
+    min_depth_limit = None
+    max_depth_limit = None
+    if gun_qc:
+        min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
+        max_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
+
+    sps_table_rows = sd.list_sps_files_summary(
+        search=request.GET.get("search", ""),
+        vessel_fk=_to_int_or_none(request.GET.get("vessel")),
+        purpose=request.GET.get("purpose", ""),
+        sailline=request.GET.get("sailline", ""),
+        attempt=request.GET.get("attempt", ""),
+        line_from=_to_int_or_none(request.GET.get("line_from")),
+        line_to=_to_int_or_none(request.GET.get("line_to")),
+        seq_from=_to_int_or_none(request.GET.get("seq_from")),
+        seq_to=_to_int_or_none(request.GET.get("seq_to")),
+        wd=request.GET.get("wd", ""),
+        gd=request.GET.get("gd", ""),
+        min_depth_limit=min_depth_limit,
+        max_depth_limit=max_depth_limit,
+        sort_by=request.GET.get("sort_by", "seq"),
+        sort_dir=request.GET.get("sort_dir", "asc"),
+    )
+
+    sps_summary = render_to_string(
+        "source/partials/sps_table_tbody.html",
+        {
+            "rows": sps_table_rows,
+            "min_depth_limit": min_depth_limit,
+            "max_depth_limit": max_depth_limit,
+            "gun_qc": gun_qc,
+        },
+        request=request,
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "count": len(sps_table_rows),
+        "sps_summary": sps_summary,
+    })
+
+@login_required
+def source_sp_solution_vs_preplot_json(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    line_raw = request.GET.get("line")
+    if line_raw in (None, ""):
+        return JsonResponse({"ok": False, "error": "Missing line."}, status=400)
+
+    try:
+        line = int(line_raw)
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "Invalid line."}, status=400)
+
+    label_every = request.GET.get("label_every", 10)
+    point_size = request.GET.get("point_size", 7)
+
+    try:
+        label_every = max(1, min(20, int(label_every)))
+    except (TypeError, ValueError):
+        label_every = 10
+
+    try:
+        point_size = max(2, int(point_size))
+    except (TypeError, ValueError):
+        point_size = 7
+
+    try:
+        sm = SourceMapGraphics(project.db_path)
+
+        item = sm.build_sp_solution_vs_preplot(
+            line=line,
+            is_show=False,
+            json_return=True,
+            label_every=label_every,
+            point_size=point_size,
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "line": line,
+            "item": item,
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            "ok": False,
+            "error": str(e),
+        }, status=500)
 
 

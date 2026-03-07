@@ -914,10 +914,6 @@ class DSRDB:
           RemoteUnit normalization matches your existing DSR hashing:
             "297080001/14987"  -> "14987 297080001"
         """
-        import io
-        import re
-        import pandas as pd
-        from pathlib import Path
 
         UPDATE_WHITELIST = [
             "Area",
@@ -2472,140 +2468,233 @@ WHERE Area IS NOT NULL
 
         return {"ok": True}
 
-    def export_all_bbox_configs(self, export_dir: str) -> dict:
+    def export_all_bbox_configs(self, dir: str) -> dict:
         """
-        Export all BBox configs to:
-
-            <export_dir>/bbox_configs.json
-
-        - export_dir is required (absolute or relative path)
-        - creates directory if missing
-        - filename is constant
+        Export all rows from BBox_Configs_List and BBox_Config
+        into one JSON file: <dir>/bbox_configs.json
         """
-        if not export_dir:
-            return {"ok": False, "error": "export_dir is required"}
-
-        self.ensure_bbox_config_schema()
-
-        def _find_col(cols, *candidates):
-            cols_l = {c.lower(): c for c in cols}
-            for cand in candidates:
-                if cand.lower() in cols_l:
-                    return cols_l[cand.lower()]
-            return None
-
-        with self._connect() as conn:
-            conn.execute("PRAGMA foreign_keys = ON;")
-
-            cfg_rows = conn.execute("""
-                SELECT
-                    ID, Name, IsDefault,
-                    Vessel_name,
-                    ROV1_name, ROV2_name,
-                    GNSS1_name, GNSS2_name,
-                    Depth1_name, Depth2_name
-                FROM BBox_Configs_List
-                ORDER BY IsDefault DESC, Name COLLATE NOCASE
-            """).fetchall()
-
-            info = conn.execute("PRAGMA table_info(BBox_Config)").fetchall()
-            cols = [r[1] for r in info]
-
-            cfg_fk_col = _find_col(cols, "CONFIG_FK", "config_fk", "Config_FK")
-            field_col = _find_col(cols, "field_name", "FieldName", "FIELD_NAME")
-            col_col = _find_col(cols, "col_name", "ColName", "COL_NAME")
-
-            if not (cfg_fk_col and field_col and col_col):
-                return {"ok": False, "error": "BBox_Config columns not found"}
-
-            sql = f"""
-                SELECT {cfg_fk_col}, {field_col}, {col_col}
-                FROM BBox_Config
-                ORDER BY {cfg_fk_col}, {field_col}
-            """
-            map_rows = conn.execute(sql).fetchall()
-
-        # ---- build mapping dict ----
-        mapping_by_cfg = {}
-        for cid, field_name, col_name in map_rows:
-            mapping_by_cfg.setdefault(int(cid), {})[str(field_name)] = (
-                "" if col_name is None else str(col_name)
-            )
-
-        configs = []
-        for r in cfg_rows:
-            cid = int(r[0])
-            configs.append({
-                "id": cid,
-                "name": r[1],
-                "is_default": int(r[2] or 0),
-                "vessel_name": r[3] or "",
-                "rov1_name": r[4] or "",
-                "rov2_name": r[5] or "",
-                "gnss1_name": r[6] or "",
-                "gnss2_name": r[7] or "",
-                "depth1_name": r[8] or "",
-                "depth2_name": r[9] or "",
-                "mapping": mapping_by_cfg.get(cid, {}),
-            })
-
-        payload = {
-            "schema": "SeisWebLog.BBoxConfigs.v1",
-            "exported_at": datetime.utcnow().isoformat() + "Z",
-            "configs": configs,
-        }
-
-        # ---- ensure export directory exists ----
         try:
-            os.makedirs(export_dir, exist_ok=True)
+            self.ensure_bbox_config_schema()
+
+            out_dir = Path(dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_file = out_dir / "bbox_configs.json"
+
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+
+                cfg_list_rows = cur.execute("""
+                    SELECT *
+                    FROM BBox_Configs_List
+                    ORDER BY ID
+                """).fetchall()
+
+                cfg_rows = cur.execute("""
+                    SELECT *
+                    FROM BBox_Config
+                    ORDER BY CONFIG_FK, ID
+                """).fetchall()
+
+                payload = {
+                    "BBox_Configs_List": [dict(r) for r in cfg_list_rows],
+                    "BBox_Config": [dict(r) for r in cfg_rows],
+                }
+
+            with open(out_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+
+            return {
+                "ok": True,
+                "file": str(out_file),
+                "configs_count": len(payload["BBox_Configs_List"]),
+                "fields_count": len(payload["BBox_Config"]),
+            }
+
         except Exception as e:
-            return {"ok": False, "error": f"Cannot create export directory: {e}"}
+            return {
+                "ok": False,
+                "error": str(e),
+            }
 
-        file_path = os.path.join(export_dir, "bbox_configs.json")
+    def import_all_bbox_configs(self, dir: str) -> dict:
+        """
+        Import BBox_Configs_List and BBox_Config from <dir>/bbox_configs.json
 
+        Rules:
+        - BBox_Config.ID from JSON is ignored, SQLite generates a new one
+        - Parent BBox_Configs_List row is always imported
+        - If parent ID already exists, a new ID is generated automatically
+        - If parent Name already exists, import it with next available suffix:
+            Name
+            Name (2)
+            Name (3)
+            ...
+        - Child rows are linked to the actually inserted parent row
+        """
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
+            self.ensure_bbox_config_schema()
+
+            in_file = Path(dir) / "bbox_configs.json"
+            if not in_file.exists():
+                return {
+                    "ok": False,
+                    "error": f"JSON file not found: {in_file}"
+                }
+
+            with open(in_file, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+            cfg_list_rows = payload.get("BBox_Configs_List", [])
+            cfg_rows = payload.get("BBox_Config", [])
+
+            if not isinstance(cfg_list_rows, list) or not isinstance(cfg_rows, list):
+                return {
+                    "ok": False,
+                    "error": "Invalid JSON structure. Expected keys: BBox_Configs_List and BBox_Config."
+                }
+
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+
+                conn.execute("PRAGMA foreign_keys = ON;")
+                conn.execute("BEGIN IMMEDIATE;")
+
+                try:
+                    imported_parents = 0
+                    imported_children = 0
+                    skipped_parents_invalid = 0
+                    skipped_children = 0
+                    renamed_parents = 0
+
+                    # old CONFIG_FK from JSON -> new inserted parent ID in DB
+                    fk_map = {}
+
+                    existing_names = {
+                        str(r[0]).strip()
+                        for r in cur.execute("""
+                            SELECT Name
+                            FROM BBox_Configs_List
+                            WHERE Name IS NOT NULL AND TRIM(Name) <> ''
+                        """).fetchall()
+                    }
+
+                    def _make_unique_name(base_name: str) -> tuple[str, bool]:
+                        """
+                        Returns unique name and bool flag whether it was renamed.
+                        """
+                        name = (base_name or "").strip()
+                        if not name:
+                            name = "Unnamed Config"
+
+                        if name not in existing_names:
+                            existing_names.add(name)
+                            return name, False
+
+                        i = 2
+                        while True:
+                            candidate = f"{name} ({i})"
+                            if candidate not in existing_names:
+                                existing_names.add(candidate)
+                                return candidate, True
+                            i += 1
+
+                    # -----------------------------------
+                    # import BBox_Configs_List
+                    # -----------------------------------
+                    for row in cfg_list_rows:
+                        if not isinstance(row, dict):
+                            skipped_parents_invalid += 1
+                            continue
+
+                        old_id = row.get("ID")
+                        if old_id is None:
+                            skipped_parents_invalid += 1
+                            continue
+
+                        old_id = int(old_id)
+
+                        row_new = dict(row)
+
+                        # do not keep old ID if it may already exist
+                        row_new.pop("ID", None)
+
+                        base_name = row.get("Name")
+                        unique_name, was_renamed = _make_unique_name(base_name)
+                        row_new["Name"] = unique_name
+
+                        if was_renamed:
+                            renamed_parents += 1
+
+                        cols = list(row_new.keys())
+                        vals = [row_new[c] for c in cols]
+
+                        sql = f"""
+                            INSERT INTO BBox_Configs_List ({", ".join(cols)})
+                            VALUES ({", ".join("?" for _ in cols)})
+                        """
+                        cur.execute(sql, vals)
+
+                        new_parent_id = cur.lastrowid
+                        fk_map[old_id] = new_parent_id
+                        imported_parents += 1
+
+                    # -----------------------------------
+                    # import BBox_Config without ID
+                    # -----------------------------------
+                    for row in cfg_rows:
+                        if not isinstance(row, dict):
+                            skipped_children += 1
+                            continue
+
+                        old_cfg_fk = row.get("CONFIG_FK")
+                        if old_cfg_fk is None:
+                            skipped_children += 1
+                            continue
+
+                        old_cfg_fk = int(old_cfg_fk)
+
+                        new_cfg_fk = fk_map.get(old_cfg_fk)
+                        if not new_cfg_fk:
+                            skipped_children += 1
+                            continue
+
+                        row_no_id = dict(row)
+                        row_no_id.pop("ID", None)
+                        row_no_id["CONFIG_FK"] = new_cfg_fk
+
+                        cols = list(row_no_id.keys())
+                        vals = [row_no_id[c] for c in cols]
+
+                        sql = f"""
+                            INSERT INTO BBox_Config ({", ".join(cols)})
+                            VALUES ({", ".join("?" for _ in cols)})
+                        """
+                        cur.execute(sql, vals)
+                        imported_children += 1
+
+                    conn.commit()
+
+                    return {
+                        "ok": True,
+                        "file": str(in_file),
+                        "imported_parents": imported_parents,
+                        "renamed_parents": renamed_parents,
+                        "skipped_parents_invalid": skipped_parents_invalid,
+                        "imported_children": imported_children,
+                        "skipped_children": skipped_children,
+                    }
+
+                except Exception:
+                    conn.rollback()
+                    raise
+
         except Exception as e:
-            return {"ok": False, "error": f"Failed to write file: {e}"}
-
-        return {
-            "ok": True,
-            "path": file_path,
-            "configs_count": len(configs),
-        }
-
-    def import_bbox_configs_from_file(self, filename: str) -> dict:
-        """
-        Import configs from JSON file inside <project_db_folder>/exports/
-        """
-
-        base_dir = os.path.dirname(self.db_path)
-        filepath = os.path.join(base_dir, "exports", filename)
-
-        if not os.path.exists(filepath):
-            return {"ok": False, "error": "File not found"}
-
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        configs = data.get("configs", [])
-
-        for item in configs:
-            self.save_bbox_config(
-                name=item.get("name"),
-                vessel_name=item.get("vessel_name", ""),
-                rov1_name=item.get("rov1_name", ""),
-                rov2_name=item.get("rov2_name", ""),
-                gnss1_name=item.get("gnss1_name", ""),
-                gnss2_name=item.get("gnss2_name", ""),
-                depth1_name=item.get("depth1_name", ""),
-                depth2_name=item.get("depth2_name", ""),
-                mapping=item.get("mapping", {}),
-                is_default=bool(item.get("is_default", False)),
-            )
-
-        return {"ok": True, "imported": len(configs)}
+            return {
+                "ok": False,
+                "error": str(e),
+            }
 
 
 

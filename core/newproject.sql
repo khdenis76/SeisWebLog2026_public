@@ -998,37 +998,13 @@ CREATE TABLE IF NOT EXISTS SHOT_TABLE (
         REFERENCES Files(id)
         ON DELETE CASCADE
 );
--- File link
-CREATE INDEX IF NOT EXISTS idx_shot_file_fk
-ON SHOT_TABLE (File_FK);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_shot_unique
+ON SHOT_TABLE (
+    nav_line_code,
+    nav_station,
+    post_point_code
+);
 
--- Line filtering
-CREATE INDEX IF NOT EXISTS idx_shot_sail_line
-ON SHOT_TABLE (sail_line);
-
--- Nav line filtering
-CREATE INDEX IF NOT EXISTS idx_shot_nav_line
-ON SHOT_TABLE (nav_line);
-
--- Line + Attempt + Seq (most important for plotting)
-CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq
-ON SHOT_TABLE (nav_line, attempt, seq);
-
--- Sequence only
-CREATE INDEX IF NOT EXISTS idx_shot_seq
-ON SHOT_TABLE (seq);
-
--- Time filtering
-CREATE INDEX IF NOT EXISTS idx_shot_time
-ON SHOT_TABLE (shot_year, shot_day);
-
--- Spatial filtering
-CREATE INDEX IF NOT EXISTS idx_shot_xy
-ON SHOT_TABLE (shot_x, shot_y);
-
--- Source ID
-CREATE INDEX IF NOT EXISTS idx_shot_source_id
-ON SHOT_TABLE (source_id);
 DROP VIEW IF EXISTS PreplotSummaryAllFiles;
 CREATE VIEW IF NOT EXISTS PreplotSummaryAllFiles AS
 
@@ -1494,7 +1470,7 @@ GROUP BY
     TRIM(Line),
     TRIM(ROV1);
 DROP VIEW IF EXISTS V_SHOT_TABLE_SUMMARY;
-CREATE VIEW V_SHOT_TABLE_SUMMARY AS
+CREATE VIEW IF NOT EXISTS V_SHOT_TABLE_SUMMARY AS
 SELECT
     s.nav_line,
     s.attempt,

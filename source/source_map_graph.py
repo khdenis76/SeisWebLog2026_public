@@ -15,6 +15,7 @@ from bokeh.layouts import column, row
 from bokeh.models import ColumnDataSource, HoverTool, Button, CustomJS, Div, Slider, FactorRange, LegendItem, Legend
 from bokeh.palettes import Category10, Category20, Turbo256
 from bokeh.plotting import figure
+from bokeh.models import CheckboxGroup, TextInput, CheckboxGroup
 import sqlite3
 import geopandas as gpd
 from bokeh.models.tiles import WMTSTileSource
@@ -899,12 +900,11 @@ class SourceMapGraphics:
                 r_dep.glyph.size = cb_obj.value;
                 r_rec.glyph.size = cb_obj.value;
             """))
-            controls_items.extend([toggle_legend_btn, cycle_legend_pos_btn,dsr_size])
+            controls_items.append(dsr_size)
             controls = row(*controls_items, sizing_mode="stretch_width")
             layout = column(controls, p, sizing_mode="stretch_both")
 
             if is_show:
-                from bokeh.io import show
                 show(layout)
                 return None
 
@@ -1535,3 +1535,479 @@ class SourceMapGraphics:
                 return json_item(p) if json_return else p
             else:
                 return p
+
+    def build_sp_solution_vs_preplot(
+            self,
+            line: int,
+            is_show: bool = False,
+            json_return: bool = False,
+            label_every: int = 10,
+            preplot_dash: str = "dashed",
+            point_size: int = 7,
+    ):
+        line = int(line)
+        label_every = max(1, min(20, int(label_every)))
+        point_size = max(2, int(point_size))
+
+        sql_preplot = """
+            SELECT
+                Line,
+                Point,
+                X AS x,
+                Y AS y,
+                Z AS z,
+                PointCode
+            FROM SPPreplot
+            WHERE Line = ?
+              AND COALESCE(X, 0) != 0
+              AND COALESCE(Y, 0) != 0
+            ORDER BY Point
+        """
+
+        sql_solution = """
+            SELECT
+                s.Line,
+                s.Seq,
+                s.Point,
+                s.Easting AS x,
+                s.Northing AS y,
+                s.Elevation AS z,
+                s.FireCode,
+                s.PointCode,
+                s.ArrayCode,
+                COALESCE(sva.purpose, 'Unknown') AS SeqPurpose
+            FROM SPSolution s
+            LEFT JOIN sequence_vessel_assignment sva
+                ON s.Seq BETWEEN sva.seq_first AND sva.seq_last
+               AND COALESCE(sva.is_active, 1) = 1
+            WHERE s.Line = ?
+              AND COALESCE(s.Easting, 0) != 0
+              AND COALESCE(s.Northing, 0) != 0
+            ORDER BY s.Seq, s.Point
+        """
+
+        try:
+            with self._connect() as conn:
+                preplot_df = pd.read_sql_query(sql_preplot, conn, params=(line,))
+                solution_df = pd.read_sql_query(sql_solution, conn, params=(line,))
+
+            if preplot_df.empty and solution_df.empty:
+                raise ValueError(f"No SPPreplot / SPSolution data found for Line {line}")
+
+            if not preplot_df.empty:
+                preplot_df = preplot_df.copy()
+                preplot_df["PointCode"] = preplot_df["PointCode"].fillna("").astype(str)
+                preplot_df["label"] = preplot_df["Point"].astype(str)
+                preplot_df["size"] = point_size
+
+            if not solution_df.empty:
+                solution_df = solution_df.copy()
+                solution_df["Seq"] = pd.to_numeric(solution_df["Seq"], errors="coerce").fillna(0).astype(int)
+                solution_df["PointCode"] = solution_df["PointCode"].fillna("").astype(str)
+                solution_df["FireCode"] = solution_df["FireCode"].fillna("").astype(str)
+                solution_df["ArrayCode"] = pd.to_numeric(solution_df["ArrayCode"], errors="coerce")
+                solution_df["SeqPurpose"] = solution_df["SeqPurpose"].fillna("Unknown").astype(str)
+                solution_df["label"] = solution_df["Point"].astype(str)
+                solution_df["size"] = point_size
+
+            xs, ys = [], []
+
+            if not preplot_df.empty:
+                xs.extend(preplot_df["x"].tolist())
+                ys.extend(preplot_df["y"].tolist())
+
+            if not solution_df.empty:
+                xs.extend(solution_df["x"].tolist())
+                ys.extend(solution_df["y"].tolist())
+
+            if not xs or not ys:
+                raise ValueError(f"No valid coordinates found for Line {line}")
+
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            dx = max(max_x - min_x, 1.0)
+            dy = max(max_y - min_y, 1.0)
+            padx = dx * 0.05
+            pady = dy * 0.05
+
+            p = figure(
+                title=f"SPSolution vs SPPreplot - Line {line}",
+                x_range=(min_x - padx, max_x + padx),
+                y_range=(min_y - pady, max_y + pady),
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+                toolbar_location="above",
+                sizing_mode="stretch_both",
+                match_aspect=True,
+            )
+
+            p.xaxis.axis_label = "X / Easting"
+            p.yaxis.axis_label = "Y / Northing"
+
+            all_sources = []
+            all_legends = []
+            seq_renderers = {}
+            seq_legends = {}
+            seq_labels = []
+            label_sources = []
+
+            def _red_gradient(v, vmin_, vmax_):
+                if pd.isna(v):
+                    return "#ff8080"
+
+                if vmax_ <= vmin_:
+                    t = 0.5
+                else:
+                    t = (float(v) - vmin_) / (vmax_ - vmin_)
+
+                r = 255
+                g = int(210 - 140 * t)
+                b = int(210 - 140 * t)
+
+                g = max(0, min(255, g))
+                b = max(0, min(255, b))
+
+                return f"#{r:02x}{g:02x}{b:02x}"
+
+            # -------------------------------------------------
+            # PREPLOT
+            # -------------------------------------------------
+            if not preplot_df.empty:
+                src_pre = ColumnDataSource(preplot_df)
+                all_sources.append(src_pre)
+
+                r_pre_line = p.line(
+                    x="x",
+                    y="y",
+                    source=src_pre,
+                    line_width=2,
+                    line_dash=preplot_dash,
+                    line_alpha=0.95,
+                    color="gray",
+                )
+
+                r_pre_pts = p.scatter(
+                    x="x",
+                    y="y",
+                    source=src_pre,
+                    size="size",
+                    marker="circle",
+                    alpha=0.75,
+                    color="gray",
+                )
+
+                pre_lbl_df = preplot_df.copy()
+                pre_lbl_df["idx"] = list(range(len(pre_lbl_df)))
+                pre_lbl_df["text"] = [
+                    lbl if (i % label_every == 0) else ""
+                    for i, lbl in enumerate(pre_lbl_df["label"].tolist())
+                ]
+                src_pre_lbl = ColumnDataSource(pre_lbl_df)
+                label_sources.append(src_pre_lbl)
+
+                r_pre_txt = p.text(
+                    x="x",
+                    y="y",
+                    text="text",
+                    source=src_pre_lbl,
+                    text_font_size="8pt",
+                    text_alpha=0.75,
+                    text_color="gray",
+                    x_offset=5,
+                    y_offset=5,
+                )
+
+                p.add_tools(HoverTool(
+                    renderers=[r_pre_pts],
+                    tooltips=[
+                        ("Type", "SPPreplot"),
+                        ("Line", "@Line"),
+                        ("Point", "@Point"),
+                        ("PointCode", "@PointCode"),
+                        ("X", "@x{0.00}"),
+                        ("Y", "@y{0.00}"),
+                        ("Z", "@z{0.00}"),
+                    ]
+                ))
+
+                lg_pre = Legend(
+                    title="Preplot",
+                    items=[
+                        LegendItem(label="SPPreplot", renderers=[r_pre_line, r_pre_pts]),
+                        LegendItem(label="Labels", renderers=[r_pre_txt]),
+                    ],
+                    click_policy="hide",
+                    label_text_font_size="9pt",
+                    title_text_font_size="10pt",
+                    spacing=4,
+                    glyph_height=16,
+                    glyph_width=22,
+                )
+                p.add_layout(lg_pre, "right")
+                all_legends.append(lg_pre)
+
+            # -------------------------------------------------
+            # SPSOLUTION - one legend per Seq
+            # -------------------------------------------------
+            seq_color_pool = [
+                "#1f77b4", "#d62728", "#2ca02c", "#ff7f0e",
+                "#9467bd", "#8c564b", "#e377c2", "#17becf",
+                "#bcbd22", "#7f7f7f", "#393b79", "#637939",
+                "#8c6d31", "#843c39", "#7b4173",
+            ]
+
+            pointcode_color_pool = [
+                "#1f77b4", "#2ca02c", "#ff7f0e", "#9467bd",
+                "#8c564b", "#e377c2", "#17becf", "#bcbd22",
+                "#7f7f7f", "#393b79", "#637939", "#8c6d31",
+                "#843c39", "#7b4173",
+            ]
+
+            if not solution_df.empty:
+                seq_values = sorted(solution_df["Seq"].dropna().unique().tolist())
+
+                for seq_index, seq in enumerate(seq_values):
+                    seq_df = solution_df[solution_df["Seq"] == seq].copy()
+                    if seq_df.empty:
+                        continue
+
+                    purpose = seq_df["SeqPurpose"].iloc[0] if "SeqPurpose" in seq_df.columns else "Unknown"
+                    seq_label = f"Seq {seq} ({purpose})"
+
+                    seq_labels.append(seq_label)
+                    seq_renderers[str(seq)] = []
+
+                    track_color = seq_color_pool[seq_index % len(seq_color_pool)]
+
+                    src_seq_line = ColumnDataSource(seq_df)
+                    all_sources.append(src_seq_line)
+
+                    r_seq_line = p.line(
+                        x="x",
+                        y="y",
+                        source=src_seq_line,
+                        line_width=2,
+                        line_alpha=0.9,
+                        color=track_color,
+                    )
+                    seq_renderers[str(seq)].append(r_seq_line)
+
+                    seq_legend_items = [
+                        LegendItem(label="Track", renderers=[r_seq_line])
+                    ]
+
+                    pointcodes = sorted(seq_df["PointCode"].astype(str).unique().tolist())
+                    if not pointcodes:
+                        pointcodes = [""]
+
+                    for pc_index, pc in enumerate(pointcodes):
+                        part = seq_df[seq_df["PointCode"].astype(str) == str(pc)].copy()
+                        if part.empty:
+                            continue
+
+                        base_color = pointcode_color_pool[pc_index % len(pointcode_color_pool)]
+                        part["color"] = base_color
+
+                        kill_mask = part["FireCode"].astype(str).str.upper() == "K"
+                        if kill_mask.any():
+                            kill_vals = pd.to_numeric(part.loc[kill_mask, "ArrayCode"], errors="coerce")
+
+                            if kill_vals.notna().any():
+                                vmin = float(kill_vals.min())
+                                vmax = float(kill_vals.max())
+                                part.loc[kill_mask, "color"] = [
+                                    _red_gradient(v, vmin, vmax) for v in kill_vals
+                                ]
+                            else:
+                                part.loc[kill_mask, "color"] = "#cc0000"
+
+                        src_pc = ColumnDataSource(part)
+                        all_sources.append(src_pc)
+
+                        r_pc = p.scatter(
+                            x="x",
+                            y="y",
+                            source=src_pc,
+                            size="size",
+                            marker="circle",
+                            alpha=0.9,
+                            color="color",
+                        )
+                        seq_renderers[str(seq)].append(r_pc)
+
+                        p.add_tools(HoverTool(
+                            renderers=[r_pc],
+                            tooltips=[
+                                ("Type", "SPSolution"),
+                                ("Line", "@Line"),
+                                ("Seq", "@Seq"),
+                                ("Purpose", "@SeqPurpose"),
+                                ("Point", "@Point"),
+                                ("FireCode", "@FireCode"),
+                                ("PointCode", "@PointCode"),
+                                ("ArrayCode", "@ArrayCode"),
+                                ("X", "@x{0.00}"),
+                                ("Y", "@y{0.00}"),
+                                ("Z", "@z{0.00}"),
+                            ]
+                        ))
+
+                        pc_label = pc if str(pc).strip() else "(blank)"
+                        seq_legend_items.append(
+                            LegendItem(label=pc_label, renderers=[r_pc])
+                        )
+
+                    seq_lbl_df = seq_df.copy()
+                    seq_lbl_df["idx"] = list(range(len(seq_lbl_df)))
+                    seq_lbl_df["text"] = [
+                        lbl if (i % label_every == 0) else ""
+                        for i, lbl in enumerate(seq_lbl_df["label"].tolist())
+                    ]
+                    src_seq_lbl = ColumnDataSource(seq_lbl_df)
+                    label_sources.append(src_seq_lbl)
+
+                    r_seq_lbl = p.text(
+                        x="x",
+                        y="y",
+                        text="text",
+                        source=src_seq_lbl,
+                        text_font_size="8pt",
+                        text_alpha=0.75,
+                        text_color="black",
+                        x_offset=5,
+                        y_offset=5,
+                    )
+                    seq_renderers[str(seq)].append(r_seq_lbl)
+
+                    seq_legend_items.append(
+                        LegendItem(label="Labels", renderers=[r_seq_lbl])
+                    )
+
+                    lg_seq = Legend(
+                        title=f"Seq {seq}",
+                        items=seq_legend_items,
+                        click_policy="hide",
+                        label_text_font_size="9pt",
+                        title_text_font_size="10pt",
+                        spacing=4,
+                        glyph_height=16,
+                        glyph_width=22,
+                    )
+                    p.add_layout(lg_seq, "right")
+                    all_legends.append(lg_seq)
+                    seq_legends[str(seq)] = lg_seq
+
+            # -------------------------------------------------
+            # Controls
+            # -------------------------------------------------
+            btn_legend = Button(label="Hide / Show Legends", width=170)
+            btn_legend.js_on_click(CustomJS(args=dict(legs=all_legends), code="""
+                if (!legs || legs.length === 0) return;
+                const make_visible = !legs[0].visible;
+                for (let i = 0; i < legs.length; i++) {
+                    legs[i].visible = make_visible;
+                }
+            """))
+
+            size_slider = Slider(
+                start=2,
+                end=20,
+                value=point_size,
+                step=1,
+                title="Point Size",
+                width=220,
+            )
+
+            size_slider.js_on_change("value", CustomJS(args=dict(srcs=all_sources), code="""
+                const v = cb_obj.value;
+                for (let i = 0; i < srcs.length; i++) {
+                    const s = srcs[i];
+                    if (!("size" in s.data)) continue;
+                    const n = s.data["size"].length;
+                    s.data["size"] = Array(n).fill(v);
+                    s.change.emit();
+                }
+            """))
+
+            label_input = TextInput(
+                title="Label every (1-20)",
+                value=str(label_every),
+                width=130,
+            )
+
+            label_input.js_on_change("value", CustomJS(args=dict(srcs=label_sources), code="""
+                let step = parseInt(cb_obj.value);
+
+                if (isNaN(step) || step < 1) step = 1;
+                if (step > 20) step = 20;
+
+                cb_obj.value = String(step);
+
+                for (let k = 0; k < srcs.length; k++) {
+                    const src = srcs[k];
+                    const data = src.data;
+                    const idx = data["idx"];
+                    const labels = data["label"];
+                    const out = [];
+
+                    for (let i = 0; i < idx.length; i++) {
+                        out.push((i % step === 0) ? labels[i] : "");
+                    }
+
+                    data["text"] = out;
+                    src.change.emit();
+                }
+            """))
+
+            controls = [btn_legend, size_slider, label_input]
+
+            if seq_labels:
+                seq_checkbox = CheckboxGroup(
+                    labels=seq_labels,
+                    active=list(range(len(seq_labels))),
+                    inline=True,
+                )
+
+                seq_checkbox.js_on_change("active", CustomJS(
+                    args=dict(
+                        seq_labels=seq_labels,
+                        seq_renderers=seq_renderers,
+                        seq_legends=seq_legends,
+                    ),
+                    code="""
+                        const activeSet = new Set(cb_obj.active);
+
+                        for (let i = 0; i < seq_labels.length; i++) {
+                            const label = seq_labels[i];
+                            const parts = label.split(" ");
+                            const seq = parts.length > 1 ? parts[1] : "";
+                            const visible = activeSet.has(i);
+
+                            const rs = seq_renderers[seq] || [];
+                            for (let j = 0; j < rs.length; j++) {
+                                rs[j].visible = visible;
+                            }
+
+                            if (seq_legends[seq]) {
+                                seq_legends[seq].visible = visible;
+                            }
+                        }
+                    """
+                ))
+
+                controls.append(Div(text="<b>Show / hide Seq:</b>"))
+                controls.append(seq_checkbox)
+
+            top_controls = row(*controls, sizing_mode="stretch_width")
+            layout = column(top_controls, p, sizing_mode="stretch_both")
+
+            if json_return:
+                return json_item(layout, f"sp-solution-vs-preplot-{line}")
+
+            if is_show:
+                show(layout)
+
+            return layout
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to build SPSolution vs SPPreplot plot for Line {line}: {e}") from e

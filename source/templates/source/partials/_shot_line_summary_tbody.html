@@ -87,7 +87,6 @@
         <td class="text-end">{{ r.LSP|default_if_none:"" }}</td>
         <td class="text-end">{{ r.FGSP|default_if_none:"" }}</td>
         <td class="text-end">{{ r.LGSP|default_if_none:"" }}</td>
-        <td class="text-end">{{ r.diff_Attempt|default_if_none:"" }}</td>
         <td class="text-end">
 {% if r.diff_Attempt and r.diff_Attempt != 0 %}
 <i class="fas fa-triangle-exclamation text-danger me-1"></i>
