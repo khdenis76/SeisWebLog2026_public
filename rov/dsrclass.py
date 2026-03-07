@@ -2418,285 +2418,280 @@ WHERE Area IS NOT NULL
         with self._connect() as conn:
             return pd.read_sql_query(sql, conn, params=tuple(selected_lines))
 
-    def delete_bbox_config(self, config_id: int) -> dict:
-        """
-        Delete config from BBox_Configs_List and its mapping rows in BBox_Config.
-
-        Rules:
-          - cannot delete last remaining config
-          - if deleting default and others exist -> first pick another config and set it default
-        """
-        self.ensure_bbox_config_schema()
-
-        cid = int(config_id or 0)
-        if cid <= 0:
-            return {"ok": False, "error": "Invalid config id"}
-
-        with self._connect() as conn:
-            conn.execute("PRAGMA foreign_keys = ON;")
-            conn.execute("BEGIN IMMEDIATE")
-
-            row = conn.execute(
-                "SELECT ID, Name, IsDefault FROM BBox_Configs_List WHERE ID=?",
-                (cid,),
-            ).fetchone()
-            if not row:
-                conn.rollback()
-                return {"ok": False, "error": f"Config ID={cid} not found"}
-
-            total = int(conn.execute("SELECT COUNT(*) FROM BBox_Configs_List").fetchone()[0])
-            if total <= 1:
-                conn.rollback()
-                return {"ok": False, "error": "Cannot delete the last remaining configuration"}
-
-            is_default = int(row["IsDefault"] or 0) == 1
-
-            # If deleting default, choose a new default first (triggers keep singleton)
-            if is_default:
-                new_row = conn.execute(
-                    "SELECT ID FROM BBox_Configs_List WHERE ID <> ? ORDER BY IsDefault DESC, Name COLLATE NOCASE LIMIT 1",
-                    (cid,),
-                ).fetchone()
-                if new_row:
-                    conn.execute("UPDATE BBox_Configs_List SET IsDefault=1 WHERE ID=?", (int(new_row["ID"]),))
-
-            # delete children first due to FK RESTRICT
-            conn.execute("DELETE FROM BBox_Config WHERE CONFIG_FK=?", (cid,))
-            conn.execute("DELETE FROM BBox_Configs_List WHERE ID=?", (cid,))
-
-            conn.commit()
-
-        return {"ok": True}
-
     def export_all_bbox_configs(self, dir: str) -> dict:
         """
-        Export all rows from BBox_Configs_List and BBox_Config
-        into one JSON file: <dir>/bbox_configs.json
+        Export BBox_Configs_List and BBox_Config to JSON
         """
+
         try:
             self.ensure_bbox_config_schema()
 
-            out_dir = Path(dir)
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_file = out_dir / "bbox_configs.json"
+            out_file = Path(dir) / "bbox_configs.json"
+            Path(dir).mkdir(parents=True, exist_ok=True)
 
             with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
                 cur = conn.cursor()
 
-                cfg_list_rows = cur.execute("""
+                cfg_list = cur.execute("""
                     SELECT *
                     FROM BBox_Configs_List
                     ORDER BY ID
                 """).fetchall()
 
-                cfg_rows = cur.execute("""
+                cfg_fields = cur.execute("""
                     SELECT *
                     FROM BBox_Config
                     ORDER BY CONFIG_FK, ID
                 """).fetchall()
 
-                payload = {
-                    "BBox_Configs_List": [dict(r) for r in cfg_list_rows],
-                    "BBox_Config": [dict(r) for r in cfg_rows],
-                }
+            payload = {
+                "BBox_Configs_List": [dict(r) for r in cfg_list],
+                "BBox_Config": [dict(r) for r in cfg_fields],
+            }
 
             with open(out_file, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2, ensure_ascii=False)
+                json.dump(payload, f, indent=2)
+
+            print("EXPORT:")
+            print(" configs:", len(cfg_list))
+            print(" fields :", len(cfg_fields))
+            print(" file   :", out_file)
 
             return {
                 "ok": True,
                 "file": str(out_file),
-                "configs_count": len(payload["BBox_Configs_List"]),
-                "fields_count": len(payload["BBox_Config"]),
+                "configs_count": len(cfg_list),
+                "fields_count": len(cfg_fields),
             }
 
         except Exception as e:
-            return {
-                "ok": False,
-                "error": str(e),
-            }
+            return {"ok": False, "error": str(e)}
 
     def import_all_bbox_configs(self, dir: str) -> dict:
         """
-        Import BBox_Configs_List and BBox_Config from <dir>/bbox_configs.json
-
-        Rules:
-        - BBox_Config.ID from JSON is ignored, SQLite generates a new one
-        - Parent BBox_Configs_List row is always imported
-        - If parent ID already exists, a new ID is generated automatically
-        - If parent Name already exists, import it with next available suffix:
-            Name
-            Name (2)
-            Name (3)
-            ...
-        - Child rows are linked to the actually inserted parent row
+        Import configs from bbox_configs.json
         """
+
         try:
             self.ensure_bbox_config_schema()
 
             in_file = Path(dir) / "bbox_configs.json"
+
             if not in_file.exists():
-                return {
-                    "ok": False,
-                    "error": f"JSON file not found: {in_file}"
-                }
+                return {"ok": False, "error": f"File not found {in_file}"}
 
             with open(in_file, "r", encoding="utf-8") as f:
                 payload = json.load(f)
 
-            cfg_list_rows = payload.get("BBox_Configs_List", [])
-            cfg_rows = payload.get("BBox_Config", [])
+            cfg_list = payload.get("BBox_Configs_List", [])
+            cfg_fields = payload.get("BBox_Config", [])
 
-            if not isinstance(cfg_list_rows, list) or not isinstance(cfg_rows, list):
-                return {
-                    "ok": False,
-                    "error": "Invalid JSON structure. Expected keys: BBox_Configs_List and BBox_Config."
-                }
+            print("IMPORT START")
+            print(" parents in json :", len(cfg_list))
+            print(" children in json:", len(cfg_fields))
 
             with self._connect() as conn:
+
                 conn.row_factory = sqlite3.Row
                 cur = conn.cursor()
 
-                conn.execute("PRAGMA foreign_keys = ON;")
-                conn.execute("BEGIN IMMEDIATE;")
+                conn.execute("PRAGMA foreign_keys = ON")
+                conn.execute("BEGIN IMMEDIATE")
 
-                try:
-                    imported_parents = 0
-                    imported_children = 0
-                    skipped_parents_invalid = 0
-                    skipped_children = 0
-                    renamed_parents = 0
+                existing_ids = {
+                    int(r[0]) for r in
+                    cur.execute("SELECT ID FROM BBox_Configs_List").fetchall()
+                }
 
-                    # old CONFIG_FK from JSON -> new inserted parent ID in DB
-                    fk_map = {}
+                existing_names = {
+                    r[0] for r in
+                    cur.execute("SELECT Name FROM BBox_Configs_List").fetchall()
+                }
 
-                    existing_names = {
-                        str(r[0]).strip()
-                        for r in cur.execute("""
-                            SELECT Name
-                            FROM BBox_Configs_List
-                            WHERE Name IS NOT NULL AND TRIM(Name) <> ''
-                        """).fetchall()
-                    }
+                fk_map = {}
 
-                    def _make_unique_name(base_name: str) -> tuple[str, bool]:
-                        """
-                        Returns unique name and bool flag whether it was renamed.
-                        """
-                        name = (base_name or "").strip()
-                        if not name:
-                            name = "Unnamed Config"
+                imported_parents = 0
+                imported_children = 0
+                renamed = 0
 
-                        if name not in existing_names:
-                            existing_names.add(name)
-                            return name, False
+                def unique_name(name):
 
-                        i = 2
-                        while True:
-                            candidate = f"{name} ({i})"
-                            if candidate not in existing_names:
-                                existing_names.add(candidate)
-                                return candidate, True
-                            i += 1
+                    if name not in existing_names:
+                        existing_names.add(name)
+                        return name, False
 
-                    # -----------------------------------
-                    # import BBox_Configs_List
-                    # -----------------------------------
-                    for row in cfg_list_rows:
-                        if not isinstance(row, dict):
-                            skipped_parents_invalid += 1
-                            continue
+                    i = 2
+                    while True:
+                        n = f"{name} ({i})"
+                        if n not in existing_names:
+                            existing_names.add(n)
+                            return n, True
+                        i += 1
 
-                        old_id = row.get("ID")
-                        if old_id is None:
-                            skipped_parents_invalid += 1
-                            continue
+                # ---------------------
+                # parents
+                # ---------------------
+                for row in cfg_list:
 
-                        old_id = int(old_id)
+                    old_id = int(row["ID"])
+                    row_new = dict(row)
 
-                        row_new = dict(row)
+                    name, was_renamed = unique_name(row_new.get("Name", "Config"))
+                    row_new["Name"] = name
 
-                        # do not keep old ID if it may already exist
-                        row_new.pop("ID", None)
+                    if was_renamed:
+                        renamed += 1
 
-                        base_name = row.get("Name")
-                        unique_name, was_renamed = _make_unique_name(base_name)
-                        row_new["Name"] = unique_name
-
-                        if was_renamed:
-                            renamed_parents += 1
+                    if old_id not in existing_ids:
 
                         cols = list(row_new.keys())
                         vals = [row_new[c] for c in cols]
 
                         sql = f"""
-                            INSERT INTO BBox_Configs_List ({", ".join(cols)})
-                            VALUES ({", ".join("?" for _ in cols)})
+                        INSERT INTO BBox_Configs_List ({",".join(cols)})
+                        VALUES ({",".join("?" for _ in cols)})
                         """
+
                         cur.execute(sql, vals)
 
-                        new_parent_id = cur.lastrowid
-                        fk_map[old_id] = new_parent_id
-                        imported_parents += 1
+                        new_id = old_id
+                        existing_ids.add(new_id)
 
-                    # -----------------------------------
-                    # import BBox_Config without ID
-                    # -----------------------------------
-                    for row in cfg_rows:
-                        if not isinstance(row, dict):
-                            skipped_children += 1
-                            continue
+                    else:
 
-                        old_cfg_fk = row.get("CONFIG_FK")
-                        if old_cfg_fk is None:
-                            skipped_children += 1
-                            continue
+                        row_new.pop("ID", None)
 
-                        old_cfg_fk = int(old_cfg_fk)
-
-                        new_cfg_fk = fk_map.get(old_cfg_fk)
-                        if not new_cfg_fk:
-                            skipped_children += 1
-                            continue
-
-                        row_no_id = dict(row)
-                        row_no_id.pop("ID", None)
-                        row_no_id["CONFIG_FK"] = new_cfg_fk
-
-                        cols = list(row_no_id.keys())
-                        vals = [row_no_id[c] for c in cols]
+                        cols = list(row_new.keys())
+                        vals = [row_new[c] for c in cols]
 
                         sql = f"""
-                            INSERT INTO BBox_Config ({", ".join(cols)})
-                            VALUES ({", ".join("?" for _ in cols)})
+                        INSERT INTO BBox_Configs_List ({",".join(cols)})
+                        VALUES ({",".join("?" for _ in cols)})
                         """
+
                         cur.execute(sql, vals)
-                        imported_children += 1
 
-                    conn.commit()
+                        new_id = cur.lastrowid
 
-                    return {
-                        "ok": True,
-                        "file": str(in_file),
-                        "imported_parents": imported_parents,
-                        "renamed_parents": renamed_parents,
-                        "skipped_parents_invalid": skipped_parents_invalid,
-                        "imported_children": imported_children,
-                        "skipped_children": skipped_children,
-                    }
+                    fk_map[old_id] = new_id
+                    imported_parents += 1
 
-                except Exception:
-                    conn.rollback()
-                    raise
+                print("parents imported:", imported_parents)
+                print("parents renamed :", renamed)
+
+                # ---------------------
+                # children
+                # ---------------------
+                for row in cfg_fields:
+
+                    old_fk = int(row["CONFIG_FK"])
+
+                    new_fk = fk_map.get(old_fk)
+
+                    if not new_fk:
+                        continue
+
+                    row_new = dict(row)
+
+                    row_new.pop("ID", None)
+                    row_new["CONFIG_FK"] = new_fk
+
+                    cols = list(row_new.keys())
+                    vals = [row_new[c] for c in cols]
+
+                    sql = f"""
+                    INSERT INTO BBox_Config ({",".join(cols)})
+                    VALUES ({",".join("?" for _ in cols)})
+                    """
+
+                    cur.execute(sql, vals)
+
+                    imported_children += 1
+
+                conn.commit()
+
+                print("children imported:", imported_children)
+                print("IMPORT DONE")
+
+                return {
+                    "ok": True,
+                    "parents": imported_parents,
+                    "children": imported_children,
+                    "renamed": renamed
+                }
 
         except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def delete_bbox_config(self, config_id: int) -> dict:
+        """
+        Delete one config from BBox_Configs_List and all related rows from BBox_Config.
+        """
+        try:
+            config_id = int(config_id)
+        except Exception:
             return {
                 "ok": False,
-                "error": str(e),
+                "error": "Invalid config_id",
             }
 
+        self.ensure_bbox_config_schema()
 
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("BEGIN IMMEDIATE;")
+
+            try:
+                row = cur.execute("""
+                    SELECT ID, Name
+                    FROM BBox_Configs_List
+                    WHERE ID = ?
+                """, (config_id,)).fetchone()
+
+                if not row:
+                    conn.rollback()
+                    return {
+                        "ok": False,
+                        "error": f"BBox config ID {config_id} not found",
+                    }
+
+                cfg_name = row["Name"]
+
+                child_count = cur.execute("""
+                    SELECT COUNT(*)
+                    FROM BBox_Config
+                    WHERE CONFIG_FK = ?
+                """, (config_id,)).fetchone()[0]
+
+                cur.execute("""
+                    DELETE FROM BBox_Config
+                    WHERE CONFIG_FK = ?
+                """, (config_id,))
+
+                cur.execute("""
+                    DELETE FROM BBox_Configs_List
+                    WHERE ID = ?
+                """, (config_id,))
+
+                conn.commit()
+
+                return {
+                    "ok": True,
+                    "deleted_config_id": config_id,
+                    "deleted_config_name": cfg_name,
+                    "deleted_fields_count": int(child_count),
+                }
+
+            except Exception as e:
+                conn.rollback()
+                return {
+                    "ok": False,
+                    "error": str(e),
+                }
 
 
 

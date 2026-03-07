@@ -1456,34 +1456,64 @@ def bbox_config_delete(request, config_id: int):
 @login_required
 @require_POST
 @csrf_protect
+@require_POST
+@csrf_protect
 def bbox_config_import_json(request):
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except Exception:
         return JsonResponse({"ok": False, "error": "Invalid JSON body"}, status=400)
 
-    cfg = payload.get("config") or {}
-    mapping = payload.get("mapping") or {}
-
-    name = (cfg.get("name") or "").strip()
-    if not name:
-        return JsonResponse({"ok": False, "error": "Config name is required"}, status=400)
-
-    # TODO: use your real project DB path getter (same as your other bbox endpoints)
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
     if not project:
         return JsonResponse({"ok": False, "error": "No active project"}, status=400)
     if not project.can_edit(request.user):
         raise PermissionDenied
+
     dsr = DSRDB(project.db_path)
 
     try:
-        dsr.import_all_bbox_configs(project.export_dir)
+        # full export JSON:
+        # { "BBox_Configs_List": [...], "BBox_Config": [...] }
+        if isinstance(payload, dict) and "BBox_Configs_List" in payload and "BBox_Config" in payload:
+            export_dir = Path(project.export_dir)
+            export_dir.mkdir(parents=True, exist_ok=True)
+            json_file = export_dir / "bbox_configs.json"
+
+            with open(json_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+
+            result = dsr.import_all_bbox_configs(str(export_dir))
+            status = 200 if result.get("ok") else 400
+            return JsonResponse(result, status=status)
+
+        # single-config JSON:
+        # { "config": {...}, "mapping": {...} }
+        cfg = payload.get("config") or {}
+        mapping = payload.get("mapping") or {}
+
+        name = (cfg.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"ok": False, "error": "Config name is required"}, status=400)
+
+        cfg_id = dsr.save_bbox_config(
+            name=name,
+            vessel_name=(cfg.get("vessel_name") or cfg.get("Vessel_name") or "").strip(),
+            rov1_name=(cfg.get("rov1_name") or "").strip(),
+            rov2_name=(cfg.get("rov2_name") or "").strip(),
+            gnss1_name=(cfg.get("gnss1_name") or "").strip(),
+            gnss2_name=(cfg.get("gnss2_name") or "").strip(),
+            depth1_name=(cfg.get("depth1_name") or cfg.get("Depth1_name") or "").strip(),
+            depth2_name=(cfg.get("depth2_name") or cfg.get("Depth2_name") or "").strip(),
+            mapping=mapping,
+            is_default=bool(cfg.get("is_default", cfg.get("IsDefault", False))),
+        )
+
+        return JsonResponse({"ok": True, "config_id": cfg_id})
+
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
-
-    return JsonResponse({"ok": True})
 @login_required
 @require_GET
 def bbox_config_export_all_json(request):
