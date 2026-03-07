@@ -1,18 +1,18 @@
-import {initSourceUploadModal} from "./initSourceUploadModal.js";
 import {initSourceUpload} from "./initSourceUpload.js";
 import {initColumnToggles} from "../../rov/js/initColumnToggles.js";
 import {initSpsTableSelection} from "./initSPSTableSelection.js";
 import {initSpsDelete} from "./initSPSDelete.js";
 import {initSpsTableFilterModal} from "./initSPSFilterModal.js";
-import {initSpsTableSortModal} from "./initSPSTableSortModal.js";
+//import {initSpsTableSortModal} from "./initSPSTableSortModal.js";
 import { initShotLineSort } from "./shot_line_sort.js";
 import {initSourceQCMap} from "./initSourceQCMap.js";
 import {initSourceQCStats} from "./initSourceQCStats.js";
 import {initDailyProductionTab} from "./initSourceDailyProduction.js";
 import {initSpsRowLinePlot} from "./initSpsRowLinePlot.js";
+import {initSourceUploadSubmit} from "./initSourceUploadModal.js"
 
 export function initAllJSForSource() {
-    initSourceUploadModal();
+    initSourceUploadSubmit()
     initSourceUpload();
     initSpsTableSelection();
     initSpsDelete();

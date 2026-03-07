@@ -1,124 +1,90 @@
-function setRequired(el, on) {
-  if (!el) return;
-  if (on) el.setAttribute("required", "required");
-  else el.removeAttribute("required");
+function showUploadMsg(text, kind = "success") {
+  const wrap = document.getElementById("source-upload-msg-wrap");
+  const box = document.getElementById("source-upload-msg");
+  if (!wrap || !box) return;
+
+  wrap.classList.remove("d-none");
+  box.className = `alert mb-0 alert-${kind}`;
+  box.textContent = text;
 }
 
-export function initSourceUploadModal() {
-  const fileType  = document.getElementById("source-file-type");
-  const spsBlock  = document.getElementById("sps-options");
-  const shotBlock = document.getElementById("shot-options");
+function getCookie(name) {
+  const v = `; ${document.cookie}`;
+  const parts = v.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(";").shift();
+  return "";
+}
 
-  const spsVessel = document.getElementById("sps-vessel");
-  const spsRev    = document.getElementById("sps-revision");
-  const spsTier   = document.getElementById("sps-tier");
-  const spsYear   = document.getElementById("sps-year");
+export function initSourceUploadSubmit() {
+  const form = document.getElementById("source-upload-form");
+  const submitBtn = document.getElementById("source-upload-submit");
+  const modalEl = document.getElementById("sourceUploadModal");
 
-  const detectBySeq = document.getElementById("detect-vessel-by-seq");
-  const spsSeq      = document.getElementById("sps-seq-number"); // optional
+  if (!form) return;
 
-  // NEW: auto year checkbox
-  const autoYear = document.getElementById("auto-year-by-jday");
+  form.addEventListener("submit", async function (e) {
+    e.preventDefault();
 
-  if (!fileType) return;
+    const fd = new FormData(form);
+    const fileType = String(fd.get("file_type") || "").toUpperCase();
 
-  function selectDefaultSpsRevision() {
-    if (!spsRev) return;
-    const opt = spsRev.querySelector('option[data-default="1"]');
-    if (opt) spsRev.value = opt.value;
-  }
-
-  function selectCurrentYear() {
-    if (!spsYear) return;
-    const y = String(new Date().getFullYear());
-    const opt = spsYear.querySelector(`option[value="${y}"]`);
-    if (opt) spsYear.value = y;
-  }
-
-  function selectTierOne() {
-    if (!spsTier) return;
-    const opt = spsTier.querySelector('option[value="1"]');
-    if (opt) spsTier.value = "1";
-  }
-
-  function updateDetectUI() {
-    const on = !!(detectBySeq && detectBySeq.checked);
-
-    if (spsVessel) {
-      spsVessel.disabled = on;
-      setRequired(spsVessel, !on);
-      if (on) spsVessel.value = "";
-    }
-
-    // we don't use manual seq anymore
-    if (spsSeq) {
-      spsSeq.disabled = true;
-      setRequired(spsSeq, false);
-      spsSeq.value = "";
-    }
-  }
-
-  function updateAutoYearUI() {
-    const on = !!(autoYear && autoYear.checked);
-    if (spsYear) {
-      spsYear.disabled = on;
-      // If auto year is ON, year is not required from UI
-      setRequired(spsYear, !on);
-    }
-  }
-
-  function updateUI() {
-    const v = (fileType.value || "").toUpperCase();
-
-    if (v === "SPS") {
-      spsBlock && spsBlock.classList.remove("d-none");
-      shotBlock && shotBlock.classList.add("d-none");
-
-      setRequired(spsRev, true);
-      setRequired(spsTier, true);
-
-      // If auto-year ON -> year not required; else required
-      updateAutoYearUI();
-
-      selectDefaultSpsRevision();
-      selectCurrentYear();
-      selectTierOne();
-
-      updateDetectUI();
+    if (!fileType) {
+      showUploadMsg("Please select file type.", "danger");
       return;
     }
 
-    if (v === "SHOT") {
-      spsBlock && spsBlock.classList.add("d-none");
-      shotBlock && shotBlock.classList.remove("d-none");
-    } else {
-      spsBlock && spsBlock.classList.add("d-none");
-      shotBlock && shotBlock.classList.add("d-none");
+    submitBtn && (submitBtn.disabled = true);
+    if (submitBtn) {
+      submitBtn.dataset.oldHtml = submitBtn.innerHTML;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Uploading...';
     }
 
-    setRequired(spsVessel, false);
-    setRequired(spsRev, false);
-    setRequired(spsTier, false);
-    setRequired(spsYear, false);
+    try {
+      const resp = await fetch(form.action, {
+        method: "POST",
+        body: fd,
+        headers: {
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+      });
 
-    if (detectBySeq) detectBySeq.checked = false;
-    updateDetectUI();
+      const data = await resp.json();
 
-    if (autoYear) autoYear.checked = true; // optional default reset
-    updateAutoYearUI();
-  }
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.error || "Upload failed.");
+      }
 
-  fileType.addEventListener("change", updateUI);
-  detectBySeq && detectBySeq.addEventListener("change", updateDetectUI);
-  autoYear && autoYear.addEventListener("change", updateAutoYearUI);
+      if (data.target_tbody && data.tbody_html) {
+        const tbody = document.getElementById(data.target_tbody);
+        if (tbody) {
+          tbody.innerHTML = data.tbody_html;
+        }
+      }
 
-  updateUI();
-}
+      let msg = `${data.file_type} uploaded successfully. Rows inserted: ${data.rows_inserted || 0}`;
+      showUploadMsg(msg, "success");
 
-window.initSourceUploadModal = initSourceUploadModal;
+      // optional: reset form after success
+      form.reset();
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initSourceUploadModal);
-} else {
-  initSourceUploadModal();
+      // optional: re-run modal UI logic after reset
+      if (window.initSourceUploadModal) {
+        window.initSourceUploadModal();
+      }
+
+      // close modal after short delay
+      if (modalEl && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+        setTimeout(() => modal.hide(), 500);
+      }
+
+    } catch (err) {
+      showUploadMsg(err.message || "Upload failed.", "danger");
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = submitBtn.dataset.oldHtml || '<i class="fas fa-cloud-upload-alt me-2"></i>Upload';
+      }
+    }
+  });
 }
