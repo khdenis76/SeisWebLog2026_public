@@ -1456,8 +1456,6 @@ def bbox_config_delete(request, config_id: int):
 @login_required
 @require_POST
 @csrf_protect
-@require_POST
-@csrf_protect
 def bbox_config_import_json(request):
     try:
         payload = json.loads(request.body.decode("utf-8"))
@@ -1474,8 +1472,6 @@ def bbox_config_import_json(request):
     dsr = DSRDB(project.db_path)
 
     try:
-        # full export JSON:
-        # { "BBox_Configs_List": [...], "BBox_Config": [...] }
         if isinstance(payload, dict) and "BBox_Configs_List" in payload and "BBox_Config" in payload:
             export_dir = Path(project.export_dir)
             export_dir.mkdir(parents=True, exist_ok=True)
@@ -1488,8 +1484,6 @@ def bbox_config_import_json(request):
             status = 200 if result.get("ok") else 400
             return JsonResponse(result, status=status)
 
-        # single-config JSON:
-        # { "config": {...}, "mapping": {...} }
         cfg = payload.get("config") or {}
         mapping = payload.get("mapping") or {}
 

@@ -483,7 +483,7 @@ class DSRDB:
 
     def ensure_bbox_config_schema(self):
         """
-        Ensure all BBox config tables, constraints, triggers exist.
+        Ensure all BBox config tables, constraints, triggers and required columns exist.
         Safe to call multiple times.
         """
         ddl = """
@@ -495,6 +495,9 @@ class DSRDB:
             rov2_name TEXT,
             gnss1_name TEXT,
             gnss2_name TEXT,
+            Vessel_name TEXT,
+            Depth1_name TEXT,
+            Depth2_name TEXT,
             CONSTRAINT ux_bbox_configs_name UNIQUE (Name)
         );
 
@@ -534,6 +537,18 @@ class DSRDB:
         with self._connect() as conn:
             conn.execute("PRAGMA foreign_keys = ON;")
             conn.executescript(ddl)
+
+            # ---- add missing columns for old projects ----
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(BBox_Configs_List)").fetchall()}
+
+            if "Vessel_name" not in cols:
+                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN Vessel_name TEXT')
+            if "Depth1_name" not in cols:
+                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN Depth1_name TEXT')
+            if "Depth2_name" not in cols:
+                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN Depth2_name TEXT')
+
+            conn.commit()
 
     def get_bbox_configs_list(self):
         """
@@ -2470,16 +2485,21 @@ WHERE Area IS NOT NULL
 
     def import_all_bbox_configs(self, dir: str) -> dict:
         """
-        Import configs from bbox_configs.json
-        """
+        Import configs from <dir>/bbox_configs.json
 
+        Rules:
+        - keep parent ID only if it is free
+        - if parent ID already exists -> insert parent without ID, SQLite generates new one
+        - if parent Name already exists -> rename to Name (2), Name (3), ...
+        - child ID is never imported
+        - child CONFIG_FK is remapped to the inserted parent ID
+        """
         try:
             self.ensure_bbox_config_schema()
 
             in_file = Path(dir) / "bbox_configs.json"
-
             if not in_file.exists():
-                return {"ok": False, "error": f"File not found {in_file}"}
+                return {"ok": False, "error": f"File not found: {in_file}"}
 
             with open(in_file, "r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -2492,136 +2512,196 @@ WHERE Area IS NOT NULL
             print(" children in json:", len(cfg_fields))
 
             with self._connect() as conn:
-
                 conn.row_factory = sqlite3.Row
                 cur = conn.cursor()
 
-                conn.execute("PRAGMA foreign_keys = ON")
-                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("PRAGMA foreign_keys = ON;")
+                conn.execute("BEGIN IMMEDIATE;")
 
-                existing_ids = {
-                    int(r[0]) for r in
-                    cur.execute("SELECT ID FROM BBox_Configs_List").fetchall()
-                }
+                try:
+                    parent_db_cols = [r["name"] for r in cur.execute("PRAGMA table_info(BBox_Configs_List)").fetchall()]
+                    child_db_cols = [r["name"] for r in cur.execute("PRAGMA table_info(BBox_Config)").fetchall()]
 
-                existing_names = {
-                    r[0] for r in
-                    cur.execute("SELECT Name FROM BBox_Configs_List").fetchall()
-                }
+                    parent_cols_lut = {c.lower(): c for c in parent_db_cols}
+                    child_cols_lut = {c.lower(): c for c in child_db_cols}
 
-                fk_map = {}
+                    parent_id_col = parent_cols_lut.get("id", "ID")
+                    parent_name_col = parent_cols_lut.get("name", "Name")
+                    child_id_col = child_cols_lut.get("id", "ID")
+                    child_fk_col = child_cols_lut.get("config_fk", "CONFIG_FK")
 
-                imported_parents = 0
-                imported_children = 0
-                renamed = 0
+                    existing_ids = {
+                        int(r[0])
+                        for r in cur.execute(f"SELECT {parent_id_col} FROM BBox_Configs_List").fetchall()
+                        if r[0] is not None
+                    }
 
-                def unique_name(name):
+                    existing_names = {
+                        str(r[0]).strip()
+                        for r in cur.execute(
+                            f"SELECT {parent_name_col} FROM BBox_Configs_List "
+                            f"WHERE {parent_name_col} IS NOT NULL AND TRIM({parent_name_col}) <> ''"
+                        ).fetchall()
+                    }
 
-                    if name not in existing_names:
-                        existing_names.add(name)
-                        return name, False
+                    fk_map = {}
 
-                    i = 2
-                    while True:
-                        n = f"{name} ({i})"
-                        if n not in existing_names:
-                            existing_names.add(n)
-                            return n, True
-                        i += 1
+                    imported_parents = 0
+                    imported_children = 0
+                    renamed_parents = 0
+                    reused_parent_ids = 0
+                    new_parent_ids = 0
+                    skipped_parents_invalid = 0
+                    skipped_children = 0
 
-                # ---------------------
-                # parents
-                # ---------------------
-                for row in cfg_list:
+                    def unique_name(name):
+                        name = (name or "").strip()
+                        if not name:
+                            name = "Unnamed Config"
 
-                    old_id = int(row["ID"])
-                    row_new = dict(row)
+                        if name not in existing_names:
+                            existing_names.add(name)
+                            return name, False
 
-                    name, was_renamed = unique_name(row_new.get("Name", "Config"))
-                    row_new["Name"] = name
+                        i = 2
+                        while True:
+                            cand = f"{name} ({i})"
+                            if cand not in existing_names:
+                                existing_names.add(cand)
+                                return cand, True
+                            i += 1
 
-                    if was_renamed:
-                        renamed += 1
+                    def filter_row(row_dict, lut):
+                        out = {}
+                        for k, v in row_dict.items():
+                            real_col = lut.get(str(k).lower())
+                            if real_col:
+                                out[real_col] = v
+                        return out
 
-                    if old_id not in existing_ids:
+                    # -------------------------
+                    # parents
+                    # -------------------------
+                    for i, row in enumerate(cfg_list, start=1):
+                        if not isinstance(row, dict):
+                            skipped_parents_invalid += 1
+                            continue
+
+                        old_id = row.get("ID", row.get("id"))
+                        if old_id is None:
+                            skipped_parents_invalid += 1
+                            continue
+
+                        try:
+                            old_id = int(old_id)
+                        except Exception:
+                            skipped_parents_invalid += 1
+                            continue
+
+                        row_new = filter_row(dict(row), parent_cols_lut)
+                        if not row_new:
+                            skipped_parents_invalid += 1
+                            continue
+
+                        new_name, was_renamed = unique_name(row_new.get(parent_name_col))
+                        row_new[parent_name_col] = new_name
+                        if was_renamed:
+                            renamed_parents += 1
+
+                        keep_original_id = old_id not in existing_ids
+
+                        if keep_original_id:
+                            row_new[parent_id_col] = old_id
+                        else:
+                            row_new.pop(parent_id_col, None)
 
                         cols = list(row_new.keys())
                         vals = [row_new[c] for c in cols]
 
                         sql = f"""
-                        INSERT INTO BBox_Configs_List ({",".join(cols)})
-                        VALUES ({",".join("?" for _ in cols)})
+                            INSERT INTO BBox_Configs_List ({",".join(cols)})
+                            VALUES ({",".join("?" for _ in cols)})
                         """
-
                         cur.execute(sql, vals)
 
-                        new_id = old_id
-                        existing_ids.add(new_id)
+                        if keep_original_id:
+                            new_id = old_id
+                            reused_parent_ids += 1
+                            print(f" parent #{i}: inserted with original ID={new_id}")
+                        else:
+                            new_id = int(cur.lastrowid)
+                            new_parent_ids += 1
+                            print(f" parent #{i}: inserted with new ID={new_id}")
 
-                    else:
+                        existing_ids.add(int(new_id))
+                        fk_map[old_id] = int(new_id)
+                        imported_parents += 1
 
-                        row_new.pop("ID", None)
+                    print(" parents imported:", imported_parents)
+                    print(" parents renamed :", renamed_parents)
+
+                    # -------------------------
+                    # children
+                    # -------------------------
+                    for i, row in enumerate(cfg_fields, start=1):
+                        if not isinstance(row, dict):
+                            skipped_children += 1
+                            continue
+
+                        old_fk = row.get("CONFIG_FK", row.get("config_fk"))
+                        if old_fk is None:
+                            skipped_children += 1
+                            continue
+
+                        try:
+                            old_fk = int(old_fk)
+                        except Exception:
+                            skipped_children += 1
+                            continue
+
+                        new_fk = fk_map.get(old_fk)
+                        if new_fk is None:
+                            skipped_children += 1
+                            continue
+
+                        row_new = filter_row(dict(row), child_cols_lut)
+                        row_new.pop(child_id_col, None)
+                        row_new[child_fk_col] = new_fk
 
                         cols = list(row_new.keys())
                         vals = [row_new[c] for c in cols]
 
                         sql = f"""
-                        INSERT INTO BBox_Configs_List ({",".join(cols)})
-                        VALUES ({",".join("?" for _ in cols)})
+                            INSERT INTO BBox_Config ({",".join(cols)})
+                            VALUES ({",".join("?" for _ in cols)})
                         """
-
                         cur.execute(sql, vals)
+                        imported_children += 1
 
-                        new_id = cur.lastrowid
+                    conn.commit()
 
-                    fk_map[old_id] = new_id
-                    imported_parents += 1
+                    print(" children imported:", imported_children)
+                    print("IMPORT DONE")
 
-                print("parents imported:", imported_parents)
-                print("parents renamed :", renamed)
+                    return {
+                        "ok": True,
+                        "file": str(in_file),
+                        "imported_parents": imported_parents,
+                        "renamed_parents": renamed_parents,
+                        "reused_parent_ids": reused_parent_ids,
+                        "new_parent_ids": new_parent_ids,
+                        "skipped_parents_invalid": skipped_parents_invalid,
+                        "imported_children": imported_children,
+                        "skipped_children": skipped_children,
+                    }
 
-                # ---------------------
-                # children
-                # ---------------------
-                for row in cfg_fields:
-
-                    old_fk = int(row["CONFIG_FK"])
-
-                    new_fk = fk_map.get(old_fk)
-
-                    if not new_fk:
-                        continue
-
-                    row_new = dict(row)
-
-                    row_new.pop("ID", None)
-                    row_new["CONFIG_FK"] = new_fk
-
-                    cols = list(row_new.keys())
-                    vals = [row_new[c] for c in cols]
-
-                    sql = f"""
-                    INSERT INTO BBox_Config ({",".join(cols)})
-                    VALUES ({",".join("?" for _ in cols)})
-                    """
-
-                    cur.execute(sql, vals)
-
-                    imported_children += 1
-
-                conn.commit()
-
-                print("children imported:", imported_children)
-                print("IMPORT DONE")
-
-                return {
-                    "ok": True,
-                    "parents": imported_parents,
-                    "children": imported_children,
-                    "renamed": renamed
-                }
+                except Exception as e:
+                    conn.rollback()
+                    print("IMPORT FAILED:", str(e))
+                    return {"ok": False, "error": str(e)}
 
         except Exception as e:
+            print("IMPORT FAILED:", str(e))
             return {"ok": False, "error": str(e)}
 
     def delete_bbox_config(self, config_id: int) -> dict:
