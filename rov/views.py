@@ -25,16 +25,7 @@ from rov.dsr_line_graphics import DSRLineGraphics
 from rov.dsr_map_graphics import DSRMapPlots
 from rov.dsrclass import DSRDB
 from rov.bbox_graphics import BlackBoxGraphics
-
-
-
-
-
 from django.core.cache import cache
-
-
-
-
 # Create your views here.
 @login_required
 def rov_main_view(request):
