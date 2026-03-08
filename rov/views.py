@@ -333,10 +333,10 @@ def rov_upload_black_box(request):
             return JsonResponse({"error": "No active project"}, status=400)
         if not project.can_edit(request.user):
             raise PermissionDenied
-        pdb = DSRDB(project.db_path)
+        dsr = DSRDB(project.db_path)
 
         # --- mapping ---
-        mapping = pdb.get_bbox_config_mapping(config_id)
+        mapping = dsr.get_bbox_config_mapping(config_id)
         if not mapping:
             return JsonResponse(
                 {"error": "Selected config has no active field mapping (inUse=1)."},
@@ -349,10 +349,10 @@ def rov_upload_black_box(request):
 
         for f in files:
             # 1) create/get file FK
-            file_fk = pdb.upsert_blackbox_file(f.name, config_id)
+            file_fk = dsr.upsert_blackbox_file(f.name, config_id)
 
             # 2) load CSV into BlackBox
-            n = pdb.load_blackbox_csv(
+            n = dsr.load_blackbox_csv(
                 uploaded_file=f,
                 mapping=mapping,
                 file_fk=file_fk,
@@ -361,7 +361,7 @@ def rov_upload_black_box(request):
 
             inserted_total += n
             processed.append({"file": f.name, "rows": n, "file_fk": file_fk})
-        bbox_file_tbody = pdb.get_bbox_file_table()
+        bbox_file_tbody = dsr.get_bbox_file_table()
 
         return JsonResponse({
             "ok": True,
