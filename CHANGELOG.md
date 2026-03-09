@@ -61,6 +61,15 @@ Compare shot table and SPS
 Fixed sps sort   
 Export/Import/Delete BlackBox config  
 ### Changed
+## [2026.1.0.8] - 2026-03-08
+### Added
+Added toasts for all input from ROV page
+Added aditional modals for ROV page 
+### Fixed
+ Main ROV page fixed.  
+In dataviewer fixed wrong ROV name 
+### Changed
+
  
 
    

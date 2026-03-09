@@ -1133,11 +1133,12 @@ class DSRMapPlots:
             show_shapes: bool = True,
             show_layers: bool = True,
             show_tiles: Optional[bool] = None,
+            show_sm: bool = False,  # NEW
             is_show: bool = False,
             jason_item: bool = False,  # kept your flag name
     ):
         """
-        Multi-layer map (dsr / rec_db) with:
+        Multi-layer map (dsr / sm / rec_db) with:
           - per-layer pandas query filter: where="ROV.isna() or ROV == ''" (<> supported)
           - per-layer coloring:
               * categorical: color_col="ROV"
@@ -1146,7 +1147,7 @@ class DSRMapPlots:
 
         Layer dict keys (important ones):
           {
-            "df": "dsr" | "rec" | "rec_db",
+            "df": "dsr" | "sm" | "rec" | "rec_db",
             "name": "...",
             "x_col": "...",
             "y_col": "...",
@@ -1172,10 +1173,12 @@ class DSRMapPlots:
             "palette": "Turbo256"|"Category10"|"Category20"|<list-of-colors>,
             "palette_colors": [ ... ],          # explicit list overrides palette
           }
+
+        SM layer:
+          - df="sm"
+          - source is dsr_df filtered by Status == "Deployed"
+          - appears wherever you place it in layers order
         """
-
-        import numpy as np  # needed for integer bin labels
-
         # ---- defaults
         if layers is None:
             layers = [
@@ -1190,6 +1193,33 @@ class DSRMapPlots:
                     color="orange",
                 )
             ]
+
+            if show_sm:
+                layers.append(
+                    dict(
+                        df="sm",
+                        name="SM Deployed",
+                        x_col="PrimaryEasting",
+                        y_col="PrimaryNorthing",
+                        marker="circle",
+                        size=6,
+                        alpha=0.9,
+                        color="deepskyblue",
+                    )
+                )
+
+            layers.append(
+                dict(
+                    df="rec",
+                    name="REC_DB",
+                    x_col="Easting",
+                    y_col="Northing",
+                    marker="circle",
+                    size=6,
+                    alpha=0.9,
+                    color="green",
+                )
+            )
 
         # ---- transformer
         transformer = None
@@ -1213,7 +1243,7 @@ class DSRMapPlots:
             active_scroll="wheel_zoom",
         )
 
-        # ---- tiles (xyzservices)
+        # ---- tiles
         if show_tiles:
             vendor = getattr(self.cfg, "tile_vendor", "CARTODB_POSITRON")
             provider = {
@@ -1236,7 +1266,7 @@ class DSRMapPlots:
                 show_tiles=show_tiles,
             )
 
-        # ---- RPPreplot layer (scatter)
+        # ---- RPPreplot layer
         r_rp = None
         if show_preplot and rp_df is not None and len(rp_df) > 0:
             rp = rp_df.copy().dropna(subset=["X", "Y"])
@@ -1276,9 +1306,20 @@ class DSRMapPlots:
                 )
             )
 
+        # ---- NEW: build SM dataframe from DSR where Status == "Deployed"
+        sm_df = None
+        if show_sm and dsr_df is not None and len(dsr_df) > 0:
+            sm_df = dsr_df.copy()
+            if "Status" in sm_df.columns:
+                sm_df = sm_df[sm_df["Status"] == "Deployed"].copy()
+            else:
+                sm_df = sm_df.iloc[0:0].copy()
+
         # ---- DataFrame selector
         df_map = {
             "dsr": dsr_df,
+            "sm": sm_df,  # NEW
+            "survey_manager": sm_df,
             "rec": rec_db_df,
             "rec_db": rec_db_df,
             "recdb": rec_db_df,
@@ -1287,7 +1328,6 @@ class DSRMapPlots:
         layer_spinners = []
         used_legend_titles = []
 
-        # ---- Helper: palette selection per layer (supports "Turbo256", list, Category10/20)
         def _pick_palette(n: int, layer: dict):
             from bokeh.palettes import Category10, Category20, Turbo256
             import numpy as np
@@ -1295,46 +1335,40 @@ class DSRMapPlots:
             palette_colors = layer.get("palette_colors", None)
             palette_raw = layer.get("palette", None)
 
-            # 1) explicit list overrides
             if isinstance(palette_colors, (list, tuple)) and len(palette_colors) > 0:
                 pal = list(palette_colors)
                 return (pal * ((n // len(pal)) + 1))[:n]
 
-            # 2) palette passed as list
             if isinstance(palette_raw, (list, tuple)) and len(palette_raw) > 0:
                 pal = list(palette_raw)
                 return (pal * ((n // len(pal)) + 1))[:n]
 
-            # 3) palette passed as string
             if isinstance(palette_raw, str):
                 name = palette_raw.strip().upper()
 
                 if name == "TURBO256":
                     if n <= 1:
                         return [Turbo256[0]]
-                    # evenly spaced indices across 0..255
                     idx = np.linspace(0, 255, n).round().astype(int)
                     return [Turbo256[i] for i in idx]
 
                 if name == "CATEGORY10":
-                    return Category10[10][:min(n, 10)]
-                if name == "CATEGORY20":
-                    return Category20[20][:min(n, 20)]
+                    if n <= 10:
+                        return Category10[10][:n]
+                    return (Category10[10] * ((n // 10) + 1))[:n]
 
-            # fallback
+                if name == "CATEGORY20":
+                    if n <= 20:
+                        return Category20[20][:n]
+                    return (Category20[20] * ((n // 20) + 1))[:n]
+
             if n <= 10:
                 return Category10[10][:n]
             if n <= 20:
                 return Category20[20][:n]
             return (Category20[20] * ((n // 20) + 1))[:n]
 
-        # ---- Helper: grouped labels for numeric column (bins -> integer labels, non-overlapping)
         def _build_grouped_numeric_column(df: pd.DataFrame, col: str, layer: dict, suffix: str) -> str:
-            """
-            Returns column name to use for categorical coloring/legend.
-            Creates df[newcol] with labels if numeric grouping enabled (bins/intervals).
-            If not grouping, converts df[col] to str and returns col.
-            """
             s = df[col]
             s_num = pd.to_numeric(s, errors="coerce")
             is_numeric = s_num.notna().any()
@@ -1356,7 +1390,6 @@ class DSRMapPlots:
             newcol = f"{col}__grp_{suffix}"
             df[newcol] = "Unknown"
 
-            # ---- Mode B: explicit intervals overrides bins
             if wants_intervals:
                 labs = interval_labels
                 if not (isinstance(labs, (list, tuple)) and len(labs) == len(intervals)):
@@ -1378,7 +1411,6 @@ class DSRMapPlots:
                 df.loc[s_num.isna(), newcol] = "Unknown"
                 return newcol
 
-            # ---- Mode A: auto bins (equal / quantile)
             if bin_method in ("quantile", "q", "Q", "qcut"):
                 try:
                     cats = pd.qcut(s_num, q=bins_n, duplicates="drop")
@@ -1387,8 +1419,6 @@ class DSRMapPlots:
             else:
                 cats = pd.cut(s_num, bins=bins_n, include_lowest=include_lowest)
 
-            # ---- Integer, non-overlapping labels:
-            # Example: 0–10, 11–20, 21–30 ...
             labels = []
             prev_right = None
             for idx, interval in enumerate(cats.cat.categories):
@@ -1396,7 +1426,6 @@ class DSRMapPlots:
                 ir = int(np.ceil(interval.right))
 
                 if idx == 0 and include_lowest:
-                    # keep il as is
                     pass
                 elif prev_right is not None:
                     il = int(prev_right) + 1
@@ -1411,7 +1440,7 @@ class DSRMapPlots:
             df.loc[s_num.isna(), newcol] = "Unknown"
             return newcol
 
-        # ---- Build each layer (scatter everywhere)
+        # ---- Build each layer
         for i, layer in enumerate(layers, start=1):
             layer_name = layer.get("name", f"Layer {i}")
             df_key = (layer.get("df") or "dsr").lower()
@@ -1435,7 +1464,6 @@ class DSRMapPlots:
 
             df = base_df.copy()
 
-            # Filter (pandas query) with "<>" support
             if where:
                 where_clean = where.replace("<>", "!=")
                 try:
@@ -1445,12 +1473,10 @@ class DSRMapPlots:
                         f"Invalid where filter in layer '{layer_name}': {where}\n{e}"
                     )
 
-            # Drop missing coords
             df = df.dropna(subset=[x_col, y_col]).copy()
             if len(df) == 0:
                 continue
 
-            # Transform coords to plot columns
             mx_col = f"__mx_{i}"
             my_col = f"__my_{i}"
 
@@ -1462,7 +1488,6 @@ class DSRMapPlots:
                 df[mx_col] = df[x_col]
                 df[my_col] = df[y_col]
 
-            # ---- Determine color field (may become grouped for numeric)
             color_field = None
             if color_col and color_col in df.columns:
                 color_field = _build_grouped_numeric_column(df, color_col, layer, suffix=str(i))
@@ -1476,10 +1501,9 @@ class DSRMapPlots:
                 size=size0,
                 alpha=alpha,
                 source=src,
-                legend_label=layer_name,  # replaced by legend_field when used
+                legend_label=layer_name,
             )
 
-            # ---- Color logic (categorical legend)
             if color_field and (color_field in df.columns):
                 factors = sorted(df[color_field].dropna().unique().tolist())
                 n = len(factors)
@@ -1514,7 +1538,6 @@ class DSRMapPlots:
 
             r = p.scatter(**glyph_kwargs)
 
-            # Hover tool
             hover = layer.get("hover", None)
             if hover is None:
                 hover = [("Layer", layer_name), ("DF", df_key)]
@@ -1540,7 +1563,6 @@ class DSRMapPlots:
 
             p.add_tools(HoverTool(renderers=[r], tooltips=hover))
 
-            # Spinner for layer size
             sp = Spinner(
                 title=f"{layer_name} size",
                 low=1,
@@ -1593,7 +1615,6 @@ class DSRMapPlots:
             )
             controls_items.extend([toggle_legend_btn, cycle_legend_pos_btn])
 
-        # RP size spinner
         sp_rp = Spinner(title="RP size", low=1, high=100, step=1, value=5, width=130)
         if r_rp is not None:
             sp_rp.js_on_change("value", CustomJS(args=dict(r=r_rp), code="r.glyph.size = cb_obj.value;"))
@@ -1611,7 +1632,7 @@ class DSRMapPlots:
             return None
 
         if jason_item:
-            return None  # you likely return json_item(layout/p) in your Django view
+            return None
 
         return layout
     # -------------------------

@@ -1,4 +1,6 @@
 import { getCSRFToken } from "../../baseproject/js/csrf.js";
+import { showToast } from "./toast.js";
+import { showConfirmModal } from "./confirmModal.js";
 
 function buildUrlFromTemplate(templateUrl, id) {
   return templateUrl.replace(/\/0\/?$/, `/${id}/`);
@@ -295,18 +297,16 @@ export function initBBoxConfigDatalist() {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || !data.ok) {
-      setAlert(
-        msgWrap,
-        msgEl,
-        "danger",
-        data.error || `Delete failed (${res.status})`
-      );
+      const msg = data.error || `Delete failed (${res.status})`;
+      setAlert(msgWrap, msgEl, "danger", msg);
+      showToast({ title: "Delete BBox config", message: msg, type: "danger" });
       return;
     }
 
     await loadConfigs();
     clearForm();
     setAlert(msgWrap, msgEl, "success", "Configuration deleted.");
+    showToast({ title: "Delete BBox config", message: "Configuration deleted.", type: "success" });
   }
 
   async function exportAllConfigsJson() {

@@ -1,7 +1,7 @@
 {% if rows %}
         {% for r in rows %}
           <tr>
-            <td class="text-nowrap">{{ r.nav_line }}</td>
+            <td class="text-nowrap" >{{ r.nav_line }}</td>
             <td class="text-nowrap">{{ r.attempt }}</td>
             <td class="text-nowrap">
                 {% if r.min_water_depth is not None and r.min_water_depth == 0 %}

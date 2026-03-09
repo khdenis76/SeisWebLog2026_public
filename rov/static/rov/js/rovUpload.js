@@ -1,23 +1,24 @@
-import { getCSRFToken } from "../../baseproject/js/csrf.js"; // adjust path if needed
+import { getCSRFToken } from "../../baseproject/js/csrf.js";
+import { showToast, toastFromResponse } from "./toast.js";
 
 export function initRovUploadModal() {
-  const form       = document.getElementById("rov-upload-form");
+  const form = document.getElementById("rov-upload-form");
   const typeSelect = document.getElementById("rov-file-type");
-  const fileInput  = document.getElementById("rov-file-input");
-  const helpText   = document.getElementById("rov-file-help");
-  const uploadBtn  = document.getElementById("rov-upload-btn");
-  const statusEl   = document.getElementById("rov-upload-status");
-  const countEl    = document.getElementById("rov-files-count");
-  const modalEl    = document.getElementById("rovUploadModal");
-  const tbody =document.getElementById('bbox-list-tbody')
-  const dsrbody =document.getElementById('dsr-line-table-body')
-  const dsrstatbody = document.getElementById("rov-stat-card-body")
+  const fileInput = document.getElementById("rov-file-input");
+  const helpText = document.getElementById("rov-file-help");
+  const uploadBtn = document.getElementById("rov-upload-btn");
+  const statusEl = document.getElementById("rov-upload-status");
+  const countEl = document.getElementById("rov-files-count");
+  const modalEl = document.getElementById("rovUploadModal");
 
-  // ✅ BlackBox config selector
-  const cfgSelect  = document.getElementById("bblog-config-select");
-  const cfgGroup   = cfgSelect ? cfgSelect.closest(".input-group") : null;
+  const tbody = document.getElementById("bbox-list-tbody");
+  const dsrbody = document.getElementById("dsr-line-table-body");
+  const dsrstatbody = document.getElementById("rov-stat-card-body");
 
-  if (!form || !typeSelect || !fileInput || !uploadBtn || !modalEl || !tbody || !dsrbody) return;
+  const cfgSelect = document.getElementById("bblog-config-select");
+  const cfgGroup = cfgSelect ? cfgSelect.closest(".input-group") : null;
+
+  if (!form || !typeSelect || !fileInput || !uploadBtn || !modalEl) return;
 
   const rules = {
     DSR: { accept: ".txt,.csv", help: "DSR files (.txt / .csv)", url: "urlDsr" },
@@ -26,8 +27,13 @@ export function initRovUploadModal() {
     REC_DB: { accept: ".*,.txt", help: "REC_DB (.* / .txt)", url: "urlRecDb" },
   };
 
-  const setStatus = (t = "") => { if (statusEl) statusEl.textContent = t; };
-  const setCount  = (t = "") => { if (countEl) countEl.textContent = t; };
+  const setStatus = (t = "") => {
+    if (statusEl) statusEl.textContent = t;
+  };
+
+  const setCount = (t = "") => {
+    if (countEl) countEl.textContent = t;
+  };
 
   const cleanupBackdrops = () => {
     document.querySelectorAll(".modal-backdrop").forEach((b) => b.remove());
@@ -44,23 +50,37 @@ export function initRovUploadModal() {
 
   function resetForm() {
     form.reset();
-
     fileInput.disabled = true;
     fileInput.accept = "";
     uploadBtn.disabled = true;
-
-    if (helpText) helpText.textContent = "Select file type first";
+    form.action = "";
     setStatus("");
     setCount("");
 
-    form.action = "";
-
-    // hide config selector until BLACK_BOX chosen
+    if (helpText) helpText.textContent = "Select file type first";
     setCfgVisibility("");
   }
 
-  // Create instance once
-  const modal = bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: true, keyboard: true });
+  function buildSuccessMessage(data) {
+    if (data.toast?.message) return data.toast.message;
+    if (data.success) return data.success;
+    if (data.message) return data.message;
+
+    if (
+      data.total_processed !== undefined ||
+      data.total_upserted !== undefined ||
+      data.total_skipped !== undefined
+    ) {
+      return `Upload completed. Processed: ${data.total_processed ?? 0}, upserted: ${data.total_upserted ?? 0}, skipped: ${data.total_skipped ?? 0}.`;
+    }
+
+    return "Upload completed successfully.";
+  }
+
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl, {
+    backdrop: true,
+    keyboard: true,
+  });
 
   modalEl.addEventListener("show.bs.modal", () => {
     cleanupBackdrops();
@@ -71,7 +91,6 @@ export function initRovUploadModal() {
     cleanupBackdrops();
   });
 
-  // Change by file type
   typeSelect.addEventListener("change", () => {
     const fileType = typeSelect.value;
     const rule = rules[fileType];
@@ -79,7 +98,6 @@ export function initRovUploadModal() {
 
     fileInput.disabled = false;
     uploadBtn.disabled = false;
-
     fileInput.value = "";
     fileInput.accept = rule.accept;
 
@@ -90,43 +108,49 @@ export function initRovUploadModal() {
 
     setStatus("");
     setCount("");
-
-    // ✅ show/hide config selector
     setCfgVisibility(fileType);
   });
 
-  // Show number of selected files
   fileInput.addEventListener("change", () => {
     const n = fileInput.files?.length || 0;
     setCount(n ? `Selected: ${n} file(s)` : "");
   });
 
-  // Submit with fetch (NO reload)
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
     if (!form.action) {
-      alert("Select file type first");
+      showToast({
+        title: "Upload",
+        message: "Select file type first.",
+        type: "warning",
+      });
       return;
     }
 
     const files = fileInput.files;
     if (!files || files.length === 0) {
-      alert("Select at least one file");
+      showToast({
+        title: "Upload",
+        message: "Select at least one file.",
+        type: "warning",
+      });
       return;
     }
 
     const fileType = typeSelect.value;
 
-    // Build FormData manually for multi-file upload
     const fd = new FormData();
     fd.append("file_type", fileType);
 
-    // ✅ IMPORTANT: for BLACK_BOX we must send config_id
     if (fileType === "BLACK_BOX") {
       const cfgId = cfgSelect?.value || "";
       if (!cfgId) {
-        alert("Select BBLog configuration");
+        showToast({
+          title: "Black Box upload",
+          message: "Select BBLog configuration.",
+          type: "warning",
+        });
         return;
       }
       fd.append("config_id", cfgId);
@@ -135,8 +159,8 @@ export function initRovUploadModal() {
     for (const f of files) fd.append("files", f);
 
     uploadBtn.disabled = true;
-    const oldText = uploadBtn.textContent;
-    uploadBtn.textContent = "Uploading...";
+    const oldHtml = uploadBtn.innerHTML;
+    uploadBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Uploading...`;
     setStatus(`Uploading ${files.length} file(s)...`);
 
     try {
@@ -147,42 +171,51 @@ export function initRovUploadModal() {
       });
 
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || `Upload failed (${resp.status})`);
-      if (data.ok && data.bbox_file_tbody !== undefined) {
-         if (tbody) tbody.innerHTML = data.bbox_file_tbody;
-      }
-      if(data.dsr_lines_body){
-        dsrbody.innerHTML=data.dsr_lines_body
-      }
-      if(data.dsr_statistics_table){
-        dsrstatbody.innerHTML=data.dsr_statistics_table
-      }
-      const msg = data.message ||
-    `Upload completed: processed: ${data.total_processed} 
-     upserted: ${data.total_upserted} 
-     skipped: ${data.total_skipped}`;
 
-      // close modal first, then show message after hidden
+      if (!resp.ok) {
+        throw new Error(data.error || data.message || `Upload failed (${resp.status})`);
+      }
+
+      if (data.ok && data.bbox_file_tbody !== undefined && tbody) {
+        tbody.innerHTML = data.bbox_file_tbody;
+      }
+
+      if (data.dsr_lines_body && dsrbody) {
+        dsrbody.innerHTML = data.dsr_lines_body;
+      }
+
+      if (data.dsr_statistics_table && dsrstatbody) {
+        dsrstatbody.innerHTML = data.dsr_statistics_table;
+      }
+
+      const toastPayload = data.toast || {
+        title: "Upload",
+        message: buildSuccessMessage(data),
+        type: "success",
+      };
+
       modalEl.addEventListener(
         "hidden.bs.modal",
-        () => {
-          alert(msg); // replace with toast if you want
-        },
+        () => showToast(toastPayload),
         { once: true }
       );
 
       modal.hide();
-
     } catch (err) {
       console.error(err);
-      alert(err.message || "Upload failed");
-      setStatus(err.message || "Upload failed");
+      const msg = err.message || "Upload failed";
+      setStatus(msg);
+
+      showToast({
+        title: "Upload failed",
+        message: msg,
+        type: "danger",
+      });
     } finally {
       uploadBtn.disabled = false;
-      uploadBtn.textContent = oldText;
+      uploadBtn.innerHTML = oldHtml;
     }
   });
 
-  // Ensure initial state if modal isn't used
   setCfgVisibility("");
 }

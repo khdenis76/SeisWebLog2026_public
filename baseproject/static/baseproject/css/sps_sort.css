@@ -1,0 +1,13 @@
+
+#sps-table thead th.sps-sortable.sort-active::after {
+  font-size: 0.8em;
+  margin-right: 1ch;
+}
+
+#sps-table thead th.sps-sortable.sort-asc::after {
+  content: "▲";
+}
+
+#sps-table thead th.sps-sortable.sort-desc::after {
+  content: "▼";
+}

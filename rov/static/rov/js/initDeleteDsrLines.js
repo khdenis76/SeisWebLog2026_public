@@ -1,4 +1,6 @@
-import { getCSRFToken } from "../../baseproject/js/csrf.js"; // adjust path if needed
+import { getCSRFToken } from "../../baseproject/js/csrf.js";
+import { showToast } from "./toast.js";
+import { showConfirmModal } from "./confirmModal.js";
 
 export function initDeleteDSRLines() {
   const menu = document.querySelector("#dsr-delete-btn + .dropdown-menu");
@@ -11,18 +13,33 @@ export function initDeleteDSRLines() {
     e.preventDefault();
 
     const mode = btn.dataset.deleteMode || "all";
+    const modeLabelMap = {
+      all: "all DSR data",
+      recdb: "REC_DB records",
+      sm: "Survey Manager fields",
+    };
 
-    // collect checked lines
-    const lines = Array.from(
-      document.querySelectorAll(".dsr-line-checkbox:checked")
-    ).map(cb => cb.value);
+    const lines = Array.from(document.querySelectorAll(".dsr-line-checkbox:checked")).map(
+      (cb) => cb.value
+    );
 
     if (!lines.length) {
-      alert("No lines selected");
+      showToast({
+        title: "Delete DSR lines",
+        message: "No lines selected.",
+        type: "warning",
+      });
       return;
     }
 
-    if (!confirm(`Delete ${lines.length} line(s)?`)) return;
+    const confirmed = await showConfirmModal({
+      title: "Delete DSR lines",
+      message: `Apply delete mode "${modeLabelMap[mode] || mode}" to ${lines.length} line(s)?`,
+      confirmText: "Yes",
+      cancelText: "No",
+      confirmClass: mode === "all" ? "btn-danger" : "btn-warning",
+    });
+    if (!confirmed) return;
 
     try {
       const resp = await fetch(btn.dataset.url || "dsr/delete_line", {
@@ -31,23 +48,26 @@ export function initDeleteDSRLines() {
           "X-CSRFToken": getCSRFToken(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          lines: lines,
-          mode: mode,
-        }),
+        body: JSON.stringify({ lines, mode }),
       });
 
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || "Delete failed");
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || data.message || "Delete failed");
 
-      alert(data.success || "Deleted");
+      showToast({
+        title: "Delete DSR lines",
+        message: data.toast?.message || data.success || "Delete completed.",
+        type: "success",
+      });
 
-      // optional: reload table or remove rows from DOM
       window.location.reload();
-
     } catch (err) {
       console.error(err);
-      alert(err.message);
+      showToast({
+        title: "Delete DSR lines",
+        message: err.message || "Delete failed.",
+        type: "danger",
+      });
     }
   });
 }

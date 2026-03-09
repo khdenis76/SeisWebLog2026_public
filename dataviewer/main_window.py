@@ -752,7 +752,7 @@ class MainWindow(QtWidgets.QMainWindow):
             x_col="ROV2_USBL_Easting",
             y_col="ROV2_USBL_Northing",
             layer_key="bb_rov2_usbl",
-            label=f"{rov1_name} USBL",
+            label=f"{rov2_name} USBL",
             point_color="orange",
             line_color="orange",
             point_size=4,

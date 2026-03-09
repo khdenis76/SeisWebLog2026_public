@@ -3,20 +3,21 @@ import {initColumnToggles} from "../../rov/js/initColumnToggles.js";
 import {initSpsTableSelection} from "./initSPSTableSelection.js";
 import {initSpsDelete} from "./initSPSDelete.js";
 import {initSpsTableFilterModal} from "./initSPSFilterModal.js";
-//import {initSpsTableSortModal} from "./initSPSTableSortModal.js";
 import { initShotLineSort } from "./shot_line_sort.js";
 import {initSourceQCMap} from "./initSourceQCMap.js";
 import {initSourceQCStats} from "./initSourceQCStats.js";
 import {initDailyProductionTab} from "./initSourceDailyProduction.js";
 import {initSpsRowLinePlot} from "./initSpsRowLinePlot.js";
 import {initSourceUploadSubmit} from "./initSourceUploadModal.js"
+import {initSpsTableAdvancedSort} from "./initSPSTableSortModal.js";
+import {initShotTableSort} from "./initShotTableSort.js";
 
 export function initAllJSForSource() {
     initSourceUploadSubmit()
     initSourceUpload();
     initSpsTableSelection();
     initSpsDelete();
-    initSpsTableFilterModal();
+    //initSpsTableFilterModal();
     initSourceQCMap();
     initSpsTableFilterModal({
     tbodyId: "sps-table-tbody",
@@ -25,9 +26,18 @@ export function initAllJSForSource() {
     endpoint: "/source/sps/table-data/"
   });
     initSourceQCStats();
+    initShotTableSort();
     initDailyProductionTab();
     initSpsRowLinePlot();
     initShotLineSort({ tbodyId: "shot-summary-tbody" }); // <-- your tbody id
+    initSpsTableAdvancedSort({
+    tableId: "sps-table",
+    theadId: "sps-table-thead",
+    tbodyId: "sps-table-tbody",
+    labelId: "sps-sort-label",
+    storageKey: "seisweblog:sps-sort",
+    maxLevels: 4,
+  });
     initColumnToggles(
     "source_toggle-left-rov-btn",
     "source_left-rov-col",

@@ -1,47 +1,46 @@
-<div class="sps-table-wrap">
-  <table class="table table-sm table-hover align-middle mb-0 sps-sticky-table" id="sps-table">
+<div class="table-scroll" style="height: 50vh">
+  <table class="mb-0" id="sps-table">
     <thead id="sps-table-thead">
       <tr>
         <!-- MAIN CHECKBOX -->
-        <th class="sticky-col-0">
+        <th class="sticky-col sticky-col-0">
           <input class="form-check-input m-0" type="checkbox" id="sps-check-all">
         </th>
 
-        <!-- FIRST 3 STICKY DATA COLS (SailLine, Line, Seq) -->
-        <th class="sticky-col-1">SailLine</th>
-        <th class="sticky-col-2">Line</th>
-        <th class="sticky-col-3 num">Seq</th>
+             <!-- FIRST 3 STICKY DATA COLS (SailLine, Line, Seq) -->
+             <th class="sticky-col sticky-col-1 sps-sortable" data-sort-key="sailline">SailLine</th>
+             <th class="sticky-col sticky-col-2 sps-sortable" data-sort-key="line">Line</th>
+             <th class="sticky-col sticky-col-3 num sps-sortable" data-sort-key="seq">Seq</th>
+             <!-- REST -->
+             <th class="num sps-sortable" data-sort-key="attempt">Attempt</th>
+             <th class="num sps-sortable" data-sort-key="fsp">FSP</th>
+             <th class="num sps-sortable" data-sort-key="fgsp">FGSP</th>
+             <th class="num sps-sortable" data-sort-key="lgsp">LGSP</th>
+             <th class="num sps-sortable" data-sort-key="lsp">LSP</th>
 
-        <!-- REST -->
-        <th class="num">Attempt</th>
-        <th class="num">FSP</th>
-        <th class="num">FGSP</th>
-        <th class="num">LGSP</th>
-        <th class="num">LSP</th>
+             <th class="num sps-sortable" data-sort-key="linelength">Length</th>
+             <th class="num sps-sortable" data-sort-key="pplength">Preplot Len.</th>
+             <th class="num sps-sortable" data-sort-key="percentline">% Line</th>
+             <th class="num sps-sortable" data-sort-key="percentseq">% Sec</th>
+             <th class="num sps-sortable" data-sort-key="production">Production</th>
+             <th class="num sps-sortable" data-sort-key="nonproduction">Non-Production</th>
+             <th class="num sps-sortable" data-sort-key="kill">Kill</th>
+             <th class="num sps-sortable" data-sort-key="gdmin">GD Min</th>
+             <th class="num sps-sortable" data-sort-key="gdmax">GD Max</th>
+             <th class="num sps-sortable" data-sort-key="wdmin">WD Min</th>
+             <th class="num sps-sortable" data-sort-key="wdmax">WD Max</th>
 
+             <th class="num sps-sortable" data-sort-key="seqlenpercentage">SeqLenPercentage</th>
+             <th class="num sps-sortable" data-sort-key="maxspi">MaxSPI</th>
+             <th class="num sps-sortable" data-sort-key="startx">StartX</th>
+             <th class="num sps-sortable" data-sort-key="starty">StartY</th>
+             <th class="num sps-sortable" data-sort-key="endx">EndX</th>
+             <th class="num sps-sortable" data-sort-key="endy">EndY</th>
 
-        <th class="num">Length</th>
-        <th class="num" title="Length of preplot line">Preplot Len.</th>
-        <th class="num" title="Percentage of Line completed">% Line</th>
-        <th class="num" title="Percentage of Seq completed">% Sec</th>
-        <th class="num" title="Production shots per seq">Production</th>
-        <th class="num" title="Non-Production shots per seq">Non-Production</th>
-        <th class="num" title="Killed (K, X) shots per seq">Kill</th>
-        <th class="num" title="Minmal Gun depth">GD Min</th>
-        <th class="num" title="Max Gun depth">GD Max</th>
-        <th class="num" >WD Min</th>
-        <th class="num" title="Max. Water depth">WD Max</th>
-
-        <th class="num" title="Length of seq">SeqLenPercentage</th>
-        <th class="num" title="Max interval in meters between nearest Production SP">MaxSPI</th>
-        <th class="num">StartX</th>
-        <th class="num">StartY</th>
-        <th class="num">EndX</th>
-        <th class="num">EndY</th>
-        <th>SOL,time</th>
-        <th>FGSP,Time</th>
-        <th>LGSP,Time</th>
-        <th>EOL,time</th>
+             <th class="sps-sortable" data-sort-key="start_time">SOL,time</th>
+             <th class="sps-sortable" data-sort-key="prodstart">FGSP,Time</th>
+             <th class="sps-sortable" data-sort-key="prodend">LGSP,Time</th>
+             <th class="sps-sortable" data-sort-key="end_time">EOL,time</th>
 
       </tr>
     </thead>

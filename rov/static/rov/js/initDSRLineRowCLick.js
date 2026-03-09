@@ -1,3 +1,6 @@
+import { getCSRFToken } from "../../baseproject/js/csrf.js";
+import { showToast } from "./toast.js";
+
 export function initDSRLineRowClick() {
   const table = document.getElementById("dsrLineTable");
   if (!table) return;
@@ -6,7 +9,6 @@ export function initDSRLineRowClick() {
   if (!url) return;
 
   table.addEventListener("click", async (e) => {
-    // ignore clicks on checkbox / buttons / links / inputs
     if (e.target.closest("input, button, a, select, textarea, label")) return;
 
     const tr = e.target.closest("tr[data-line]");
@@ -15,7 +17,6 @@ export function initDSRLineRowClick() {
     const line = tr.dataset.line;
     if (!line) return;
 
-    // optional: UI highlight
     table.querySelectorAll("tr.table-active").forEach((r) => r.classList.remove("table-active"));
     tr.classList.add("table-active");
 
@@ -29,13 +30,17 @@ export function initDSRLineRowClick() {
         body: form,
       });
 
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || "Click failed");
 
       console.log("DSR line clicked:", data.line);
     } catch (err) {
       console.error(err);
-      alert(err.message);
+      showToast({
+        title: "DSR line",
+        message: err.message || "Failed to load line.",
+        type: "danger",
+      });
     }
   });
 }

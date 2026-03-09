@@ -1,4 +1,5 @@
-import { getCSRFToken } from "../../baseproject/js/csrf.js"; // adjust path if needed
+import { getCSRFToken } from "../../baseproject/js/csrf.js";
+import { showToast } from "./toast.js";
 
 export function initSetDefaultBBoxConfig() {
   const btn = document.getElementById("set-default-bbox");
@@ -6,13 +7,19 @@ export function initSetDefaultBBoxConfig() {
 
   if (!btn || !sel) return;
 
-  // prevent double binding
   if (btn.dataset.bound === "1") return;
   btn.dataset.bound = "1";
 
   btn.addEventListener("click", async () => {
     const cfgId = sel.value;
-    if (!cfgId) return;
+    if (!cfgId) {
+      showToast({
+        title: "Default BBox config",
+        message: "Select a configuration first.",
+        type: "warning",
+      });
+      return;
+    }
 
     const url = btn.dataset.postUrl;
     if (!url) {
@@ -39,17 +46,24 @@ export function initSetDefaultBBoxConfig() {
         throw new Error(data.error || `HTTP ${resp.status}`);
       }
 
-      // ✅ Option A: quick UI update (mark selected option visually)
-      [...sel.options].forEach(o => (o.textContent = o.textContent.replace(/^⭐\s*/, "")));
+      [...sel.options].forEach((o) => {
+        o.textContent = o.textContent.replace(/^⭐\s*/, "");
+      });
       const opt = sel.options[sel.selectedIndex];
-      opt.textContent = `⭐ ${opt.textContent}`;
+      if (opt) opt.textContent = `⭐ ${opt.textContent}`;
 
-      // ✅ Option B (better): reload config list from server (if you have endpoint)
-      // await loadBBoxConfigs();
-
+      showToast({
+        title: "Default BBox config",
+        message: data.toast?.message || data.message || "Default configuration updated.",
+        type: "success",
+      });
     } catch (e) {
       console.error(e);
-      alert(e.message || "Failed to set default config");
+      showToast({
+        title: "Default BBox config",
+        message: e.message || "Failed to set default config.",
+        type: "danger",
+      });
     } finally {
       btn.disabled = false;
     }

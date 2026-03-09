@@ -13,18 +13,22 @@
            data-maxspi ="{{ r.MaxSPI }}"
            {% if r.MinProdWaterDepth > 0 %}data-wd="Ok"{% else %}data-wd="Error"{% endif %}
            {% if min_depth_limit <= r.MinProdGunDepth <= max_depth_limit %}data-gd="Ok"{% else %}data-gd="Error"{% endif %}
+           data-start-time="{{ r.Start_Time }}"
+           data-prodstart="{{ r.Start_Production_Time }}"
+           data-prodend="{{ r.End_Production_Time }}"
+           data-end-time="{{ r.End_Time }}"
       >
 
-        <td class="sticky-col-0">
+        <td class="sps-sticky-0 w-col1">
           <input class="form-check-input m-0 row-check"
                  type="checkbox"
                  name="sps_row"
                  value="{{ r.PPLine_FK }}|{{ r.Seq }}|{{ r.Attempt }}">
         </td>
 
-        <td class="sticky-col-1">{{ r.SailLine }}</td>
-        <td class="sticky-col-2">{{ r.Line }}</td>
-        <td class="sticky-col-3 num seq-kind-{{ r.purpose_id }}"title ="{{ r.purpose }}">{{ r.Seq|stringformat:"04d" }}</td>
+        <td class="sps-sticky-1 w-sailline">{{ r.SailLine }}</td>
+        <td class="sps-sticky-2 w-line">{{ r.Line }}</td>
+        <td class="sps-sticky-3 w-seq num seq-kind-{{ r.purpose_id }}"title ="{{ r.purpose }}">{{ r.Seq|stringformat:"04d" }}</td>
 
         <td class="num{% if r.Attempt == 1 %} text-primary
                       {% elif r.Attempt == "R" %} text-danger

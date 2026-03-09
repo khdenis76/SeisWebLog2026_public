@@ -61,6 +61,18 @@ def rov_main_view(request):
             where="ROV.notna() and ROV1 != ''",  # filter: ROV not empty
         ),
         dict(
+            name="SM (Deployment)",
+            df='sm',
+            x_col="PrimaryEasting1",
+            y_col="PrimaryNorthing1",
+            marker="circle",
+            size=6,
+            alpha=0.9,
+            color='lightblue',
+            # color_col="ROV",                       # categorical color mapping
+             # filter: ROV not empty
+        ),
+        dict(
             name="Recovered Nodes",
             df='dsr',
             x_col="PrimaryEasting1",
@@ -72,6 +84,7 @@ def rov_main_view(request):
             # color_col="ROV",                       # categorical color mapping
             where="ROV1.notna() and ROV1 != ''",  # filter: ROV not empty
         ),
+
         dict(
             name="Processed Nodes",
             df='rec',
@@ -84,6 +97,7 @@ def rov_main_view(request):
             # color_col="ROV",                       # categorical color mapping
             where=None,  # filter: ROV not empty
         ),
+
     ]
     progress_map = dsr_map_plot.make_map_multi_layers(
         rp_df=rp_data,  # your RPPreplot dataframe
@@ -93,6 +107,7 @@ def rov_main_view(request):
         layers=layers,
         show_preplot=True,
         show_shapes=True,
+        show_sm=True,
         show_tiles=True,  # if using mercator tiles
     )
     d_dep = dsr_map_plot.day_by_day_deployment(json_return=False)
@@ -196,11 +211,13 @@ def rov_upload_dsr(request):
     file_name = Path(project.export_csv / "dsr.csv")
     dsrdb.export_dsr_to_csv(file_name=file_name)
 
-
-
-
     return JsonResponse({
-        "status": "ok",
+        "ok": True,
+        "toast": {
+            "title": "DSR upload",
+            "message": f"Processed {total_processed}, upserted {total_upserted}, skipped {total_skipped}.",
+            "type": "success",
+        },
         "tier": tier,
         "rec_idx": rec_idx,
         "solution": solution_name,
@@ -209,7 +226,7 @@ def rov_upload_dsr(request):
         "total_skipped": total_skipped,
         "files": result_files,
         "dsr_lines_body": dsr_lines_body,
-        "dsr_statistics_table":dsr_statistics_table,
+        "dsr_statistics_table": dsr_statistics_table,
     })
 @require_POST
 @login_required
@@ -279,6 +296,12 @@ def rov_upload_survey_manager(request):
     if errors:
         return JsonResponse(
             {
+                "ok": False,
+                "toast": {
+                    "title": "Survey Manager upload",
+                    "message": "Some files failed to import.",
+                    "type": "danger",
+                },
                 "error": "Some files failed",
                 "results": results,
                 "updated_total": updated_total,
@@ -288,11 +311,16 @@ def rov_upload_survey_manager(request):
 
     return JsonResponse(
         {
-            "success": f"Survey Manager imported ({len(results)} file(s))",
+            "ok": True,
+            "toast": {
+                "title": "Survey Manager upload",
+                "message": f"Imported {len(results)} file(s). Updated rows: {updated_total}.",
+                "type": "success",
+            },
             "results": results,
             "updated_total": updated_total,
             "dsr_lines_body": dsr_lines_body,
-            "dsr_statistics_table":dsr_statistics_table,
+            "dsr_statistics_table": dsr_statistics_table,
         }
     )
 @require_POST
@@ -356,10 +384,14 @@ def rov_upload_black_box(request):
 
         return JsonResponse({
             "ok": True,
-            "message": f"BlackBox imported: {inserted_total} rows from {len(processed)} file(s)",
+            "toast": {
+                "title": "Black Box upload",
+                "message": f"Imported {inserted_total} rows from {len(processed)} file(s).",
+                "type": "success",
+            },
             "rows": inserted_total,
             "files": processed,
-            "bbox_file_tbody": bbox_file_tbody
+            "bbox_file_tbody": bbox_file_tbody,
         })
 
     except Exception as e:
@@ -522,7 +554,7 @@ def save_bbox_config(request):
             mapping=mapping,
             is_default=False,
         )
-        return JsonResponse({"ok": True, "message": "BlackBox config saved"})
+        return JsonResponse({"ok": True, "message": "BlackBox config saved", "toast": {"title": "Default BBox config", "message": "Default configuration updated.", "type": "success"}})
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -632,7 +664,13 @@ def delete_selected_dsr_lines(request):
             return JsonResponse({"error": str(e)}, status=500)
 
     return JsonResponse({
+        "ok": True,
         "success": f"'{mode}' operation applied to {len(lines)} line(s)",
+        "toast": {
+            "title": "Delete DSR lines",
+            "message": f"Mode '{mode}' applied to {len(lines)} line(s).",
+            "type": "success",
+        },
         "lines": lines,
         "mode": mode,
     })
@@ -668,6 +706,7 @@ def delete_bbox_files(request):
         bbox_file_tbody = dsrdb.get_bbox_file_table()
         return JsonResponse({"ok": True,
                              "deleted": len(ids),
+                             "toast": {"title": "Delete BBOX files", "message": f"Deleted {len(ids)} file(s).", "type": "success"},
                              "bbox_file_tbody": bbox_file_tbody})
 
     except Exception as e:
