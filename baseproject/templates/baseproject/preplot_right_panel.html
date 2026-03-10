@@ -54,10 +54,13 @@
                                           {{ pp_map_script|safe }}
                                           {{ pp_map_div|safe }}
                          {% else %}
-                                    <div class="alert alert-warning text-center">
-                                       <i class="fas fa-exclamation-triangle me-1"></i>
-                                          Plot is not available
-                                    </div>
+                                    <div class="seis-empty-state">
+                           <div>
+                             <div class="seis-empty-state-icon"><i class="fas fa-map"></i></div>
+                             <div class="fw-semibold mb-1">Plot is not available</div>
+                             <div class="text-muted small">Upload preplot files or refresh the project map to render the latest view.</div>
+                           </div>
+                         </div>
                           {% endif %}
                        </div>
                      </div>

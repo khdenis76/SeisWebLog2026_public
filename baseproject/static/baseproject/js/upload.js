@@ -1,4 +1,4 @@
-import { ensureLoadingModal,cleanupModalArtifacts} from "./modalLoader.js";
+import { ensureLoadingModal,cleanupModalArtifacts} from "./modalloader.js";
 import { getCSRFToken } from "./csrf.js";
 import { showUploadToast } from "./toast.js";
 import { updatePreplotTable } from "./updaterltable.js";
@@ -161,12 +161,14 @@ function initLoadingLottie() {
           const preplot_summary_container=document.getElementById("preplot-statcard")
           preplot_summary_container.innerHTML = data.prep_stat
       }
-      if (data?.hdr1 !== undefined) {
-        hdr_editor1.innerHTML=data.hdr1
-       }
-      if (data?.hdr2 !== undefined) {
-        hdr_editor2.innerHTML=data.hdr2
-       }
+      const header1Text = data?.hdr1 ?? data?.header1_text;
+      const header2Text = data?.hdr2 ?? data?.header2_text;
+      if (header1Text !== undefined && hdr_editor1) {
+        hdr_editor1.innerHTML = header1Text;
+      }
+      if (header2Text !== undefined && hdr_editor2) {
+        hdr_editor2.innerHTML = header2Text;
+      }
       let tbodyId = null;
       if (data.point_type === "R") {
         tbodyId = "rlBody";

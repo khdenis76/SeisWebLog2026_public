@@ -7,6 +7,7 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtGui import QAction
 from PySide6.QtGui import QCursor
+
 from .plots.plots_manager import PlotManager
 from .db.django_db import DjangoDb, DjangoDbError
 from .ui.left_panel import LeftPanel
@@ -14,6 +15,17 @@ from .ui.central_tabs import CentralTabs
 from .ui.right_panel import RightPanel
 from .plots.plot_factory import PlotFactory
 from .db.project_db import ProjectDb, ProjectDbError
+from .ui.dsr_mdi_window import DsrMdiWindow
+from .ui.bb_mdi_window import BbMdiWindow
+from .config_store import ConfigStore
+from .ui.plot_window import PlotWindow
+from .config import (
+    APP_NAME,
+    APP_VERSION,
+    DEFAULT_WINDOW_WIDTH,
+    DEFAULT_WINDOW_HEIGHT,
+    PLOT_QUALITY_PRESETS,
+)
 
 
 def fill_table_from_df(table: QtWidgets.QTableWidget, df: pd.DataFrame, max_rows: int = 500):
@@ -39,8 +51,13 @@ def fill_table_from_df(table: QtWidgets.QTableWidget, df: pd.DataFrame, max_rows
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SeisWebLog Viewer")
-        self.resize(1400, 900)
+        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
+        self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+        self.quality_mode = "Balanced"
+        self.dsr_mdi_window = None
+        self.bb_mdi_window = None
+        self.config_store = ConfigStore("dataviewer")
+        self.plot_settings = self.config_store.load()
 
         self.projects_df = pd.DataFrame()
         self.current_project = None
@@ -56,8 +73,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rp_circle_radius = 25.0
 
         self._build_menu()
+        self._build_toolbar()
         self._build_ui()
         self._wire()
+        try:
+            self.left.apply_plot_settings(self.plot_settings)
+        except Exception as e:
+            print("[Config apply] error:", e)
         self.statusBar().showMessage("Ready")
 
         # auto-load at start
@@ -66,11 +88,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.depth_windows = {}
         self.plot_settings = {
             "rp": {"point_size": 6},
-            "dsr": {"depth": True, "sigmas": True, "radial": True, "primary_point_size": 6, "secondary_point_size": 6},
-            "bb": {"bb_vessel": True, "bb_rov1_ins": True, "bb_rov2_ins": True, "bb_rov1_usbl": True,
-                   "bb_rov2_usbl": True},
+            "dsr": {
+                "depth": True,
+                "sigmas": True,
+                "radial": True,
+                "primary_point_size": 6,
+                "secondary_point_size": 6,
+            },
+            "bb": {
+                "bb_vessel": True,
+                "bb_rov1_ins": True,
+                "bb_rov2_ins": True,
+                "bb_rov1_usbl": True,
+                "bb_rov2_usbl": True,
+            },
         }
-
 
     def _build_menu(self):
         menubar = self.menuBar()
@@ -90,45 +122,62 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_toggle_right.setChecked(True)
         view_menu.addAction(self.act_toggle_right)
 
+    def _build_toolbar(self):
+        self.toolbar = self.addToolBar("Main")
+        self.toolbar.setMovable(False)
+
+        self.act_reload = QAction("Reload", self)
+        self.act_zoom_full = QAction("Zoom Full", self)
+        self.act_toggle_legend = QAction("Legend", self)
+        self.act_toggle_legend.setCheckable(True)
+        self.act_toggle_legend.setChecked(True)
+
+        self.cmb_quality = QtWidgets.QComboBox()
+        self.cmb_quality.addItems(list(PLOT_QUALITY_PRESETS.keys()))
+        self.cmb_quality.setCurrentText(self.quality_mode)
+        self.cmb_quality.setToolTip("Plot quality preset")
+
+        self.toolbar.addAction(self.act_reload)
+        self.toolbar.addAction(self.act_zoom_full)
+        self.toolbar.addAction(self.act_toggle_legend)
+        self.toolbar.addSeparator()
+        self.toolbar.addWidget(QtWidgets.QLabel("Quality: "))
+        self.toolbar.addWidget(self.cmb_quality)
+
     def _build_ui(self):
         # 3-way splitter: Left panel | Center tabs | Right panel
         self.splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.setCentralWidget(self.splitter)
 
-        # Create widgets
         self.left = LeftPanel()
         self.tabs = CentralTabs()
-        # connect hover
+
+        # map hover
         self._hover_proxy = pg.SignalProxy(
             self.tabs.map_plot.scene().sigMouseMoved,
             rateLimit=30,
-            slot=self._on_map_mouse_moved
+            slot=self._on_map_mouse_moved,
         )
+
         self.right = RightPanel()
-        QtCore.QTimer.singleShot(1000, self._debug_heading_test)
+
         # Keep map scale equal (Easting/Northing)
         try:
             self.tabs.map_plot.getViewBox().setAspectLocked(True, ratio=1)
+            self.tabs.map_plot.getPlotItem().setClipToView(True)
+            self.tabs.map_plot.getPlotItem().setDownsampling(auto=True, mode="peak")
         except Exception:
             pass
 
-        # Add to splitter
         self.splitter.addWidget(self.left)
         self.splitter.addWidget(self.tabs)
         self.splitter.addWidget(self.right)
 
-        # Stretch behavior: center grows, side panels stay reasonable
-        self.splitter.setStretchFactor(0, 0)  # left
-        self.splitter.setStretchFactor(1, 1)  # center
-        self.splitter.setStretchFactor(2, 0)  # right
-
-        # Initial sizes (px)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
         self.splitter.setSizes([360, 900, 320])
-
         self.splitter.setChildrenCollapsible(False)
-        # ---- TEST ROTATION ----
-        QtCore.QTimer.singleShot(500, lambda: self.right.set_rov1_heading(45))
-        QtCore.QTimer.singleShot(500, lambda: self.right.set_rov2_heading(120))
 
     def _wire(self):
         self.act_exit.triggered.connect(self.close)
@@ -136,6 +185,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_toggle_right.triggered.connect(self._toggle_right)
 
         self.right.closeRequested.connect(self._close_right_panel)
+        self.act_reload.triggered.connect(self.load_projects)
+        self.act_zoom_full.triggered.connect(self._zoom_map_full)
+        self.act_toggle_legend.triggered.connect(self._toggle_legend_visibility)
+        self.cmb_quality.currentTextChanged.connect(self._on_quality_mode_changed)
 
         self.left.reloadProjectsClicked.connect(self.load_projects)
         self.left.projectChanged.connect(self.on_project_changed)
@@ -148,9 +201,35 @@ class MainWindow(QtWidgets.QMainWindow):
         # BlackBox
         self.left.blackBoxSelectionChanged.connect(self.on_blackbox_selection_changed)
         self.left.blackBoxRowClicked.connect(self.on_blackbox_row_clicked)
-        #Red radius
+
+        # Red radius
         self.left.rpRadiusChanged.connect(self._on_rp_radius_changed)
         self.left.plotsSettingsChanged.connect(self.on_plot_settings_changed)
+
+    def _toggle_legend_visibility(self):
+        if getattr(self.tabs, "legend", None) is None:
+            return
+        self.tabs.legend.setVisible(self.act_toggle_legend.isChecked())
+
+    def _zoom_map_full(self):
+        try:
+            vb = self.tabs.map_plot.getViewBox()
+            vb.autoRange()
+        except Exception:
+            pass
+
+    def _on_quality_mode_changed(self, mode: str):
+        if mode in PLOT_QUALITY_PRESETS:
+            self.quality_mode = mode
+            self.statusBar().showMessage(f"Plot quality: {mode}", 3000)
+            try:
+                if getattr(self, "current_project", None):
+                    self.on_plot_settings_changed(self.plot_settings)
+            except Exception:
+                pass
+
+    def _quality(self) -> dict:
+        return PLOT_QUALITY_PRESETS.get(self.quality_mode, PLOT_QUALITY_PRESETS["Balanced"])
 
     def _toggle_left(self):
         self.left.setVisible(self.act_toggle_left.isChecked())
@@ -177,13 +256,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage("No projects found in core_project", 8000)
                 return
 
-            # select first
             self.left.cmb_project.setCurrentIndex(0)
             self.on_project_changed(self.left.cmb_project.currentText())
 
-            # also show preview in table tab
             fill_table_from_df(self.tabs.table, df, max_rows=500)
-
             self.statusBar().showMessage(f"Loaded {len(df)} projects")
 
         except DjangoDbError as e:
@@ -210,7 +286,6 @@ class MainWindow(QtWidgets.QMainWindow):
         folder_name = str(r["folder_name"])
         project_dir = Path(root_path) / folder_name
 
-        # store current project early
         self.current_project = {
             "id": int(r["id"]),
             "name": str(r["name"]),
@@ -220,21 +295,14 @@ class MainWindow(QtWidgets.QMainWindow):
         }
 
         self.left.set_project_dir(str(project_dir))
-        """
-        self.right.set_text(
-            f"Project: {self.current_project['name']}\n"
-            f"ID: {self.current_project['id']}\n"
-            f"Root: {self.current_project['root_path']}\n"
-            f"Folder: {self.current_project['folder_name']}\n"
-            f"Dir: {self.current_project['project_dir']}\n"
-        )
-        """
-        # --- RPPreplot plot (optional) ---
+        self.right.set_metric("Project", str(project_name))
+        self.right.append_text(f"Loaded project: {project_name}")
+
+        # RPPreplot
         try:
             pdb = ProjectDb(project_dir)
             df = pdb.read_rp_preplot()
 
-            # remove previous RP layer
             if self.rp_layer:
                 if self.rp_layer.get("curve"):
                     self.tabs.map_plot.removeItem(self.rp_layer["curve"])
@@ -254,6 +322,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 point_color="blue",
                 line_color="blue",
                 line_width=1.5,
+                scatter_max_points=self._quality()["rp_scatter_max_points"],
+                interactive_max_points=self._quality()["interactive_max_points"],
+                interactive=False,
             )
             self.rp_layer = layer
             if layer.get("curve"):
@@ -261,22 +332,20 @@ class MainWindow(QtWidgets.QMainWindow):
             if layer.get("scatter"):
                 self.tabs.map_plot.addItem(layer["scatter"])
 
-            # store df for future redraw + redraw circles using current radius
             self.rp_circle_df = df
 
-            # sync settings UI (LeftPanel), without emitting valueChanged
             try:
                 self.left.set_rp_radius(self.rp_circle_radius)
             except Exception:
                 pass
 
-            # redraw circle layer + legend proxy
             self._redraw_rp_circle_layer()
+            self.right.set_metric("Visible", f"RP rows: {len(df):,}")
 
         except ProjectDbError as e:
             self.statusBar().showMessage(str(e), 10000)
 
-        # --- Load DSR lines summary into left panel ---
+        # DSR lines
         try:
             pdb = ProjectDb(project_dir)
             df_sum = pdb.read_v_dsr_lines()
@@ -285,7 +354,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(str(e), 10000)
             self.left.set_dsr_lines_table(None)
 
-        # --- Load BlackBox files into left panel ---
+        # BlackBox files
         try:
             pdb = ProjectDb(project_dir)
             df_bb = pdb.read_blackbox_files()
@@ -299,119 +368,268 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_dsr_line_clicked(self, line: int):
         if not self.current_project:
             return
-
+        self._show_loading(f"Loading DSR line {line} ...")
         try:
+            self.current_dsr_line = int(line)
+
             pdb = ProjectDb(self.current_project["project_dir"])
 
-            # 1) stations list for this line
+            # -----------------------------
+            # Station table + DSR line data
+            # -----------------------------
             df_st = pdb.read_dsr_stations_for_line(line)
+            self.current_dsr_stations_df = df_st.copy() if df_st is not None else None
             self.left.set_dsr_stations_table(df_st)
 
-            # 2) load full DSR for plotting
             self.dsr_line_df = pdb.read_dsr_for_line(line)
+            if self.dsr_line_df is None or self.dsr_line_df.empty:
+                self.statusBar().showMessage(f"Line {line}: no DSR data found", 8000)
+                return
+
             depth_df, st_col = self._make_station_depth_df(self.dsr_line_df)
-            # BlackBox subset in Date1 window for this line
+
+            # -----------------------------
+            # BlackBox for this line
+            # -----------------------------
+            bb_sel = self.plot_settings.get("bb", {})
+
             try:
                 self.bb_configs = pdb.get_blackbox_configs_by_dsr_line(line)
                 self.bb_line_df = pdb.read_blackbox_for_line_by_date1_window(line)
-                cfg_id = self.bb_configs[0][0]  # first row, first column (ID)
-                self.bb_line_df = self.bb_line_df[self.bb_line_df["config_id"] == cfg_id]
+
+                if self.bb_line_df is not None and not self.bb_line_df.empty and self.bb_configs:
+                    cfg_id = self.bb_configs[0][0]
+                    if "config_id" in self.bb_line_df.columns:
+                        self.bb_line_df = self.bb_line_df[
+                            self.bb_line_df["config_id"] == cfg_id
+                            ].copy()
+
+                if bb_sel.get("show_tracks_window", True):
+                    self.plot_blackbox_tracks(self.bb_line_df)
+
+                if bb_sel.get("show_timeseries_window", True):
+                    self.show_blackbox_timeseries_window(line, df_st=df_st)
 
             except Exception as e:
-                print(e)
+                print("[BlackBox load] error:", e)
                 self.bb_line_df = None
 
-            # plot tracks on map (vessel / rov ins / usbl)
-            self.plot_blackbox_tracks(self.bb_line_df)
-
+            # -----------------------------
+            # Plot settings
+            # -----------------------------
             dsr_sel = self.plot_settings.get("dsr", {})
 
-            # Build only selected windows
-            w_depth = None
-            w_sig = None
-            w_rad = None
+            # -----------------------------
+            # DSR MDI host window
+            # -----------------------------
+            mdi = self._get_dsr_mdi_window(line)
 
+            base_plot = None
+
+            # -----------------------------
+            # Depth vs Station
+            # -----------------------------
             if dsr_sel.get("depth", True):
-                key = "depth_vs_station"
-                w_depth = self.plot_manager.get_or_create(key, title="Depth vs Station", seq=1)
-                w_depth.show();
-                w_depth.raise_();
-                w_depth.activateWindow()
+                w_depth = PlotWindow(title=f"Depth vs Station - Line {line}")
                 w_depth.state["current_line"] = int(line)
-                w_depth.state["on_station_selected"] = lambda st: self.on_dsr_station_clicked(line, st)
+                w_depth.state["on_station_selected"] = (
+                    lambda st, ln=line: self.on_dsr_station_clicked(ln, st, from_graph=True)
+                )
 
                 PlotFactory.build_two_series_vs_station(
                     w_depth,
                     depth_df,
-                    station_col="Station",
+                    station_col=st_col,
                     series1_col="PrimaryElevation",
                     series2_col="SecondaryElevation",
                     y_label="Elevation",
-                    title=f"Depth vs Station — Line {line}",
+                    title=f"Depth vs Station - Line {line}",
+                    time_col="Deploy T" if "Deploy T" in depth_df.columns else None,
                 )
 
+                mdi.add_plot_window(
+                    "depth_vs_station",
+                    w_depth,
+                    f"Depth - Line {line}",
+                )
+                base_plot = w_depth.plot
+
+            # -----------------------------
+            # Sigma vs Station
+            # -----------------------------
             if dsr_sel.get("sigmas", True):
-                key1 = "sigmas_vs_station"
-                w_sig = self.plot_manager.get_or_create(key1, title="Sigma vs Station", seq=2)
-                w_sig.show();
-                w_sig.raise_();
-                w_sig.activateWindow()
+                w_sig = PlotWindow(title=f"Sigma vs Station - Line {line}")
                 w_sig.state["current_line"] = int(line)
-                w_sig.state["on_station_selected"] = lambda st: self.on_dsr_station_clicked(line, st)
+                w_sig.state["on_station_selected"] = (
+                    lambda st, ln=line: self.on_dsr_station_clicked(ln, st, from_graph=True)
+                )
 
                 PlotFactory.build_two_series_vs_station(
                     w_sig,
                     depth_df,
-                    station_col="Station",
+                    station_col=st_col,
                     series1_col="Sigma1",
                     series2_col="Sigma2",
                     y_label="Sigma",
-                    title=f"Sigma vs Station — Line {line}",
+                    title=f"Sigma vs Station - Line {line}",
+                    time_col="Deploy T" if "Deploy T" in depth_df.columns else None,
                 )
 
+                mdi.add_plot_window(
+                    "sigmas_vs_station",
+                    w_sig,
+                    f"Sigmas - Line {line}",
+                )
+
+                if base_plot is not None:
+                    try:
+                        w_sig.plot.setXLink(base_plot)
+                    except Exception:
+                        pass
+
+            # -----------------------------
+            # Radial Offset vs Station
+            # -----------------------------
             if dsr_sel.get("radial", True):
-                key2 = "radial_offset_vs_station"
-                w_rad = self.plot_manager.get_or_create(key2, title="Radial Offset", seq=3)
-                w_rad.show();
-                w_rad.raise_();
-                w_rad.activateWindow()
+                w_rad = PlotWindow(title=f"Radial Offset - Line {line}")
                 w_rad.state["current_line"] = int(line)
-                w_rad.state["on_station_selected"] = lambda st: self.on_dsr_station_clicked(line, st)
+                w_rad.state["on_station_selected"] = (
+                    lambda st, ln=line: self.on_dsr_station_clicked(ln, st, from_graph=True)
+                )
 
                 PlotFactory.build_two_series_vs_station(
                     w_rad,
                     depth_df,
-                    station_col="Station",
+                    station_col=st_col,
                     series1_col="DeltaEprimarytosecondary",
                     series2_col="DeltaNprimarytosecondary",
                     y_label="Radial Offset",
-                    title=f"Radial Offset — Line {line}",
+                    title=f"Radial Offset - Line {line}",
+                    time_col="Deploy T" if "Deploy T" in depth_df.columns else None,
                 )
 
-            # Link X only among windows that exist
-            base = w_depth or w_sig or w_rad
-            if base:
-                if w_sig: w_sig.plot.setXLink(base.plot)
-                if w_rad: w_rad.plot.setXLink(base.plot)
+                mdi.add_plot_window(
+                    "radial_offset_vs_station",
+                    w_rad,
+                    f"Radial - Line {line}",
+                )
 
-            # 3) plot primary + secondary on map
+                if base_plot is not None:
+                    try:
+                        w_rad.plot.setXLink(base_plot)
+                    except Exception:
+                        pass
+
+            # -----------------------------
+            # Arrange DSR subwindows
+            # -----------------------------
+            try:
+                mdi.mdi.tileSubWindows()
+            except Exception:
+                pass
+
+            # -----------------------------
+            # Draw DSR points on main map
+            # -----------------------------
             self.plot_dsr_primary_secondary(self.dsr_line_df)
 
-            # ✅ Zoom map to project extent (RPPreplot)
-            if self.rp_layer and self.rp_layer.get("curve"):
-                bounds = self.rp_layer["curve"].boundingRect()
-                vb = self.tabs.map_plot.getViewBox()
-                vb.setRange(bounds, padding=0.02)
+            # -----------------------------
+            # Initial station selection
+            # red marker + table + map + BB marker
+            # -----------------------------
+            try:
+                first_station = None
+
+                if df_st is not None and not df_st.empty:
+                    for cand in ("Station", "LinePoint"):
+                        if cand in df_st.columns:
+                            vals = pd.to_numeric(df_st[cand], errors="coerce").dropna()
+                            if not vals.empty:
+                                first_station = int(vals.iloc[0])
+                                break
+
+                if first_station is None and depth_df is not None and not depth_df.empty and st_col in depth_df.columns:
+                    vals = pd.to_numeric(depth_df[st_col], errors="coerce").dropna()
+                    if not vals.empty:
+                        first_station = int(vals.iloc[0])
+
+                if first_station is not None:
+                    self.on_dsr_station_clicked(line, first_station)
+
+            except Exception as e:
+                print("[Initial station select] error:", e)
+
+            # -----------------------------
+            # Zoom main map to DSR line extent
+            # only if station focus did not already handle it
+            # -----------------------------
+            try:
+                dzoom = None
+
+                if "PrimaryEasting" in self.dsr_line_df.columns and "PrimaryNorthing" in self.dsr_line_df.columns:
+                    dzoom = self.dsr_line_df[["PrimaryEasting", "PrimaryNorthing"]].copy()
+                    dzoom["PrimaryEasting"] = pd.to_numeric(dzoom["PrimaryEasting"], errors="coerce")
+                    dzoom["PrimaryNorthing"] = pd.to_numeric(dzoom["PrimaryNorthing"], errors="coerce")
+                    dzoom = dzoom.dropna(subset=["PrimaryEasting", "PrimaryNorthing"])
+
+                    if not dzoom.empty:
+                        xmin = float(dzoom["PrimaryEasting"].min())
+                        xmax = float(dzoom["PrimaryEasting"].max())
+                        ymin = float(dzoom["PrimaryNorthing"].min())
+                        ymax = float(dzoom["PrimaryNorthing"].max())
+
+                        vb = self.tabs.map_plot.getViewBox()
+                        vb.setXRange(xmin, xmax, padding=0.05)
+                        vb.setYRange(ymin, ymax, padding=0.05)
+
+                elif "SecondaryEasting" in self.dsr_line_df.columns and "SecondaryNorthing" in self.dsr_line_df.columns:
+                    dzoom = self.dsr_line_df[["SecondaryEasting", "SecondaryNorthing"]].copy()
+                    dzoom["SecondaryEasting"] = pd.to_numeric(dzoom["SecondaryEasting"], errors="coerce")
+                    dzoom["SecondaryNorthing"] = pd.to_numeric(dzoom["SecondaryNorthing"], errors="coerce")
+                    dzoom = dzoom.dropna(subset=["SecondaryEasting", "SecondaryNorthing"])
+
+                    if not dzoom.empty:
+                        xmin = float(dzoom["SecondaryEasting"].min())
+                        xmax = float(dzoom["SecondaryEasting"].max())
+                        ymin = float(dzoom["SecondaryNorthing"].min())
+                        ymax = float(dzoom["SecondaryNorthing"].max())
+
+                        vb = self.tabs.map_plot.getViewBox()
+                        vb.setXRange(xmin, xmax, padding=0.05)
+                        vb.setYRange(ymin, ymax, padding=0.05)
+
+            except Exception:
+                try:
+                    if self.rp_layer and self.rp_layer.get("curve"):
+                        bounds = self.rp_layer["curve"].boundingRect()
+                        vb = self.tabs.map_plot.getViewBox()
+                        vb.setRange(bounds, padding=0.02)
+                except Exception:
+                    pass
+
+            # -----------------------------
+            # Right panel / status
+            # -----------------------------
+            try:
+                self.right.set_metric("Selected Line", str(line))
+                self.right.set_metric("Stations", f"{len(df_st):,}" if df_st is not None else "0")
+                self.right.set_metric("DSR Rows", f"{len(self.dsr_line_df):,}")
+                if self.bb_line_df is not None:
+                    self.right.set_metric("BB Rows", f"{len(self.bb_line_df):,}")
+            except Exception:
+                pass
 
             self.statusBar().showMessage(
-                f"Line {line}: stations {len(df_st)}, dsr rows {len(self.dsr_line_df)}",
-                8000
+                f"Line {line}: stations {len(df_st) if df_st is not None else 0}, dsr rows {len(self.dsr_line_df)}",
+                8000,
             )
 
         except ProjectDbError as e:
             self.statusBar().showMessage(str(e), 10000)
             self.left.set_dsr_stations_table(None)
             self.dsr_line_df = None
+        finally:
+            self._hide_loading()
 
     def on_dsr_selection_changed(self, lines: list):
         self.statusBar().showMessage(f"Selected lines: {', '.join(map(str, lines))}")
@@ -423,7 +641,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(f"BlackBox file clicked: {file_id}")
 
     def plot_dsr_primary_secondary(self, df):
-        # remove old
         if self.dsr_primary_layer:
             if self.dsr_primary_layer.get("curve"):
                 self.tabs.map_plot.removeItem(self.dsr_primary_layer["curve"])
@@ -442,7 +659,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if df is None or df.empty:
             return
 
-        # Primary
         if "PrimaryEasting" in df.columns and "PrimaryNorthing" in df.columns:
             self.dsr_primary_layer = PlotFactory.create_scatter_layer(
                 df,
@@ -454,11 +670,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 point_size=ps1,
                 point_shape="o",
                 point_color="yellow",
+                scatter_max_points=self._quality()["dsr_scatter_max_points"],
+                interactive_max_points=self._quality()["interactive_max_points"],
             )
             if self.dsr_primary_layer["scatter"]:
                 self.tabs.map_plot.addItem(self.dsr_primary_layer["scatter"])
 
-        # Secondary
         if "SecondaryEasting" in df.columns and "SecondaryNorthing" in df.columns:
             self.dsr_secondary_layer = PlotFactory.create_scatter_layer(
                 df,
@@ -470,6 +687,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 point_size=ps2,
                 point_shape="t",
                 point_color="cyan",
+                scatter_max_points=self._quality()["dsr_scatter_max_points"],
+                interactive_max_points=self._quality()["interactive_max_points"],
             )
             if self.dsr_secondary_layer["scatter"]:
                 self.tabs.map_plot.addItem(self.dsr_secondary_layer["scatter"])
@@ -487,89 +706,248 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_station_selection_lines(self, line: int, station: int):
         st = float(station)
 
-        for key, w in self.plot_manager.windows.items():
-            if not w or not hasattr(w, "items"):
+        for key, w in self._iter_dsr_plot_widgets():
+            if w is None:
+                continue
+            if not hasattr(w, "items"):
+                continue
+            if not hasattr(w, "state"):
                 continue
 
-            # ✅ match by stored current line
-            if int(w.state.get("current_line", -1)) != int(line):
-                continue
-
-            sel = w.items.get("sel_line")
-            if sel is None:
-                continue
-
-            sel.setPos(st)
-            sel.setVisible(True)
-            w.state["selected_station"] = int(station)
-
-    def on_dsr_station_clicked(self, line: int, station: int):
-        if not self.current_project:
-            return
-
-        try:
-            stf = float(station)
-            sti = int(float(station))
-        except Exception:
-            return
-
-        # 1) Update red vertical line in BOTH windows
-        for key in ("depth_vs_station", "sigmas_vs_station","radial_offset_vs_station"):
-            w = self.plot_manager.windows.get(key)
-            if not w or not hasattr(w, "items"):
-                continue
-
-            # only update windows that currently display this line
             try:
                 if int(w.state.get("current_line", -1)) != int(line):
                     continue
             except Exception:
                 continue
 
-            # If sel_line does not exist yet, just store selection and let PlotFactory restore it
             sel = w.items.get("sel_line")
-            w.state["selected_station"] = sti
+            if sel is None:
+                continue
 
-            if sel is not None:
-                sel.setPos(stf)
+            try:
+                sel.setPos(st)
                 sel.setVisible(True)
-                sel.setZValue(10_000)
+                sel.setZValue(10000)
+                w.state["selected_station"] = int(station)
 
-                # ✅ Force redraw immediately (this is the key)
+                if hasattr(w, "plot") and w.plot is not None:
+                    try:
+                        w.plot.getViewBox().update()
+                    except Exception:
+                        pass
+                    try:
+                        w.plot.repaint()
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+
+    def on_dsr_station_clicked(self, line: int, station: int, from_graph: bool = False):
+        if not self.current_project:
+            return
+
+        try:
+            stf = float(station)
+            sti = int(round(float(station)))
+        except Exception:
+            return
+
+        # -------------------------------------------------
+        # 1) Move red vertical line in all DSR MDI graphs
+        # -------------------------------------------------
+        for key, w in self._iter_dsr_plot_widgets():
+            if w is None or not hasattr(w, "items") or not hasattr(w, "state"):
+                continue
+
+            try:
+                if int(w.state.get("current_line", -1)) != int(line):
+                    continue
+            except Exception:
+                continue
+
+            sel = w.items.get("sel_line")
+            if sel is not None:
                 try:
-                    w.plot.getViewBox().update()
+                    sel.setPos(stf)
+                    sel.setVisible(True)
+                    sel.setZValue(10000)
+                    w.state["selected_station"] = sti
+
+                    if hasattr(w, "plot") and w.plot is not None:
+                        try:
+                            w.plot.getViewBox().update()
+                        except Exception:
+                            pass
+                        try:
+                            w.plot.repaint()
+                        except Exception:
+                            pass
                 except Exception:
                     pass
-                w.plot.repaint()
 
-        # Process pending paint events (helps on Windows)
-        try:
-            QtWidgets.QApplication.processEvents()
-        except Exception:
-            pass
+        # -------------------------------------------------
+        # 2) Highlight/select station row in LEFT table
+        # -------------------------------------------------
+        table = getattr(self.left, "tbl_dsr_stations", None)
+        deploy_ts = None
 
-        # 2) Zoom map to this station
+        if table is not None:
+            try:
+                table.blockSignals(True)
+                table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+                table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+                table.clearSelection()
+
+                station_col = None
+                deploy_col = None
+
+                for c in range(table.columnCount()):
+                    hdr = table.horizontalHeaderItem(c)
+                    txt = hdr.text().strip() if hdr else ""
+
+                    if txt in ("Station", "LinePoint"):
+                        station_col = c
+                    if txt in ("Deploy T", "DeployT", "DeployTime", "Deploy_Time"):
+                        deploy_col = c
+
+                found_row = None
+                if station_col is not None:
+                    for r in range(table.rowCount()):
+                        item = table.item(r, station_col)
+                        if item is None:
+                            continue
+
+                        try:
+                            row_station = int(round(float(item.text())))
+                        except Exception:
+                            continue
+
+                        if row_station == sti:
+                            found_row = r
+                            break
+
+                if found_row is not None:
+                    table.selectRow(found_row)
+                    table.setCurrentCell(found_row, station_col if station_col is not None else 0)
+
+                    item = table.item(found_row, station_col if station_col is not None else 0)
+                    if item is not None:
+                        table.scrollToItem(
+                            item,
+                            QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter,
+                        )
+
+                    if deploy_col is not None:
+                        dep_item = table.item(found_row, deploy_col)
+                        if dep_item is not None:
+                            deploy_ts = pd.to_datetime(dep_item.text(), errors="coerce")
+
+            except Exception as e:
+                print("[DSR] table highlight error:", e)
+            finally:
+                try:
+                    table.blockSignals(False)
+                except Exception:
+                    pass
+
+        # -------------------------------------------------
+        # 3) Zoom CENTRAL MAP to selected station
+        # -------------------------------------------------
         try:
-            pdb = ProjectDb(self.current_project["project_dir"])
-            center = pdb.read_dsr_station_center(line, station)
-            if not center:
+            if self.dsr_line_df is None or self.dsr_line_df.empty:
+                self.statusBar().showMessage("No DSR data loaded", 5000)
+                return
+
+            d = self.dsr_line_df.copy()
+
+            st_col = None
+            for cand in ("Station", "LinePoint"):
+                if cand in d.columns:
+                    st_col = cand
+                    break
+
+            if st_col is None:
+                self.statusBar().showMessage("No Station column found in DSR data", 5000)
+                return
+
+            d[st_col] = pd.to_numeric(d[st_col], errors="coerce")
+
+            x_col = None
+            y_col = None
+            if "PrimaryEasting" in d.columns and "PrimaryNorthing" in d.columns:
+                x_col, y_col = "PrimaryEasting", "PrimaryNorthing"
+            elif "SecondaryEasting" in d.columns and "SecondaryNorthing" in d.columns:
+                x_col, y_col = "SecondaryEasting", "SecondaryNorthing"
+
+            if x_col is None or y_col is None:
+                self.statusBar().showMessage("No map coordinates found in DSR data", 5000)
+                return
+
+            d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
+            d[y_col] = pd.to_numeric(d[y_col], errors="coerce")
+
+            ds = d.loc[
+                d[st_col].round() == sti,
+                [x_col, y_col]
+            ].dropna()
+
+            if ds.empty:
                 self.statusBar().showMessage(
-                    f"No Primary coords for Line {line} Station {station}", 8000
+                    f"No coordinates found for Line {line} Station {sti}",
+                    5000,
                 )
                 return
 
-            # zoom = 2 × circle radius
-            half_size = float(self.rp_circle_radius) * 2.0
+            x = float(ds[x_col].mean())
+            y = float(ds[y_col].mean())
 
-            self.zoom_map_to_xy(
-                center["X"],
-                center["Y"],
-                half_size_m=half_size
+            vb = self.tabs.map_plot.getViewBox()
+            half_size = max(float(self.rp_circle_radius) * 2.0, 25.0)
+
+            vb.setXRange(x - half_size, x + half_size, padding=0)
+            vb.setYRange(y - half_size, y + half_size, padding=0)
+            vb.update()
+
+            try:
+                self.tabs.map_plot.repaint()
+            except Exception:
+                pass
+
+            try:
+                self.right.set_coordinates(f"{x:,.2f}", f"{y:,.2f}")
+                self.right.set_selection(Line=line, Station=sti)
+            except Exception:
+                pass
+
+            self.statusBar().showMessage(
+                f"Focused map on Line {line} Station {sti}",
+                5000,
             )
-            self.statusBar().showMessage(f"Zoom to Line {line} Station {station} {half_size}")
-            print("clicked station:", station)
-        except ProjectDbError as e:
-            self.statusBar().showMessage(str(e), 10000)
+
+        except Exception as e:
+            print("[DSR] central map zoom error:", e)
+            self.statusBar().showMessage(str(e), 5000)
+
+        # -------------------------------------------------
+        # 4) Move BB red marker to nearest BB timestamp for this station Deploy T
+        # -------------------------------------------------
+        try:
+            if deploy_ts is not None and pd.notna(
+                    deploy_ts) and self.bb_line_df is not None and not self.bb_line_df.empty:
+                bb = self.bb_line_df.copy()
+                bb["TimeStamp_dt"] = pd.to_datetime(bb["TimeStamp"], errors="coerce")
+                bb = bb.dropna(subset=["TimeStamp_dt"])
+
+                if not bb.empty:
+                    bb["TimeStampNum"] = bb["TimeStamp_dt"].astype("int64") / 1e9
+                    arr = bb["TimeStampNum"].to_numpy(dtype=float)
+
+                    if arr.size:
+                        target_num = float(deploy_ts.timestamp())
+                        idx = int(np.argmin(np.abs(arr - target_num)))
+                        self._set_bb_time_marker(float(arr[idx]))
+        except Exception as e:
+            print("[BB marker by Deploy T] error:", e)
 
     def _make_station_depth_df(self, dsr_line_df):
         if "Station" in dsr_line_df.columns:
@@ -578,83 +956,86 @@ class MainWindow(QtWidgets.QMainWindow):
             st_col = "LinePoint"
         else:
             raise ValueError("Neither Station nor LinePoint found")
+
         out = (
-            dsr_line_df.groupby(st_col, as_index=False)[["PrimaryElevation", "SecondaryElevation",
-                                                         "Sigma1","Sigma2",
-                                                         "DeltaEprimarytosecondary","DeltaNprimarytosecondary",
-                                                         "Rangeprimarytosecondary","RangetoPrePlot"]]
+            dsr_line_df.groupby(st_col, as_index=False)[
+                [
+                    "PrimaryElevation",
+                    "SecondaryElevation",
+                    "Sigma1",
+                    "Sigma2",
+                    "DeltaEprimarytosecondary",
+                    "DeltaNprimarytosecondary",
+                    "Rangeprimarytosecondary",
+                    "RangetoPrePlot",
+                ]
+            ]
             .mean(numeric_only=True)
             .sort_values(st_col)
         )
         return out, st_col
 
     def _add_bb_track(
-            self,
-            df,
-            x_col,
-            y_col,
-            layer_key,
-            label,
-            point_color="white",
-            line_color="white",
-            point_size=5,
-            line_width=1.2,
-            heading_col=None,
-            compute_heading_if_missing=False,  # <- optional
+        self,
+        df,
+        x_col,
+        y_col,
+        layer_key,
+        label,
+        point_color="white",
+        line_color="white",
+        point_size=5,
+        line_width=1.2,
+        heading_col=None,
+        compute_heading_if_missing=False,
     ):
-        """
-        Adds one track (line+scatter) to the map from df[x_col,y_col].
-        Stores the layer in self.bb_layers[layer_key] so we can remove/update later.
-        """
-
         if df is None or df.empty:
             return
         if x_col not in df.columns or y_col not in df.columns:
             return
 
-        # keep coords + any metadata we want to see on hover
         meta_cols = [
-            "Line", "Station", "LinePoint",
-            "TimeStamp", "DateTime", "TS", "UTC",
-            "FileID", "BBFileID", "Source",
-            # headings
-            "VesselHDG", "ROV1_HDG", "ROV2_HDG",
+            "Line",
+            "Station",
+            "LinePoint",
+            "TimeStamp",
+            "DateTime",
+            "TS",
+            "UTC",
+            "FileID",
+            "BBFileID",
+            "Source",
+            "VesselHDG",
+            "ROV1_HDG",
+            "ROV2_HDG",
         ]
 
         d = df.copy()
 
-        # --- normalize heading into a fixed name for hover/UI ---
-        # For vessel layer we store heading in VesselHDG (even if source col has different name)
         if heading_col and heading_col in d.columns:
             d["VesselHDG"] = pd.to_numeric(d[heading_col], errors="coerce")
         else:
-            # ensure column exists
             if "VesselHDG" not in d.columns:
                 d["VesselHDG"] = np.nan
             else:
                 d["VesselHDG"] = pd.to_numeric(d["VesselHDG"], errors="coerce")
 
-        # --- choose which columns to keep (IMPORTANT: use d, not df) ---
         keep = [x_col, y_col] + [c for c in meta_cols if c in d.columns]
         d = d[keep].copy()
 
-        # numeric coords
         d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
         d[y_col] = pd.to_numeric(d[y_col], errors="coerce")
         d = d.dropna(subset=[x_col, y_col])
         if d.empty:
             return
 
-        # --- optional: compute heading from XY if missing ---
         if compute_heading_if_missing and "VesselHDG" in d.columns:
             if d["VesselHDG"].isna().all():
-                # heading = atan2(East, North) => 0..360 (0=N, 90=E)
                 dx = d[x_col].diff()
                 dy = d[y_col].diff()
                 hdg = np.degrees(np.arctan2(dx, dy))
                 d["VesselHDG"] = (hdg + 360.0) % 360.0
 
-        # remove previous
         old = self.bb_layers.get(layer_key)
         if old:
             if old.get("curve"):
@@ -674,7 +1055,9 @@ class MainWindow(QtWidgets.QMainWindow):
             line_color=line_color,
             line_width=line_width,
             meta_cols=[c for c in meta_cols if c in d.columns],
-            meta_mode="tuple",
+            meta_mode="dict",
+            scatter_max_points=self._quality()["bb_scatter_max_points"],
+            interactive_max_points=self._quality()["bb_scatter_max_points"],
         )
 
         self.bb_layers[layer_key] = layer
@@ -686,28 +1069,28 @@ class MainWindow(QtWidgets.QMainWindow):
     def plot_blackbox_tracks(self, bb_df):
         if not hasattr(self, "bb_layers"):
             self.bb_layers = {}
-        if not bb_df.empty:
-            vessel_name = bb_df['vessel_name'].iloc[0]
-            rov1_name = bb_df['rov1_name'].iloc[0]
-            rov2_name = bb_df['rov2_name'].iloc[0]
+
+        if bb_df is not None and not bb_df.empty:
+            vessel_name = bb_df["vessel_name"].iloc[0]
+            rov1_name = bb_df["rov1_name"].iloc[0]
+            rov2_name = bb_df["rov2_name"].iloc[0]
         else:
             vessel_name = "Unknown Vessel"
             rov1_name = "ROV1"
             rov2_name = "ROV2"
-        # Vessel
+
         self._add_bb_track(
             bb_df,
             x_col="VesselEasting",
             y_col="VesselNorthing",
             layer_key="bb_vessel",
-            label= vessel_name, #vessel name
+            label=vessel_name,
             point_color="yellow",
             line_color="yellow",
             point_size=4,
             line_width=1.5,
         )
 
-        # ROV1 INS
         self._add_bb_track(
             bb_df,
             x_col="ROV1_INS_Easting",
@@ -720,7 +1103,6 @@ class MainWindow(QtWidgets.QMainWindow):
             line_width=1.2,
         )
 
-        # ROV2 INS
         self._add_bb_track(
             bb_df,
             x_col="ROV2_INS_Easting",
@@ -733,7 +1115,6 @@ class MainWindow(QtWidgets.QMainWindow):
             line_width=1.2,
         )
 
-        # ROV1 USBL
         self._add_bb_track(
             bb_df,
             x_col="ROV1_USBL_Easting",
@@ -746,7 +1127,6 @@ class MainWindow(QtWidgets.QMainWindow):
             line_width=1.0,
         )
 
-        # ROV2 USBL
         self._add_bb_track(
             bb_df,
             x_col="ROV2_USBL_Easting",
@@ -758,23 +1138,23 @@ class MainWindow(QtWidgets.QMainWindow):
             point_size=4,
             line_width=1.0,
         )
+
         self._enable_legend_toggle()
 
     def closeEvent(self, event):
-        # Close all secondary plot windows
         if hasattr(self, "plot_manager"):
             self.plot_manager.close_all()
-
         super().closeEvent(event)
 
     def _set_station_marker_on_windows(self, line: int, station: int):
-        for key in ("depth_vs_station", "sigmas_vs_station"):
-            w = self.plot_manager.windows.get(key)
+        for key, w in self._iter_dsr_plot_widgets():
             if not w or not hasattr(w, "items"):
                 continue
 
-            # only update if this window currently displays the same line
-            if int(w.state.get("current_line", -1)) != int(line):
+            try:
+                if int(w.state.get("current_line", -1)) != int(line):
+                    continue
+            except Exception:
                 continue
 
             sel = w.items.get("sel_line")
@@ -783,15 +1163,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
             sel.setPos(float(station))
             sel.setVisible(True)
+            sel.setZValue(10000)
             w.state["selected_station"] = int(station)
 
-
+            try:
+                w.plot.getViewBox().update()
+                w.plot.repaint()
+            except Exception:
+                pass
 
     def _redraw_rp_circle_layer(self):
         if self.rp_circle_df is None or self.rp_circle_df.empty:
             return
 
-        # remove old circle item
         if self.rp_circle_item is not None:
             try:
                 self.tabs.map_plot.removeItem(self.rp_circle_item)
@@ -799,7 +1183,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
             self.rp_circle_item = None
 
-        # remove legend proxy
         if getattr(self, "rp_circle_legend_proxy", None) is not None:
             try:
                 self.tabs.legend.removeItem(self.rp_circle_legend_proxy.name())
@@ -807,7 +1190,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
             self.rp_circle_legend_proxy = None
 
-        # create new circle
         self.rp_circle_item = PlotFactory.create_circle_layer_fast(
             self.rp_circle_df,
             x_col="X",
@@ -817,33 +1199,112 @@ class MainWindow(QtWidgets.QMainWindow):
             fill_color=None,
             line_width=2.0,
             max_circles=200000,
-            name=f"R = {self.rp_circle_radius}m"
+            name=f"R = {self.rp_circle_radius}m",
         )
 
         self.tabs.map_plot.addItem(self.rp_circle_item)
 
-        # rebuild legend proxy
         proxy_pen = pg.mkPen("red", width=2.0)
         proxy_brush = pg.QtGui.QBrush(pg.QtCore.Qt.NoBrush)
 
         self.rp_circle_legend_proxy = pg.PlotDataItem(
-            [0], [0],
+            [0],
+            [0],
             pen=proxy_pen,
             symbol="o",
             symbolPen=proxy_pen,
             symbolBrush=proxy_brush,
             symbolSize=10,
-            name=self.rp_circle_item.name()
+            name=self.rp_circle_item.name(),
         )
 
         self.tabs.legend.addItem(
             self.rp_circle_legend_proxy,
-            self.rp_circle_legend_proxy.name()
+            self.rp_circle_legend_proxy.name(),
         )
 
     def _on_rp_radius_changed(self, value: float):
         self.rp_circle_radius = float(value)
         self._redraw_rp_circle_layer()
+
+    def _spot_to_info(self, scatter, spot) -> dict:
+        meta = spot.data()
+        if meta is None:
+            return {}
+
+        if getattr(scatter, "meta_mode", None) == "tuple":
+            cols = getattr(scatter, "meta_cols", [])
+            return dict(zip(cols, meta))
+
+        if getattr(scatter, "meta_mode", None) == "dict":
+            return meta if isinstance(meta, dict) else {}
+
+        return {"data": meta}
+
+    def _nearest_bb_hover_spot(self, x: float, y: float, scene_pos):
+        if not hasattr(self, "bb_layers"):
+            return None
+
+        vb = self.tabs.map_plot.getViewBox()
+
+        px_tol = 18.0
+        p0 = vb.mapSceneToView(scene_pos)
+        p1 = vb.mapSceneToView(scene_pos + QtCore.QPointF(px_tol, px_tol))
+        tol_x = abs(float(p1.x()) - float(p0.x()))
+        tol_y = abs(float(p1.y()) - float(p0.y()))
+        tol2 = (tol_x * tol_x) + (tol_y * tol_y)
+
+        best = None
+        best_d2 = None
+
+        for layer_key in ("bb_rov1_ins", "bb_rov2_ins", "bb_rov1_usbl", "bb_rov2_usbl", "bb_vessel"):
+            layer = self.bb_layers.get(layer_key)
+            if not layer:
+                continue
+
+            scatter = layer.get("scatter")
+            if scatter is None or not scatter.isVisible():
+                continue
+
+            try:
+                data = scatter.getData()
+                if not data or len(data) < 2:
+                    continue
+
+                xs, ys = data[0], data[1]
+                if xs is None or ys is None:
+                    continue
+
+                xs = np.asarray(xs, dtype=float)
+                ys = np.asarray(ys, dtype=float)
+                if xs.size == 0:
+                    continue
+
+                dx = xs - x
+                dy = ys - y
+                d2 = dx * dx + dy * dy
+
+                idx = int(np.argmin(d2))
+                cur_d2 = float(d2[idx])
+
+                if cur_d2 > tol2:
+                    continue
+
+                pts = scatter.points()
+                if idx >= len(pts):
+                    continue
+
+                spot = pts[idx]
+                info = self._spot_to_info(scatter, spot)
+
+                if best_d2 is None or cur_d2 < best_d2:
+                    best = (layer_key, scatter, spot, info)
+                    best_d2 = cur_d2
+
+            except Exception:
+                continue
+
+        return best
 
     def _on_map_mouse_moved(self, evt):
         def _safe_float(v):
@@ -854,6 +1315,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 return f
             except Exception:
                 return None
+
+        def _pick(info: dict, keys: list[str]):
+            for k in keys:
+                if k in info:
+                    val = _safe_float(info.get(k))
+                    if val is not None:
+                        return val
+            return None
 
         pos = evt[0]
 
@@ -866,54 +1335,37 @@ class MainWindow(QtWidgets.QMainWindow):
         x = float(p.x())
         y = float(p.y())
 
-        if not hasattr(self, "bb_layers"):
+        self.statusBar().showMessage(f"Cursor X: {x:,.2f}   Y: {y:,.2f}")
+        self.right.set_coordinates(f"{x:,.2f}", f"{y:,.2f}")
+        self.right.set_metric("Cursor", f"{x:,.1f}, {y:,.1f}")
+
+        hit = self._nearest_bb_hover_spot(x, y, pos)
+        if hit is None:
             QtWidgets.QToolTip.hideText()
             return
 
-        # You can keep priority, but it doesn't matter anymore
-        for layer_key in ("bb_rov1_ins", "bb_rov2_ins","bb_rov1_usbl", "bb_rov2_usbl","bb_vessel"):
-            layer = self.bb_layers.get(layer_key)
-            if not layer:
-                continue
+        layer_key, scatter, spot, info = hit
 
-            scatter = layer.get("scatter")
-            if scatter is None:
-                continue
+        v_hdg = _pick(info, ["VesselHDG", "VesselHeading", "ShipHeading", "Heading"])
+        r1_hdg = _pick(info, ["ROV1_HDG", "ROV1Heading", "ROV1_INS_Heading", "ROV1_HDG_DEG"])
+        r2_hdg = _pick(info, ["ROV2_HDG", "ROV2Heading", "ROV2_INS_Heading", "ROV2_HDG_DEG"])
 
-            pts = scatter.pointsAt(pg.QtCore.QPointF(x, y))
-            if pts is None or len(pts) == 0:
-                continue
+        if v_hdg is not None:
+            self.right.set_vessel_heading(v_hdg)
+        if r1_hdg is not None:
+            self.right.set_rov1_heading(r1_hdg)
+        if r2_hdg is not None:
+            self.right.set_rov2_heading(r2_hdg)
 
-            spot = pts[0]
-            meta = spot.data()
-            if meta is None:
-                continue
+        self.right.set_selection(
+            Layer=layer_key,
+            Line=info.get("Line"),
+            Station=info.get("Station"),
+            Node=info.get("Node"),
+        )
 
-            if getattr(scatter, "meta_mode", None) == "tuple":
-                cols = getattr(scatter, "meta_cols", [])
-                info = dict(zip(cols, meta))
-            elif getattr(scatter, "meta_mode", None) == "dict":
-                info = meta
-            else:
-                info = {"data": meta}
-
-            # ✅ Update all 3 headings from the hovered record
-            v_hdg = _safe_float(info.get("VesselHDG"))
-            r1_hdg = _safe_float(info.get("ROV1_HDG"))
-            r2_hdg = _safe_float(info.get("ROV2_HDG"))
-
-            if v_hdg is not None:
-                self.right.set_vessel_heading(v_hdg)
-            if r1_hdg is not None:
-                self.right.set_rov1_heading(r1_hdg)
-            if r2_hdg is not None:
-                self.right.set_rov2_heading(r2_hdg)
-
-            msg = "\n".join(f"{k}: {v}" for k, v in info.items())
-            QtWidgets.QToolTip.showText(QCursor.pos(), msg, self)
-            return
-
-        QtWidgets.QToolTip.hideText()
+        msg = "\n".join(f"{k}: {v}" for k, v in info.items())
+        QtWidgets.QToolTip.showText(QCursor.pos(), msg, self)
 
     def _enable_legend_toggle(self):
         legend = self.tabs.legend
@@ -921,18 +1373,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         for sample, label in legend.items:
-            item = sample.item  # the actual PlotDataItem
-
-            # only handle blackbox layers
+            item = sample.item
             name = item.name()
             if not name:
                 continue
 
-            # connect mouse press event
             def make_toggle(nm):
                 def toggle(ev):
                     self._toggle_bb_layer(nm)
-
                 return toggle
 
             sample.mousePressEvent = make_toggle(name)
@@ -945,7 +1393,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if not layer:
             return
 
-        # detect current visibility
         visible = True
         if layer.get("curve"):
             visible = layer["curve"].isVisible()
@@ -962,15 +1409,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(settings, dict):
             self.plot_settings = settings
 
-        # If RP layer exists: rebuild RP scatter with new point size (optional)
-        # easiest: just re-run on_project_changed (heavy) OR redraw only RP scatter.
-        # We'll do light redraw if data exists.
+        try:
+            self.config_store.save(self.plot_settings)
+        except Exception as e:
+            print("[Config save] error:", e)
 
-        # redraw RP scatter (only if we have layer + df)
         try:
             rp_ps = int(self.plot_settings.get("rp", {}).get("point_size", 6))
             if self.rp_layer and self.rp_circle_df is not None and not self.rp_circle_df.empty:
-                # remove old
                 if self.rp_layer.get("curve"):
                     self.tabs.map_plot.removeItem(self.rp_layer["curve"])
                 if self.rp_layer.get("scatter"):
@@ -988,42 +1434,414 @@ class MainWindow(QtWidgets.QMainWindow):
                     point_color="blue",
                     line_color="blue",
                     line_width=1.5,
+                    scatter_max_points=self._quality()["rp_scatter_max_points"],
+                    interactive_max_points=self._quality()["interactive_max_points"],
+                    interactive=False,
                 )
                 if self.rp_layer.get("curve"):
                     self.tabs.map_plot.addItem(self.rp_layer["curve"])
                 if self.rp_layer.get("scatter"):
                     self.tabs.map_plot.addItem(self.rp_layer["scatter"])
 
-                # keep circles on top
+                self.rp_circle_radius = float(self.plot_settings.get("rp", {}).get("circle_radius", 25.0))
                 self._redraw_rp_circle_layer()
         except Exception:
             pass
 
-        # redraw DSR primary/secondary if currently plotted
         try:
             if getattr(self, "dsr_line_df", None) is not None:
                 self.plot_dsr_primary_secondary(self.dsr_line_df)
         except Exception:
             pass
 
-        # replot blackbox if we already have bb_line_df
         try:
             if getattr(self, "bb_line_df", None) is not None:
                 self.plot_blackbox_tracks(self.bb_line_df)
+                if self.plot_settings.get("bb", {}).get("show_timeseries_window", True):
+                    self.show_blackbox_timeseries_window(
+                        self.current_dsr_line if hasattr(self, "current_dsr_line") else 0,
+                        df_st=getattr(self, "current_dsr_stations_df", None),
+                    )
         except Exception:
             pass
 
-    def _debug_heading_test(self):
-        from PySide6 import QtWidgets
+    def _get_dsr_mdi_window(self, line: int):
+        if self.dsr_mdi_window is None:
+            self.dsr_mdi_window = DsrMdiWindow(self)
+        self.dsr_mdi_window.set_line_title(line)
+        self.dsr_mdi_window.show()
+        self.dsr_mdi_window.raise_()
+        self.dsr_mdi_window.activateWindow()
+        return self.dsr_mdi_window
 
+    def _iter_dsr_plot_widgets(self):
+        if self.dsr_mdi_window is None:
+            return []
+
+        out = []
+        for key in ("depth_vs_station", "sigmas_vs_station", "radial_offset_vs_station"):
+            sub = self.dsr_mdi_window.get_subwindow(key)
+            if sub is None:
+                continue
+
+            try:
+                w = sub.widget()
+            except Exception:
+                w = None
+
+            if w is not None:
+                out.append((key, w))
+
+        return out
+
+    def _get_bb_mdi_window(self, line: int):
+        if self.bb_mdi_window is None:
+            self.bb_mdi_window = BbMdiWindow(self)
+        self.bb_mdi_window.set_title(line)
+        self.bb_mdi_window.show()
+        self.bb_mdi_window.raise_()
+        self.bb_mdi_window.activateWindow()
+        return self.bb_mdi_window
+
+    def _iter_bb_plot_widgets(self):
+        if self.bb_mdi_window is None:
+            return []
+
+        keys = (
+            "bb_hdg",
+            "bb_sog",
+            "bb_cog",
+            "bb_nos",
+            "bb_diffage",
+            "bb_fixquality",
+            "bb_hdop",
+            "bb_depth",
+        )
+
+        out = []
+        for key in keys:
+            sub = self.bb_mdi_window.get_subwindow(key)
+            if sub is None:
+                continue
+            try:
+                w = sub.widget()
+            except Exception:
+                w = None
+            if w is not None:
+                out.append((key, w))
+        return out
+
+    def _set_bb_time_marker(self, ts_num: float):
+        for _, w in self._iter_bb_plot_widgets():
+            try:
+                sel = w.items.get("sel_line")
+                if sel is not None:
+                    sel.setPos(float(ts_num))
+                    sel.setVisible(True)
+                    sel.setZValue(10000)
+                    w.state["selected_time"] = float(ts_num)
+                    if hasattr(w, "plot") and w.plot is not None:
+                        w.plot.repaint()
+            except Exception:
+                pass
+
+    def show_blackbox_timeseries_window(self, line: int, df_st=None):
+        if getattr(self, "bb_line_df", None) is None or self.bb_line_df.empty:
+            return
+
+        d = self.bb_line_df.copy()
+
+        if "TimeStamp" not in d.columns:
+            return
+
+        d["TimeStamp_dt"] = pd.to_datetime(d["TimeStamp"], errors="coerce")
+        d = d.dropna(subset=["TimeStamp_dt"]).sort_values("TimeStamp_dt")
+        if d.empty:
+            return
+
+        # fast numeric x-axis for pyqtgraph
+        d["TimeStampNum"] = d["TimeStamp_dt"].astype("int64") / 1e9
+
+        # -------------------------------------------------
+        # labels from bb_line_df (legend only, not column names)
+        # -------------------------------------------------
+        def _first_str(df, col, default):
+            try:
+                if col in df.columns:
+                    vals = df[col].dropna().astype(str).str.strip()
+                    vals = vals[vals != ""]
+                    if not vals.empty:
+                        return vals.iloc[0]
+            except Exception:
+                pass
+            return default
+
+        vessel_name = _first_str(d, "vessel_name", "Vessel")
+        rov1_name = _first_str(d, "rov1_name", "ROV1")
+        rov2_name = _first_str(d, "rov2_name", "ROV2")
+        gnss1_name = _first_str(d, "gnss1_name", "GNSS1")
+        gnss2_name = _first_str(d, "gnss2_name", "GNSS2")
+        depth1_name = _first_str(d, "Depth1_name", _first_str(d, "depth1_name", "Depth1"))
+        depth2_name = _first_str(d, "Depth2_name", _first_str(d, "depth2_name", "Depth2"))
+
+        # -------------------------------------------------
+        # settings
+        # -------------------------------------------------
+        bb_sel = self.plot_settings.get("bb", {})
+
+        # optional light downsampling for long logs
+        max_rows = 200_000
+        if len(d) > max_rows:
+            idx = np.unique(np.rint(np.linspace(0, len(d) - 1, max_rows)).astype(np.int64))
+            d = d.iloc[idx].copy()
+
+        mdi = self._get_bb_mdi_window(line)
+
+        created_keys = []
+        base_plot = None
+
+        def _add_ts_plot(key: str, title: str, y_label: str, series: list[dict]):
+            nonlocal base_plot
+            w = PlotWindow(title=title)
+
+            PlotFactory.build_multi_series_vs_time(
+                w,
+                d,
+                time_col="TimeStampNum",
+                title=title,
+                y_label=y_label,
+                series=series,
+            )
+
+            mdi.add_plot_window(key, w, title)
+
+            if base_plot is None:
+                base_plot = w.plot
+            else:
+                try:
+                    w.plot.setXLink(base_plot)
+                except Exception:
+                    pass
+
+            created_keys.append(key)
+            return w
+
+        # -------------------------------------------------
+        # Heading
+        # -------------------------------------------------
+        if bb_sel.get("ts_hdg", True):
+            _add_ts_plot(
+                "bb_hdg",
+                f"Heading - Line {line}",
+                "HDG",
+                [
+                    {"col": "VesselHDG", "name": vessel_name, "color": "yellow"},
+                    {"col": "ROV1_HDG", "name": rov1_name, "color": "cyan"},
+                    {"col": "ROV2_HDG", "name": rov2_name, "color": "magenta"},
+                ],
+            )
+
+        # -------------------------------------------------
+        # Speed over ground
+        # -------------------------------------------------
+        if bb_sel.get("ts_sog", True):
+            _add_ts_plot(
+                "bb_sog",
+                f"Speed over Ground - Line {line}",
+                "SOG",
+                [
+                    {"col": "VesselSOG", "name": vessel_name, "color": "yellow"},
+                    {"col": "ROV1_SOG", "name": rov1_name, "color": "cyan"},
+                    {"col": "ROV2_SOG", "name": rov2_name, "color": "magenta"},
+                ],
+            )
+
+        # -------------------------------------------------
+        # Course over ground
+        # -------------------------------------------------
+        if bb_sel.get("ts_cog", True):
+            _add_ts_plot(
+                "bb_cog",
+                f"Course over Ground - Line {line}",
+                "COG",
+                [
+                    {"col": "VesselCOG", "name": vessel_name, "color": "yellow"},
+                    {"col": "ROV1_COG", "name": rov1_name, "color": "cyan"},
+                    {"col": "ROV2_COG", "name": rov2_name, "color": "magenta"},
+                ],
+            )
+
+        # -------------------------------------------------
+        # Number of satellites
+        # -------------------------------------------------
+        if bb_sel.get("ts_nos", True):
+            _add_ts_plot(
+                "bb_nos",
+                f"Number of Satellites - Line {line}",
+                "NOS",
+                [
+                    {"col": "GNSS1_NOS", "name": gnss1_name, "color": "lime"},
+                    {"col": "GNSS2_NOS", "name": gnss2_name, "color": "orange"},
+                ],
+            )
+
+        # -------------------------------------------------
+        # GPS Diff Age
+        # -------------------------------------------------
+        if bb_sel.get("ts_diffage", True):
+            _add_ts_plot(
+                "bb_diffage",
+                f"GPS Diff Age - Line {line}",
+                "DiffAge",
+                [
+                    {"col": "GNSS1_DiffAge", "name": gnss1_name, "color": "lime"},
+                    {"col": "GNSS2_DiffAge", "name": gnss2_name, "color": "orange"},
+                ],
+            )
+
+        # -------------------------------------------------
+        # GPS FixQuality
+        # -------------------------------------------------
+        if bb_sel.get("ts_fixquality", True):
+            _add_ts_plot(
+                "bb_fixquality",
+                f"GPS Fix Quality - Line {line}",
+                "Fix Quality",
+                [
+                    {"col": "GNSS1_FixQuality", "name": gnss1_name, "color": "lime"},
+                    {"col": "GNSS2_FixQuality", "name": gnss2_name, "color": "orange"},
+                ],
+            )
+
+        # -------------------------------------------------
+        # HDOP
+        # -------------------------------------------------
+        if bb_sel.get("ts_hdop", True):
+            _add_ts_plot(
+                "bb_hdop",
+                f"HDOP - Line {line}",
+                "HDOP",
+                [
+                    {"col": "GNSS1_HDOP", "name": gnss1_name, "color": "lime"},
+                    {"col": "GNSS2_HDOP", "name": gnss2_name, "color": "orange"},
+                ],
+            )
+
+        # -------------------------------------------------
+        # Depth
+        # legend = combination of rov name + depth sensor name
+        # -------------------------------------------------
+        if bb_sel.get("ts_depth", True):
+            depth_series = []
+
+            if "ROV1_Depth1" in d.columns:
+                depth_series.append({
+                    "col": "ROV1_Depth1",
+                    "name": f"{rov1_name} {depth1_name}",
+                    "color": "cyan",
+                })
+
+            if "ROV1_Depth2" in d.columns:
+                depth_series.append({
+                    "col": "ROV1_Depth2",
+                    "name": f"{rov1_name} {depth2_name}",
+                    "color": "deepskyblue",
+                })
+
+            if "ROV2_Depth1" in d.columns:
+                depth_series.append({
+                    "col": "ROV2_Depth1",
+                    "name": f"{rov2_name} {depth1_name}",
+                    "color": "magenta",
+                })
+
+            if "ROV2_Depth2" in d.columns:
+                depth_series.append({
+                    "col": "ROV2_Depth2",
+                    "name": f"{rov2_name} {depth2_name}",
+                    "color": "violet",
+                })
+
+            if depth_series:
+                _add_ts_plot(
+                    "bb_depth",
+                    f"Depth - Line {line}",
+                    "Depth",
+                    depth_series,
+                )
+
+        # -------------------------------------------------
+        # arrange mdi windows
+        # -------------------------------------------------
         try:
-            # make sure heading tab is visible
-            if hasattr(self.right, "tabs"):
-                self.right.tabs.setCurrentIndex(1)
+            mdi.mdi.tileSubWindows()
+        except Exception:
+            pass
 
-            self.right.set_vessel_heading(30)
-            self.right.set_rov1_heading(45)
-            self.right.set_rov2_heading(120)
+        # -------------------------------------------------
+        # initial red marker = nearest BB timestamp to first station Deploy T
+        # -------------------------------------------------
+        try:
+            deploy_ts = None
 
+            if df_st is not None and not df_st.empty:
+                for cand in ("Deploy T", "DeployT", "DeployTime", "Deploy_Time"):
+                    if cand in df_st.columns:
+                        vals = pd.to_datetime(df_st[cand], errors="coerce").dropna()
+                        if not vals.empty:
+                            deploy_ts = vals.iloc[0]
+                            break
+
+            arr = d["TimeStampNum"].to_numpy(dtype=float)
+            if arr.size:
+                if deploy_ts is not None and pd.notna(deploy_ts):
+                    target_num = float(deploy_ts.timestamp())
+                    idx = int(np.argmin(np.abs(arr - target_num)))
+                    self._set_bb_time_marker(float(arr[idx]))
+                else:
+                    self._set_bb_time_marker(float(arr[0]))
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Test ERROR", repr(e))
+            print("[BB initial marker] error:", e)
+
+    def _show_loading(self, text="Loading..."):
+        if getattr(self, "_loading_dialog", None) is not None:
+            try:
+                self._loading_dialog.close()
+            except Exception:
+                pass
+
+        dlg = QtWidgets.QProgressDialog(text, None, 0, 0, self)
+        dlg.setWindowTitle("Please wait")
+        dlg.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+        dlg.setCancelButton(None)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setValue(0)
+
+        # cleaner look
+        dlg.setWindowFlags(
+            dlg.windowFlags()
+            & ~QtCore.Qt.WindowType.WindowContextHelpButtonHint
+        )
+
+        self._loading_dialog = dlg
+
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        dlg.show()
+        QtWidgets.QApplication.processEvents()
+
+    def _hide_loading(self):
+        try:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        except Exception:
+            pass
+
+        dlg = getattr(self, "_loading_dialog", None)
+        if dlg is not None:
+            try:
+                dlg.close()
+                dlg.deleteLater()
+            except Exception:
+                pass
+            self._loading_dialog = None

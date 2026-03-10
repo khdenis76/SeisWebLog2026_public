@@ -1,30 +1,35 @@
 import { getCSRFToken } from "./csrf.js";
-import { renderBokehInto } from "./renderBokeh.js"
+import { renderBokehInto } from "./renderBokeh.js";
+import { showAppToast } from "./toast.js";
+import { showConfirmModal } from "./modalConfirm.js";
+
 export function initDeleteShapesButton() {
   const btn = document.getElementById("btnDeleteShapes");
   const tbody = document.getElementById("shape-folder-body");
-  const prj_shapes_body = document.getElementById("prj-shp-body")
+  const prjShapesBody = document.getElementById("prj-shp-body");
   if (!btn) return;
 
   btn.addEventListener("click", async () => {
     const table = document.getElementById("shp-in-db-table");
     if (!table) return;
 
-    // Select only the row-selection checkboxes (switches) in column 2
-    const checked = Array.from(
-      table.querySelectorAll('tbody input.form-check-input[type="checkbox"]:checked')
-    );
-
-    const fullNames = checked
-      .map(cb => cb.value)
-      .filter(v => typeof v === "string" && v.trim().length > 0);
+    const checked = Array.from(table.querySelectorAll('tbody input.form-check-input[type="checkbox"]:checked'));
+    const fullNames = checked.map(cb => cb.value).filter(v => typeof v === "string" && v.trim().length > 0);
 
     if (fullNames.length === 0) {
-      alert("Select at least one row to delete.");
+      showAppToast("Select at least one shape row.", { title: "Nothing selected", variant: "warning" });
       return;
     }
 
-    if (!confirm(`Delete ${fullNames.length} shape(s) from database?`)) return;
+    const confirmed = await showConfirmModal({
+      title: "Delete project shapes",
+      message: `Delete ${fullNames.length} shape(s) from database?`,
+      details: "The files will stay in the source folder. Only the project records will be removed.",
+      confirmText: "Delete shapes",
+      confirmClass: "btn btn-danger seis-btn-danger",
+      iconClass: "fa-shapes",
+    });
+    if (!confirmed) return;
 
     const url = btn.dataset.postUrl;
 
@@ -43,38 +48,33 @@ export function initDeleteShapesButton() {
       const data = await resp.json();
 
       if (!resp.ok) {
-        alert(data.error || "Failed to delete shapes.");
+        showAppToast(data.error || "Failed to delete shapes.", { title: "Delete failed", variant: "danger" });
         return;
       }
-      if (data.preplot_map) {
-          renderBokehInto("preplot-map-div", data.preplot_map);
-      }
-      tbody.innerHTML=data.shapes_in_folder
-      prj_shapes_body.innerHTML=data.prj_shp_body
-      // Remove rows from DOM
+      if (data.preplot_map) renderBokehInto("preplot-map-div", data.preplot_map);
+      tbody.innerHTML = data.shapes_in_folder;
+      prjShapesBody.innerHTML = data.prj_shp_body;
       checked.forEach(cb => cb.closest("tr")?.remove());
 
-      // Optional: reset main checkbox
       const main = document.getElementById("MainCheckbox");
       if (main) main.checked = false;
 
-      alert(`Deleted: ${data.deleted} shape(s)`);
-
+      showAppToast(`Deleted: ${data.deleted} shape(s).`, { title: "Shapes removed", variant: "success" });
     } catch (err) {
       console.error(err);
-      alert("Network error while deleting shapes.");
+      showAppToast("Network error while deleting shapes.", { title: "Request failed", variant: "danger" });
     } finally {
       btn.disabled = false;
     }
   });
 }
+
 export function forceInputsFromHtmlDefaults() {
   document.querySelectorAll("#shp-in-db-table input[type='color'], #shp-in-db-table input[type='number']").forEach(el => {
     const attr = el.getAttribute("value");
-    if (attr !== null) el.value = attr; // override restored value
+    if (attr !== null) el.value = attr;
   });
 
-  // also restore checkboxes that you render using checked attribute
   document.querySelectorAll("#shp-in-db-table input[type='checkbox']").forEach(el => {
     const shouldBeChecked = el.hasAttribute("checked");
     el.checked = shouldBeChecked;

@@ -1,6 +1,8 @@
-import {getCSRFToken} from "./csrf.js";
-import {updatePreplotTable, updateRLPreplotTable} from "./updaterltable.js"
-import {renderBokehInto} from "./renderBokeh.js";
+import { getCSRFToken } from "./csrf.js";
+import { updateRLPreplotTable } from "./updaterltable.js";
+import { renderBokehInto } from "./renderBokeh.js";
+import { showAppToast } from "./toast.js";
+
 export function initDeleteRL() {
   const btnDelete = document.getElementById("btnDeleteRL");
   const modalEl = document.getElementById("confirmDeleteModal");
@@ -20,7 +22,7 @@ export function initDeleteRL() {
       .filter(n => Number.isFinite(n));
 
     if (pendingIds.length === 0) {
-      alert("No lines selected");
+      showAppToast("Select receiver lines first.", { title: "Nothing selected", variant: "warning" });
       return;
     }
 
@@ -32,7 +34,6 @@ export function initDeleteRL() {
     if (pendingIds.length === 0) return;
 
     btnConfirm.disabled = true;
-    console.log("SENDING IDS:", pendingIds);
     try {
       const resp = await fetch(window.RL_DELETE_URL, {
         method: "POST",
@@ -50,35 +51,23 @@ export function initDeleteRL() {
       }
 
       const data = await resp.json();
-      if (data.preplot_map) {
-          renderBokehInto("preplot-map-div", data.preplot_map);
-      }
-      if (data.prep_stat){
-          document.getElementById("preplot-statcard").innerHTML = data.prep_stat
-      }
-      // ✅ перерисовать из свежих данных
-      updateRLPreplotTable(data.rl_rows)
+      if (data.preplot_map) renderBokehInto("preplot-map-div", data.preplot_map);
+      if (data.prep_stat) document.getElementById("preplot-statcard").innerHTML = data.prep_stat;
+      updateRLPreplotTable(data.rl_rows);
 
-      // снять main checkbox
       const main = document.getElementById("MainRLPreplotCheckbox");
       if (main) main.checked = false;
 
       modal.hide();
       pendingIds = [];
+      showAppToast("Receiver lines deleted successfully.", { title: "Project updated", variant: "success" });
     } catch (e) {
       console.error(e);
-      alert("Delete failed: " + (e.message || e));
+      showAppToast(`Delete failed: ${e.message || e}`, { title: "Delete failed", variant: "danger" });
     } finally {
       btnConfirm.disabled = false;
     }
   });
-}
-function bindOnce(el, event, handler, flag) {
-  if (!el) return;
-  const key = `__bound_${flag}`;
-  if (el[key]) return;
-  el.addEventListener(event, handler);
-  el[key] = true;
 }
 
 export function initDeletePreplot(configs) {
@@ -90,10 +79,8 @@ export function initDeletePreplot(configs) {
   if (!modalEl || !btnConfirm) return;
 
   const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-
   let ctx = null;
 
-  // ✅ confirm handler (один раз)
   if (!btnConfirm.__boundConfirm) {
     btnConfirm.addEventListener("click", async () => {
       if (!ctx || ctx.pendingIds.length === 0) return;
@@ -112,14 +99,8 @@ export function initDeletePreplot(configs) {
 
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
-        if (data.preplot_map) {
-          console.log("Preplot map")
-          renderBokehInto("preplot-map-div", data.preplot_map);
-      }
-      if (data.prep_stat){
-         console.log("Preplot stat")
-          document.getElementById("preplot-statcard").innerHTML = data.prep_stat
-      }
+        if (data.preplot_map) renderBokehInto("preplot-map-div", data.preplot_map);
+        if (data.prep_stat) document.getElementById("preplot-statcard").innerHTML = data.prep_stat;
 
         const freshRows = Array.isArray(data?.[ctx.rowsKey]) ? data[ctx.rowsKey] : [];
         ctx.onUpdatedRows(freshRows);
@@ -128,10 +109,11 @@ export function initDeletePreplot(configs) {
         if (main) main.checked = false;
 
         modal.hide();
+        showAppToast(`${ctx.pendingIds.length} line(s) deleted.`, { title: "Project updated", variant: "success" });
         ctx = null;
       } catch (e) {
         console.error(e);
-        alert("Delete failed: " + (e.message || e));
+        showAppToast(`Delete failed: ${e.message || e}`, { title: "Delete failed", variant: "danger" });
       } finally {
         btnConfirm.disabled = false;
       }
@@ -139,7 +121,6 @@ export function initDeletePreplot(configs) {
     btnConfirm.__boundConfirm = true;
   }
 
-  // ✅ document click handler (ловит кнопки даже если появились позже)
   if (!document.__boundDeletePreplot) {
     document.addEventListener("click", (e) => {
       const clickedBtn = e.target.closest("button");
@@ -156,7 +137,7 @@ export function initDeletePreplot(configs) {
         .filter(Number.isFinite);
 
       if (ids.length === 0) {
-        alert("No lines selected");
+        showAppToast("Select line rows first.", { title: "Nothing selected", variant: "warning" });
         return;
       }
 
@@ -176,22 +157,4 @@ export function initDeletePreplot(configs) {
 
     document.__boundDeletePreplot = true;
   }
-}
-
-
-
-
-function collectSelectedRL() {
-  const boxes = document.querySelectorAll(".rl-preplot-checkbox:checked");
-  const ids = [];
-  const tierLines = [];
-
-  boxes.forEach(cb => {
-    const id = cb.dataset.lineId;
-    const tl = cb.dataset.tierLine;
-    if (id) ids.push(Number(id));
-    if (tl) tierLines.push(Number(tl));
-  });
-
-  return { ids, tierLines, count: boxes.length };
 }

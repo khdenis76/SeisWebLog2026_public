@@ -2,18 +2,47 @@ import pandas as pd
 from PySide6 import QtCore, QtWidgets, QtGui
 
 
+class StationTableWidget(QtWidgets.QTableWidget):
+    stationActivated = QtCore.Signal(int, int)  # (line, station)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
+            super().keyPressEvent(event)
+
+            row = self.currentRow()
+            if row < 0:
+                return
+
+            line_item = self.item(row, 0)
+            st_item = self.item(row, 1)
+            if not line_item or not st_item:
+                return
+
+            try:
+                line = int(float(line_item.text()))
+                station = int(float(st_item.text()))
+            except ValueError:
+                return
+
+            self.stationActivated.emit(line, station)
+            return
+
+        super().keyPressEvent(event)
+
+
 class LeftPanel(QtWidgets.QFrame):
-    rpRadiusChanged = QtCore.Signal(float)  # <-- add this
+    rpRadiusChanged = QtCore.Signal(float)
     projectChanged = QtCore.Signal(str)
     plotsSettingsChanged = QtCore.Signal(dict)
     reloadProjectsClicked = QtCore.Signal()
-    dsrLineClicked = QtCore.Signal(int)  # row click -> show details
-    dsrSelectionChanged = QtCore.Signal(list)  # checkbox selection -> list of lines
-    blackBoxSelectionChanged = QtCore.Signal(list)  # list of selected file IDs
-    blackBoxRowClicked = QtCore.Signal(int)  # single click -> file ID
-    dsrLineClicked = QtCore.Signal(int)  # row click -> single line
-    dsrSelectionChanged = QtCore.Signal(list)  # checkbox selection -> list of lines (optional)
-    dsrStationClicked = QtCore.Signal(int, int)  # (line, station/linepoint)
+
+    dsrLineClicked = QtCore.Signal(int)
+    dsrSelectionChanged = QtCore.Signal(list)
+    dsrStationClicked = QtCore.Signal(int, int)
+
+    blackBoxSelectionChanged = QtCore.Signal(list)
+    blackBoxRowClicked = QtCore.Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -23,17 +52,17 @@ class LeftPanel(QtWidgets.QFrame):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(6, 6, 6, 6)
 
-        # Tab widget inside left panel
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.setTabPosition(QtWidgets.QTabWidget.TabPosition.North)
-
         main_layout.addWidget(self.tabs)
 
-        # Build tabs
         self._build_projects_tab()
         self._build_dsr_tab()
         self._build_blackbox_tab()
         self._build_settings_tab()
+        self._wire_settings_signals()
+
+        QtCore.QTimer.singleShot(0, self._emit_plot_settings)
 
     # ----------------------------------
     # TAB 1 — Projects
@@ -61,7 +90,6 @@ class LeftPanel(QtWidgets.QFrame):
 
         self.tabs.addTab(tab, "Projects")
 
-        # signals
         self.btn_reload_projects.clicked.connect(self.reloadProjectsClicked.emit)
         self.cmb_project.currentTextChanged.connect(self.projectChanged.emit)
 
@@ -75,29 +103,39 @@ class LeftPanel(QtWidgets.QFrame):
 
         self.dsr_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
 
-        # LEFT: Lines table
         self.tbl_dsr_lines = QtWidgets.QTableWidget()
         self.tbl_dsr_lines.setColumnCount(6)
-        self.tbl_dsr_lines.setHorizontalHeaderLabels(["", "Line", "Stations","Vessel","ROV 1","ROV 2"])
-        self.tbl_dsr_lines.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.tbl_dsr_lines.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-        self.tbl_dsr_lines.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl_dsr_lines.setHorizontalHeaderLabels(
+            ["", "Line", "Stations", "Vessel", "ROV 1", "ROV 2"]
+        )
+        self.tbl_dsr_lines.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.tbl_dsr_lines.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.tbl_dsr_lines.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
+        )
         self.tbl_dsr_lines.setColumnWidth(0, 28)
         self.tbl_dsr_lines.cellClicked.connect(self._on_dsr_line_row_clicked)
         self.tbl_dsr_lines.itemChanged.connect(self._on_dsr_checkbox_changed)
 
-        # RIGHT: Stations table (MUST be StationTableWidget so arrows emit)
         self.tbl_dsr_stations = StationTableWidget()
         self.tbl_dsr_stations.setColumnCount(5)
-        self.tbl_dsr_stations.setHorizontalHeaderLabels(["Line", "Station", "Node", "ROV", "Deploy T"])
-        self.tbl_dsr_stations.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.tbl_dsr_stations.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-        self.tbl_dsr_stations.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-
-        # Mouse click (optional)
+        self.tbl_dsr_stations.setHorizontalHeaderLabels(
+            ["Line", "Station", "Node", "ROV", "Deploy T"]
+        )
+        self.tbl_dsr_stations.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.tbl_dsr_stations.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.tbl_dsr_stations.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
+        )
         self.tbl_dsr_stations.cellClicked.connect(self._on_dsr_station_row_clicked)
-
-        # Arrow keys (this is the important part)
         self.tbl_dsr_stations.stationActivated.connect(self.dsrStationClicked.emit)
 
         self.dsr_splitter.addWidget(self.tbl_dsr_lines)
@@ -119,7 +157,6 @@ class LeftPanel(QtWidgets.QFrame):
         self.tbl_bb_files = QtWidgets.QTableWidget()
         self.tbl_bb_files.setColumnCount(3)
         self.tbl_bb_files.setHorizontalHeaderLabels(["", "ID", "FileName"])
-
         self.tbl_bb_files.setSelectionBehavior(
             QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
         )
@@ -129,7 +166,6 @@ class LeftPanel(QtWidgets.QFrame):
         self.tbl_bb_files.setEditTriggers(
             QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
         )
-
         self.tbl_bb_files.setColumnWidth(0, 28)
 
         v.addWidget(self.tbl_bb_files, 1)
@@ -151,10 +187,13 @@ class LeftPanel(QtWidgets.QFrame):
 
         self.chk_dark_mode = QtWidgets.QCheckBox("Dark Mode")
         self.chk_auto_load = QtWidgets.QCheckBox("Auto-load last project")
+        # backward-compatible alias for old code
+        self.chk_autoload_last_project = self.chk_auto_load
+
         g.addWidget(self.chk_dark_mode)
         g.addWidget(self.chk_auto_load)
 
-        # ---------- RP panel ----------
+        # ---------- RP ----------
         rp_box = QtWidgets.QGroupBox("RP")
         rp = QtWidgets.QFormLayout(rp_box)
         rp.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
@@ -168,17 +207,20 @@ class LeftPanel(QtWidgets.QFrame):
         self.spn_rp_point_size = QtWidgets.QSpinBox()
         self.spn_rp_point_size.setRange(1, 50)
         self.spn_rp_point_size.setSingleStep(1)
-        self.spn_rp_point_size.setValue(6)  # your current RPPreplot size
+        self.spn_rp_point_size.setValue(6)
+
+        # backward-compatible aliases
+        self.spin_rp_radius = self.spn_rp_radius
+        self.spin_rp_point_size = self.spn_rp_point_size
 
         rp.addRow("Circle radius (m):", self.spn_rp_radius)
         rp.addRow("RPPreplot point size:", self.spn_rp_point_size)
 
-        # ---------- DSR panel ----------
+        # ---------- DSR ----------
         dsr_box = QtWidgets.QGroupBox("DSR")
         dsr = QtWidgets.QFormLayout(dsr_box)
         dsr.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
 
-        # plot enable/disable
         self.chk_dsr_depth = QtWidgets.QCheckBox("Depth window")
         self.chk_dsr_sigmas = QtWidgets.QCheckBox("Sigmas window")
         self.chk_dsr_radial = QtWidgets.QCheckBox("Radial Offset window")
@@ -186,7 +228,6 @@ class LeftPanel(QtWidgets.QFrame):
         self.chk_dsr_sigmas.setChecked(True)
         self.chk_dsr_radial.setChecked(True)
 
-        # point sizes for map scatters
         self.spn_dsr_primary_size = QtWidgets.QSpinBox()
         self.spn_dsr_primary_size.setRange(1, 50)
         self.spn_dsr_primary_size.setValue(6)
@@ -195,15 +236,31 @@ class LeftPanel(QtWidgets.QFrame):
         self.spn_dsr_secondary_size.setRange(1, 50)
         self.spn_dsr_secondary_size.setValue(6)
 
+        # backward-compatible aliases
+        self.spin_dsr_primary_size = self.spn_dsr_primary_size
+        self.spin_dsr_secondary_size = self.spn_dsr_secondary_size
+
         dsr.addRow(self.chk_dsr_depth)
         dsr.addRow(self.chk_dsr_sigmas)
         dsr.addRow(self.chk_dsr_radial)
         dsr.addRow("DSR Primary point size:", self.spn_dsr_primary_size)
         dsr.addRow("DSR Secondary point size:", self.spn_dsr_secondary_size)
 
-        # ---------- BlackBox panel ----------
-        bb_box = QtWidgets.QGroupBox("BlackBox tracks")
+        # ---------- BlackBox ----------
+        bb_box = QtWidgets.QGroupBox("BlackBox")
         bb = QtWidgets.QVBoxLayout(bb_box)
+
+        self.chk_bb_show_tracks = QtWidgets.QCheckBox("Show BlackBox tracks on map")
+        self.chk_bb_show_tracks.setChecked(True)
+
+        self.chk_bb_show_timeseries = QtWidgets.QCheckBox("Show BlackBox time-series window")
+        self.chk_bb_show_timeseries.setChecked(True)
+
+        bb.addWidget(self.chk_bb_show_tracks)
+        bb.addWidget(self.chk_bb_show_timeseries)
+
+        tracks_box = QtWidgets.QGroupBox("BlackBox tracks")
+        tracks_layout = QtWidgets.QVBoxLayout(tracks_box)
 
         self.chk_bb_vessel = QtWidgets.QCheckBox("Vessel")
         self.chk_bb_rov1_ins = QtWidgets.QCheckBox("ROV1 INS")
@@ -211,12 +268,44 @@ class LeftPanel(QtWidgets.QFrame):
         self.chk_bb_rov1_usbl = QtWidgets.QCheckBox("ROV1 USBL")
         self.chk_bb_rov2_usbl = QtWidgets.QCheckBox("ROV2 USBL")
 
-        for cb in (self.chk_bb_vessel, self.chk_bb_rov1_ins, self.chk_bb_rov2_ins,
-                   self.chk_bb_rov1_usbl, self.chk_bb_rov2_usbl):
+        for cb in (
+            self.chk_bb_vessel,
+            self.chk_bb_rov1_ins,
+            self.chk_bb_rov2_ins,
+            self.chk_bb_rov1_usbl,
+            self.chk_bb_rov2_usbl,
+        ):
             cb.setChecked(True)
-            bb.addWidget(cb)
+            tracks_layout.addWidget(cb)
 
-        # ---------- Assemble ----------
+        ts_box = QtWidgets.QGroupBox("BlackBox time-series")
+        ts_layout = QtWidgets.QVBoxLayout(ts_box)
+
+        self.chk_ts_hdg = QtWidgets.QCheckBox("Heading graph")
+        self.chk_ts_sog = QtWidgets.QCheckBox("SOG graph")
+        self.chk_ts_cog = QtWidgets.QCheckBox("COG graph")
+        self.chk_ts_nos = QtWidgets.QCheckBox("Number of satellites graph")
+        self.chk_ts_diffage = QtWidgets.QCheckBox("GPS Diff Age graph")
+        self.chk_ts_fixquality = QtWidgets.QCheckBox("GPS FixQuality graph")
+        self.chk_ts_hdop = QtWidgets.QCheckBox("HDOP graph")
+        self.chk_ts_depth = QtWidgets.QCheckBox("Depth graph")
+
+        for cb in (
+            self.chk_ts_hdg,
+            self.chk_ts_sog,
+            self.chk_ts_cog,
+            self.chk_ts_nos,
+            self.chk_ts_diffage,
+            self.chk_ts_fixquality,
+            self.chk_ts_hdop,
+            self.chk_ts_depth,
+        ):
+            cb.setChecked(True)
+            ts_layout.addWidget(cb)
+
+        bb.addWidget(tracks_box)
+        bb.addWidget(ts_box)
+
         layout.addWidget(general_box)
         layout.addWidget(rp_box)
         layout.addWidget(dsr_box)
@@ -225,29 +314,61 @@ class LeftPanel(QtWidgets.QFrame):
 
         self.tabs.addTab(tab, "Settings")
 
-        # ---- wiring
+        # rp radius should update immediately
         self.spn_rp_radius.valueChanged.connect(self.rpRadiusChanged.emit)
 
-        # emit unified settings dict on any change
-        widgets_to_watch = [
-            self.spn_rp_point_size,
-            self.spn_dsr_primary_size,
-            self.spn_dsr_secondary_size,
-            self.chk_dsr_depth, self.chk_dsr_sigmas, self.chk_dsr_radial,
-            self.chk_bb_vessel, self.chk_bb_rov1_ins, self.chk_bb_rov2_ins,
-            self.chk_bb_rov1_usbl, self.chk_bb_rov2_usbl,
+    # ----------------------------------
+    # Settings helpers
+    # ----------------------------------
+    def _wire_settings_signals(self):
+        checkbox_names = [
+            "chk_dark_mode",
+            "chk_autoload_last_project",
+            "chk_dsr_depth",
+            "chk_dsr_sigmas",
+            "chk_dsr_radial",
+            "chk_bb_show_tracks",
+            "chk_bb_show_timeseries",
+            "chk_bb_vessel",
+            "chk_bb_rov1_ins",
+            "chk_bb_rov2_ins",
+            "chk_bb_rov1_usbl",
+            "chk_bb_rov2_usbl",
+            "chk_ts_hdg",
+            "chk_ts_sog",
+            "chk_ts_cog",
+            "chk_ts_nos",
+            "chk_ts_diffage",
+            "chk_ts_fixquality",
+            "chk_ts_hdop",
+            "chk_ts_depth",
         ]
-        for w in widgets_to_watch:
-            if hasattr(w, "valueChanged"):
-                w.valueChanged.connect(self._emit_plot_settings)
-            if hasattr(w, "toggled"):
+        for name in checkbox_names:
+            w = getattr(self, name, None)
+            if w is not None:
                 w.toggled.connect(self._emit_plot_settings)
 
-        QtCore.QTimer.singleShot(0, self._emit_plot_settings)
+        spin_names = [
+            "spn_rp_point_size",
+            "spn_dsr_primary_size",
+            "spn_dsr_secondary_size",
+        ]
+        for name in spin_names:
+            w = getattr(self, name, None)
+            if w is not None:
+                w.editingFinished.connect(self._emit_plot_settings)
 
     def _emit_plot_settings(self):
-        settings = {
+        self.plotsSettingsChanged.emit(self.get_plot_settings())
+
+    def get_plot_settings(self) -> dict:
+        return {
+            "general": {
+                "dark_mode": self.chk_dark_mode.isChecked(),
+                "autoload_last_project": self.chk_autoload_last_project.isChecked(),
+            },
             "rp": {
+                "circle_radius": float(self.spn_rp_radius.value()),
                 "point_size": int(self.spn_rp_point_size.value()),
             },
             "dsr": {
@@ -258,18 +379,63 @@ class LeftPanel(QtWidgets.QFrame):
                 "secondary_point_size": int(self.spn_dsr_secondary_size.value()),
             },
             "bb": {
+                "show_tracks_window": self.chk_bb_show_tracks.isChecked(),
+                "show_timeseries_window": self.chk_bb_show_timeseries.isChecked(),
                 "bb_vessel": self.chk_bb_vessel.isChecked(),
                 "bb_rov1_ins": self.chk_bb_rov1_ins.isChecked(),
                 "bb_rov2_ins": self.chk_bb_rov2_ins.isChecked(),
                 "bb_rov1_usbl": self.chk_bb_rov1_usbl.isChecked(),
                 "bb_rov2_usbl": self.chk_bb_rov2_usbl.isChecked(),
-            }
+                "ts_hdg": self.chk_ts_hdg.isChecked(),
+                "ts_sog": self.chk_ts_sog.isChecked(),
+                "ts_cog": self.chk_ts_cog.isChecked(),
+                "ts_nos": self.chk_ts_nos.isChecked(),
+                "ts_diffage": self.chk_ts_diffage.isChecked(),
+                "ts_fixquality": self.chk_ts_fixquality.isChecked(),
+                "ts_hdop": self.chk_ts_hdop.isChecked(),
+                "ts_depth": self.chk_ts_depth.isChecked(),
+            },
         }
-        self.plotsSettingsChanged.emit(settings)
+
+    def apply_plot_settings(self, settings: dict):
+        general = settings.get("general", {})
+        rp = settings.get("rp", {})
+        dsr = settings.get("dsr", {})
+        bb = settings.get("bb", {})
+
+        self.chk_dark_mode.setChecked(bool(general.get("dark_mode", False)))
+        self.chk_autoload_last_project.setChecked(
+            bool(general.get("autoload_last_project", False))
+        )
+
+        self.spn_rp_radius.setValue(float(rp.get("circle_radius", 25.0)))
+        self.spn_rp_point_size.setValue(int(rp.get("point_size", 6)))
+
+        self.chk_dsr_depth.setChecked(bool(dsr.get("depth", True)))
+        self.chk_dsr_sigmas.setChecked(bool(dsr.get("sigmas", True)))
+        self.chk_dsr_radial.setChecked(bool(dsr.get("radial", True)))
+        self.spn_dsr_primary_size.setValue(int(dsr.get("primary_point_size", 6)))
+        self.spn_dsr_secondary_size.setValue(int(dsr.get("secondary_point_size", 6)))
+
+        self.chk_bb_show_tracks.setChecked(bool(bb.get("show_tracks_window", True)))
+        self.chk_bb_show_timeseries.setChecked(bool(bb.get("show_timeseries_window", True)))
+
+        self.chk_bb_vessel.setChecked(bool(bb.get("bb_vessel", True)))
+        self.chk_bb_rov1_ins.setChecked(bool(bb.get("bb_rov1_ins", True)))
+        self.chk_bb_rov2_ins.setChecked(bool(bb.get("bb_rov2_ins", True)))
+        self.chk_bb_rov1_usbl.setChecked(bool(bb.get("bb_rov1_usbl", True)))
+        self.chk_bb_rov2_usbl.setChecked(bool(bb.get("bb_rov2_usbl", True)))
+
+        self.chk_ts_hdg.setChecked(bool(bb.get("ts_hdg", True)))
+        self.chk_ts_sog.setChecked(bool(bb.get("ts_sog", True)))
+        self.chk_ts_cog.setChecked(bool(bb.get("ts_cog", True)))
+        self.chk_ts_nos.setChecked(bool(bb.get("ts_nos", True)))
+        self.chk_ts_diffage.setChecked(bool(bb.get("ts_diffage", True)))
+        self.chk_ts_fixquality.setChecked(bool(bb.get("ts_fixquality", True)))
+        self.chk_ts_hdop.setChecked(bool(bb.get("ts_hdop", True)))
+        self.chk_ts_depth.setChecked(bool(bb.get("ts_depth", True)))
 
     def set_rp_radius(self, value: float):
-        if not hasattr(self, "spn_rp_radius"):
-            return
         self.spn_rp_radius.blockSignals(True)
         self.spn_rp_radius.setValue(float(value))
         self.spn_rp_radius.blockSignals(False)
@@ -295,7 +461,6 @@ class LeftPanel(QtWidgets.QFrame):
             self.tbl_dsr_lines.blockSignals(False)
             return
 
-        # Stations column can be "Stations" or "Sations"
         stations_col = None
         for c in df.columns:
             if str(c).lower() in ("stations", "sations"):
@@ -311,23 +476,67 @@ class LeftPanel(QtWidgets.QFrame):
         for r in range(len(df)):
             line_val = df.iloc[r]["Line"]
             st_val = df.iloc[r][stations_col]
-            vessel_val = df.iloc[r]["Vessel_name"]
-            rov1_val=df.iloc[r]["rov1_name"]
-            rov2_val=df.iloc[r]["rov2_name"]
+            vessel_val = df.iloc[r]["Vessel_name"] if "Vessel_name" in df.columns else ""
+            rov1_val = df.iloc[r]["rov1_name"] if "rov1_name" in df.columns else ""
+            rov2_val = df.iloc[r]["rov2_name"] if "rov2_name" in df.columns else ""
 
             chk = QtWidgets.QTableWidgetItem()
-            chk.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            chk.setFlags(
+                QtCore.Qt.ItemFlag.ItemIsEnabled
+                | QtCore.Qt.ItemFlag.ItemIsUserCheckable
+            )
             chk.setCheckState(QtCore.Qt.CheckState.Unchecked)
             self.tbl_dsr_lines.setItem(r, 0, chk)
 
-            self.tbl_dsr_lines.setItem(r, 1, QtWidgets.QTableWidgetItem("" if pd.isna(line_val) else str(line_val)))
-            self.tbl_dsr_lines.setItem(r, 2, QtWidgets.QTableWidgetItem("" if pd.isna(st_val) else str(st_val)))
-            self.tbl_dsr_lines.setItem(r, 3, QtWidgets.QTableWidgetItem("" if pd.isna(vessel_val) else str(vessel_val)))
-            self.tbl_dsr_lines.setItem(r, 4, QtWidgets.QTableWidgetItem("" if pd.isna(rov1_val) else str(rov1_val)))
-            self.tbl_dsr_lines.setItem(r, 5, QtWidgets.QTableWidgetItem("" if pd.isna(rov2_val) else str(rov2_val)))
+            self.tbl_dsr_lines.setItem(
+                r, 1, QtWidgets.QTableWidgetItem("" if pd.isna(line_val) else str(line_val))
+            )
+            self.tbl_dsr_lines.setItem(
+                r, 2, QtWidgets.QTableWidgetItem("" if pd.isna(st_val) else str(st_val))
+            )
+            self.tbl_dsr_lines.setItem(
+                r, 3, QtWidgets.QTableWidgetItem("" if pd.isna(vessel_val) else str(vessel_val))
+            )
+            self.tbl_dsr_lines.setItem(
+                r, 4, QtWidgets.QTableWidgetItem("" if pd.isna(rov1_val) else str(rov1_val))
+            )
+            self.tbl_dsr_lines.setItem(
+                r, 5, QtWidgets.QTableWidgetItem("" if pd.isna(rov2_val) else str(rov2_val))
+            )
+
         self.tbl_dsr_lines.resizeColumnsToContents()
         self.tbl_dsr_lines.setColumnWidth(0, 28)
         self.tbl_dsr_lines.blockSignals(False)
+
+    def set_dsr_stations_table(self, df):
+        self.tbl_dsr_stations.setRowCount(0)
+
+        if df is None or df.empty:
+            return
+
+        self.tbl_dsr_stations.setRowCount(len(df))
+
+        for r in range(len(df)):
+            line_val = df.iloc[r]["Line"] if "Line" in df.columns else ""
+            st_val = df.iloc[r]["Station"] if "Station" in df.columns else ""
+            node_val = df.iloc[r]["Node"] if "Node" in df.columns else ""
+            rov_val = df.iloc[r]["ROV"] if "ROV" in df.columns else ""
+            dep_val = (
+                df.iloc[r]["DeployTime"]
+                if "DeployTime" in df.columns
+                else (df.iloc[r]["Deploy T"] if "Deploy T" in df.columns else "")
+            )
+
+            self.tbl_dsr_stations.setItem(r, 0, QtWidgets.QTableWidgetItem(str(line_val)))
+            self.tbl_dsr_stations.setItem(r, 1, QtWidgets.QTableWidgetItem(str(st_val)))
+            self.tbl_dsr_stations.setItem(r, 2, QtWidgets.QTableWidgetItem(str(node_val)))
+            self.tbl_dsr_stations.setItem(r, 3, QtWidgets.QTableWidgetItem(str(rov_val)))
+            self.tbl_dsr_stations.setItem(r, 4, QtWidgets.QTableWidgetItem(str(dep_val)))
+
+        self.tbl_dsr_stations.resizeColumnsToContents()
+        if self.tbl_dsr_stations.rowCount() > 0:
+            self.tbl_dsr_stations.setCurrentCell(0, 0)
+            self.tbl_dsr_stations.setFocus()
 
     def set_blackbox_files_table(self, df):
         self.tbl_bb_files.blockSignals(True)
@@ -337,26 +546,23 @@ class LeftPanel(QtWidgets.QFrame):
             self.tbl_bb_files.blockSignals(False)
             return
 
-        # Determine ID column (ID or id)
         id_col = "ID" if "ID" in df.columns else ("id" if "id" in df.columns else None)
         if id_col is None:
             self.tbl_bb_files.blockSignals(False)
             return
 
-        # Determine file name column (FileName/File_Name/Name etc.)
         name_col = None
         for cand in ("FileName", "FILE_NAME", "File_Name", "Name", "Filename"):
             if cand in df.columns:
                 name_col = cand
                 break
         if name_col is None:
-            # fallback: show first text-like column
             for c in df.columns:
                 if df[c].dtype == object:
                     name_col = c
                     break
         if name_col is None:
-            name_col = id_col  # worst case
+            name_col = id_col
 
         self.tbl_bb_files.setRowCount(len(df))
 
@@ -364,17 +570,20 @@ class LeftPanel(QtWidgets.QFrame):
             file_id = df.at[df.index[r], id_col]
             file_name = df.at[df.index[r], name_col]
 
-            # checkbox
             chk = QtWidgets.QTableWidgetItem()
-            chk.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            chk.setFlags(
+                QtCore.Qt.ItemFlag.ItemIsEnabled
+                | QtCore.Qt.ItemFlag.ItemIsUserCheckable
+            )
             chk.setCheckState(QtCore.Qt.CheckState.Unchecked)
             self.tbl_bb_files.setItem(r, 0, chk)
 
-            # ID
-            self.tbl_bb_files.setItem(r, 1, QtWidgets.QTableWidgetItem("" if pd.isna(file_id) else str(file_id)))
-
-            # FileName
-            self.tbl_bb_files.setItem(r, 2, QtWidgets.QTableWidgetItem("" if pd.isna(file_name) else str(file_name)))
+            self.tbl_bb_files.setItem(
+                r, 1, QtWidgets.QTableWidgetItem("" if pd.isna(file_id) else str(file_id))
+            )
+            self.tbl_bb_files.setItem(
+                r, 2, QtWidgets.QTableWidgetItem("" if pd.isna(file_name) else str(file_name))
+            )
 
         self.tbl_bb_files.resizeColumnsToContents()
         self.tbl_bb_files.setColumnWidth(0, 28)
@@ -392,45 +601,11 @@ class LeftPanel(QtWidgets.QFrame):
                 continue
             if chk.checkState() == QtCore.Qt.CheckState.Checked:
                 try:
-                    selected.append(int(line_item.text()))
+                    selected.append(int(float(line_item.text())))
                 except ValueError:
                     pass
 
         self.dsrSelectionChanged.emit(selected)
-
-    def set_dsr_stations_table(self, df):
-        self.tbl_dsr_stations.setRowCount(0)
-
-        if df is None or df.empty:
-            return
-
-        # Expecting columns: Line, LinePoint, Nodes, FirstTime, LastTime
-        self.tbl_dsr_stations.setRowCount(len(df))
-
-        for r in range(len(df)):
-            self.tbl_dsr_stations.setItem(r, 0, QtWidgets.QTableWidgetItem(str(df.iloc[r]["Line"])))
-            self.tbl_dsr_stations.setItem(r, 1, QtWidgets.QTableWidgetItem(str(df.iloc[r]["Station"])))
-            self.tbl_dsr_stations.setItem(r, 2, QtWidgets.QTableWidgetItem(str(df.iloc[r]["Node"])))
-            self.tbl_dsr_stations.setItem(r, 3, QtWidgets.QTableWidgetItem(str(df.iloc[r]["ROV"])))
-            self.tbl_dsr_stations.setItem(r, 4, QtWidgets.QTableWidgetItem(str(df.iloc[r]["DeployTime"])))
-
-        self.tbl_dsr_stations.resizeColumnsToContents()
-        self.tbl_dsr_stations.setCurrentCell(0, 0)
-        if self.tbl_dsr_stations.rowCount() > 0:
-            self.tbl_dsr_stations.setCurrentCell(0, 0)
-            self.tbl_dsr_stations.setFocus()
-
-    def _on_bb_row_clicked(self, row: int, col: int):
-        if col == 0:
-            return
-        item = self.tbl_bb_files.item(row, 1)  # ID column
-        if not item:
-            return
-        try:
-            file_id = int(item.text())
-        except ValueError:
-            return
-        self.blackBoxRowClicked.emit(file_id)
 
     def _on_bb_checkbox_changed(self, item: QtWidgets.QTableWidgetItem):
         if item.column() != 0:
@@ -444,38 +619,34 @@ class LeftPanel(QtWidgets.QFrame):
                 continue
             if chk.checkState() == QtCore.Qt.CheckState.Checked:
                 try:
-                    selected.append(int(id_item.text()))
+                    selected.append(int(float(id_item.text())))
                 except ValueError:
                     pass
 
         self.blackBoxSelectionChanged.emit(selected)
 
+    def _on_bb_row_clicked(self, row: int, col: int):
+        if col == 0:
+            return
+        item = self.tbl_bb_files.item(row, 1)
+        if not item:
+            return
+        try:
+            file_id = int(float(item.text()))
+        except ValueError:
+            return
+        self.blackBoxRowClicked.emit(file_id)
+
     def _on_dsr_station_row_clicked(self, row: int, col: int):
-        # expecting stations table columns: Line, Station, ...
         line_item = self.tbl_dsr_stations.item(row, 0)
         st_item = self.tbl_dsr_stations.item(row, 1)
         if not line_item or not st_item:
             return
         try:
-            line = int(line_item.text())
-            station = int(st_item.text())
+            line = int(float(line_item.text()))
+            station = int(float(st_item.text()))
         except ValueError:
             return
-
-        def _activate_current_station(self):
-            row = self.tbl_dsr_stations.currentRow()
-            if row < 0:
-                return
-            line_item = self.tbl_dsr_stations.item(row, 0)
-            st_item = self.tbl_dsr_stations.item(row, 1)
-            if not line_item or not st_item:
-                return
-            try:
-                line = int(line_item.text())
-                station = int(st_item.text())
-            except ValueError:
-                return
-            self.dsrStationClicked.emit(line, station)
 
         self.dsrStationClicked.emit(line, station)
 
@@ -484,15 +655,15 @@ class LeftPanel(QtWidgets.QFrame):
         if row < 0:
             return
 
-        line_item = self.tbl_dsr_stations.item(row, 0)  # Line
-        st_item = self.tbl_dsr_stations.item(row, 1)  # Station
+        line_item = self.tbl_dsr_stations.item(row, 0)
+        st_item = self.tbl_dsr_stations.item(row, 1)
 
         if not line_item or not st_item:
             return
 
         try:
-            line = int(line_item.text())
-            station = int(st_item.text())
+            line = int(float(line_item.text()))
+            station = int(float(st_item.text()))
         except ValueError:
             return
 
@@ -500,69 +671,16 @@ class LeftPanel(QtWidgets.QFrame):
 
     def _on_dsr_line_row_clicked(self, row: int, col: int):
         if col == 0:
-            return  # checkbox col
+            return
 
-        item = self.tbl_dsr_lines.item(row, 1)  # column 1 MUST be "Line"
+        item = self.tbl_dsr_lines.item(row, 1)
         if not item:
             return
 
         try:
-            line = int(item.text())
+            line = int(float(item.text()))
         except ValueError:
             return
 
-        print("LeftPanel emitted line:", line)  # DEBUG
+        print("LeftPanel emitted line:", line)
         self.dsrLineClicked.emit(line)
-
-    def _on_station_current_row_changed(self, current, previous):
-        row = current.row()
-        if row < 0:
-            return
-
-        line_item = self.tbl_dsr_stations.item(row, 0)  # Line column
-        st_item = self.tbl_dsr_stations.item(row, 1)  # Station column
-        if not line_item or not st_item:
-            return
-
-        try:
-            line = int(line_item.text())
-            station = int(st_item.text())
-        except ValueError:
-            return
-
-        self.dsrStationClicked.emit(line, station)
-
-
-
-
-class StationTableWidget(QtWidgets.QTableWidget):
-    stationActivated = QtCore.Signal(int, int)  # (line, station)
-
-    def keyPressEvent(self, event):
-        key = event.key()
-        if key in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
-            # let the table move selection first
-            super().keyPressEvent(event)
-
-            row = self.currentRow()
-            if row < 0:
-                return
-
-            line_item = self.item(row, 0)   # Line column
-            st_item = self.item(row, 1)     # Station column
-            if not line_item or not st_item:
-                return
-
-            try:
-                line = int(line_item.text())
-                station = int(st_item.text())
-            except ValueError:
-                return
-
-            self.stationActivated.emit(line, station)
-            return
-
-        super().keyPressEvent(event)
-
-
-

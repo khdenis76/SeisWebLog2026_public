@@ -1,4 +1,5 @@
 import { getCSRFToken } from "./csrf.js";
+import { showAppToast } from "./toast.js";
 
 export function initShapeFolderSearchButton() {
   const btn = document.getElementById("shape-folder-search-button");
@@ -10,7 +11,7 @@ export function initShapeFolderSearchButton() {
   btn.addEventListener("click", async () => {
     const folderPath = input.value.trim();
     if (!folderPath) {
-      alert("Folder path is empty");
+      showAppToast("Folder path is empty.", { title: "Shapes folder", variant: "warning" });
       return;
     }
 
@@ -30,18 +31,15 @@ export function initShapeFolderSearchButton() {
 
       const data = await resp.json();
 
-
       if (!resp.ok) {
-        alert(data.error || "Failed to load shapes");
+        showAppToast(data.error || "Failed to load shapes.", { title: "Shapes folder", variant: "danger" });
         return;
       }
-      console.log("List of Shapes updated")
-      tbody.innerHTML=data.shapes_in_folder
-
-
+      tbody.innerHTML = data.shapes_in_folder;
+      showAppToast("Folder scanned successfully.", { title: "Shapes folder", variant: "success", delay: 3000 });
     } catch (err) {
       console.error(err);
-      alert("Network error");
+      showAppToast("Network error while loading shapes.", { title: "Shapes folder", variant: "danger" });
     } finally {
       btn.disabled = false;
     }

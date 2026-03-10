@@ -1,9 +1,11 @@
 import { getCSRFToken } from "./csrf.js";
-import {initSPPointCheckboxes} from "./initMainSPCheckbox.js";
-import {activateTab} from "./initTabActivator.js";
+import { initSPPointCheckboxes } from "./initMainSPCheckbox.js";
+import { activateTab } from "./initTabActivator.js";
+import { showAppToast } from "./toast.js";
+
 export function initSLLineClick() {
   const table = document.getElementById("slpreplotTable");
-  const rldiv = document.getElementById("sl-points-div")
+  const rldiv = document.getElementById("sl-points-div");
   if (!table) return;
 
   const url = table.dataset.lineClickUrl;
@@ -11,8 +13,6 @@ export function initSLLineClick() {
   table.addEventListener("click", async (e) => {
     const td = e.target.closest("td");
     if (!td) return;
-
-    // ignore checkbox clicks
     if (e.target.closest("input[type='checkbox']")) return;
 
     const tr = td.closest("tr");
@@ -34,31 +34,20 @@ export function initSLLineClick() {
       const data = await resp.json();
 
       if (!resp.ok || !data.ok) {
-        alert(data.error || "Failed to load line data");
+        showAppToast(data.error || "Failed to load line data.", { title: "Source line", variant: "danger" });
         return;
       }
-      rldiv.innerHTML = data.point_table
+      rldiv.innerHTML = data.point_table;
       initSPPointCheckboxes();
-      activateTab("sl-points-tab")
-      // ✅ Use returned JSON
-      console.log("Line data:", data);
+      activateTab("sl-points-tab");
 
-      // Example: put HTML into a panel
       if (data.html) {
         const panel = document.getElementById("lineDetailPanel");
         if (panel) panel.innerHTML = data.html;
       }
-
-      // Example: if you return bokeh json_item
-      // if (data.bokeh_item) {
-      //   const el = document.getElementById("linePlot");
-      //   el.innerHTML = "";
-      //   Bokeh.embed.embed_item(data.bokeh_item, "linePlot");
-      // }
-
     } catch (err) {
       console.error(err);
-      alert("Network error");
+      showAppToast("Network error while loading source line.", { title: "Source line", variant: "danger" });
     }
   });
 }

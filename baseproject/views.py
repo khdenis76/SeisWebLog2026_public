@@ -309,7 +309,7 @@ def upload_header_sps(request):
     pdb = ProjectDB(project.db_path)
     uploaded = request.FILES.get("files")
     if not uploaded:
-        return JsonResponse({"error": "No file uploaded (field name must be 'file')"}, status=400)
+        return JsonResponse({"error": "No file uploaded (field name must be 'files')"}, status=400)
 
     # 2) sps_revision from form
     sps_revision_raw = request.POST.get("sps_revision")
@@ -344,6 +344,8 @@ def upload_header_sps(request):
         "status": "ok",
         "header1_text": header1_text,
         "header2_text": header2_text,
+        "hdr1": header1_text,
+        "hdr2": header2_text,
     })
 @login_required
 @require_POST
@@ -472,6 +474,7 @@ def shape_search(request):
         "ok": True,
         "shp_list": shp_list,
     })
+@login_required
 @require_POST
 def add_shape_to_db(request):
     """Add shape file from the folder to project database with default values for line_width & colors"""
@@ -599,12 +602,6 @@ def project_layers_update(request):
             raise PermissionDenied
         pdb = ProjectDB(project.db_path)
         pgr =PreplotGraphics(project.db_path)
-        layout = pgr.preplot_map(
-            src_epsg=pdb.get_main().epsg,
-            show_shapes=True,  # or False
-            show_layers=True,  # or False
-            show_scale_bar=True,  # or False
-        )
         layer = ProjectLayer(
             layer_id=layer_id,
             fill_color=fill_color,
@@ -612,7 +609,13 @@ def project_layers_update(request):
             point_size=point_size,
         )
         pdb.upsert_layer(layer)
-        return JsonResponse({"ok": True, "preplot_map": json_item(layout),})
+        layout = pgr.preplot_map(
+            src_epsg=pdb.get_main().epsg,
+            show_shapes=True,
+            show_layers=True,
+            show_scale_bar=True,
+        )
+        return JsonResponse({"ok": True, "preplot_map": json_item(layout)})
 
     except (ValueError, TypeError):
         return JsonResponse({"error": "Invalid field types"}, status=400)
@@ -865,6 +868,7 @@ def export_to_sps(request):
         return JsonResponse({"error": str(e)}, status=500)
 #==========================================================================================================================
 #====================================LOAD CSV LAYERS=====================================================================
+@login_required
 @require_POST
 def csv_headers(request):
     f = request.FILES.get("csv_file")
@@ -908,6 +912,7 @@ def csv_headers(request):
         "headers": headers,
         "options_html": "".join(options),
     })
+@login_required
 def upload_csv_layer_ajax(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST only"}, status=405)
@@ -1000,6 +1005,8 @@ def delete_csv_layers(request):
         project = user_settings.active_project
         if not project:
             return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+        if not project.can_edit(request.user):
+            raise PermissionDenied
 
         pdb = ProjectDB(project.db_path)
         pgr=PreplotGraphics(project.db_path)
@@ -1111,7 +1118,7 @@ def rp_points_delete(request):
         if not project.can_edit(request.user):
             raise PermissionDenied
         pdb = ProjectDB(project.db_path)
-        deleted = pdb.delete_preplot_points(point_ids,table_name="SPPreplot")
+        deleted = pdb.delete_preplot_points(point_ids,table_name="RPPreplot")
 
         return JsonResponse({"ok": True, "deleted": deleted, "deleted_ids": point_ids})
 

@@ -1,18 +1,18 @@
-import {getCSRFToken} from "./csrf.js"
-import { renderBokehInto } from "./renderBokeh.js"
+import { getCSRFToken } from "./csrf.js";
+import { renderBokehInto } from "./renderBokeh.js";
+import { showAppToast } from "./toast.js";
+
 export function initMainShapeCheckBox() {
   const main = document.getElementById("mainshapefileCheckbox");
   const tbody = document.getElementById("shape-folder-body");
   if (!main || !tbody) return;
 
-  // Select all
   main.addEventListener("change", () => {
     tbody.querySelectorAll(".shape-checkbox").forEach(cb => {
       cb.checked = main.checked;
     });
   });
 
-  // Если вручную снимают/ставят — обновлять главный чекбокс
   tbody.addEventListener("change", (e) => {
     if (!e.target.classList.contains("shape-checkbox")) return;
     const boxes = tbody.querySelectorAll(".shape-checkbox");
@@ -20,23 +20,19 @@ export function initMainShapeCheckBox() {
     main.checked = boxes.length > 0 && checked.length === boxes.length;
   });
 }
+
 export function initAddShapeButton() {
   const btn = document.getElementById("btnAddShapes");
   const tbody = document.getElementById("shape-folder-body");
-  const prj_shapes_body = document.getElementById("prj-shp-body")
+  const prjShapesBody = document.getElementById("prj-shp-body");
   if (!btn) return;
 
   btn.addEventListener("click", async () => {
-    const checked = Array.from(
-      document.querySelectorAll(".shape-checkbox:checked")
-    );
-
-    const fullNames = checked
-      .map(cb => cb.dataset.fullname)
-      .filter(Boolean);
+    const checked = Array.from(document.querySelectorAll(".shape-checkbox:checked"));
+    const fullNames = checked.map(cb => cb.dataset.fullname).filter(Boolean);
 
     if (fullNames.length === 0) {
-      alert("Select at least one shape.");
+      showAppToast("Select at least one shape.", { title: "Nothing selected", variant: "warning" });
       return;
     }
 
@@ -57,33 +53,27 @@ export function initAddShapeButton() {
       const data = await resp.json();
 
       if (!resp.ok) {
-        alert(data.error || "Failed to add shapes.");
+        showAppToast(data.error || "Failed to add shapes.", { title: "Import failed", variant: "danger" });
         return;
       }
-      if (data.preplot_map) {
-          renderBokehInto("preplot-map-div", data.preplot_map);
-      }
-      tbody.innerHTML=data.shapes_in_folder
-      prj_shapes_body.innerHTML=data.prj_shp_body
-      // Optional: uncheck added rows
+      if (data.preplot_map) renderBokehInto("preplot-map-div", data.preplot_map);
+      tbody.innerHTML = data.shapes_in_folder;
+      prjShapesBody.innerHTML = data.prj_shp_body;
       checked.forEach(cb => (cb.checked = false));
 
-
+      showAppToast(`${fullNames.length} shape(s) added to project.`, { title: "Shapes loaded", variant: "success" });
     } catch (err) {
       console.error(err);
-      alert("Network error while adding shapes.");
+      showAppToast("Network error while adding shapes.", { title: "Import failed", variant: "danger" });
     } finally {
       btn.disabled = false;
     }
   });
 
-  // Optional: "select all" checkbox
   const main = document.getElementById("mainshapefileCheckbox");
   if (main) {
     main.addEventListener("change", () => {
-      document
-        .querySelectorAll(".shape-checkbox")
-        .forEach(cb => (cb.checked = main.checked));
+      document.querySelectorAll(".shape-checkbox").forEach(cb => (cb.checked = main.checked));
     });
   }
 }
@@ -92,26 +82,21 @@ export function initProjectShapesAutoSave() {
   const table = document.getElementById("shp-in-db-table");
   if (!table) return;
 
-  const saveUrl = table.dataset.saveUrl; // set in template
+  const saveUrl = table.dataset.saveUrl;
   if (!saveUrl) {
     console.warn("Missing data-save-url on #shp-in-db-table");
     return;
   }
 
-  // Debounce per row (avoid spamming server while user clicks/scrolls)
   const timers = new Map();
 
   function scheduleRowSave(tr) {
     const key = tr.dataset.fullname || "";
     if (!key) return;
 
-    // clear previous timer for this row
     if (timers.has(key)) clearTimeout(timers.get(key));
 
-    timers.set(
-      key,
-      setTimeout(() => saveRow(tr).catch(console.error), 400) // 400ms debounce
-    );
+    timers.set(key, setTimeout(() => saveRow(tr).catch(console.error), 400));
   }
 
   async function saveRow(tr) {
@@ -136,13 +121,10 @@ export function initProjectShapesAutoSave() {
       fill_color: fillColor,
       line_color: lineColor,
       line_width: lineWidth,
-      hatch_pattern:hatchpattern,
-      line_dashed:linedashed,
-      // optional: add line_style later if you have it in UI
-      // line_style: "solid",
+      hatch_pattern: hatchpattern,
+      line_dashed: linedashed,
     };
 
-    // Optional UI: mark row as "saving"
     tr.classList.add("table-warning");
 
     const resp = await fetch(saveUrl, {
@@ -155,7 +137,6 @@ export function initProjectShapesAutoSave() {
     });
 
     const data = await resp.json();
-
     tr.classList.remove("table-warning");
 
     if (!resp.ok) {
@@ -163,21 +144,16 @@ export function initProjectShapesAutoSave() {
       console.error(data);
       return;
     }
-    if (data.preplot_map) {
-          renderBokehInto("preplot-map-div", data.preplot_map);
-      }
-    // Optional UI: mark row "saved"
+    if (data.preplot_map) renderBokehInto("preplot-map-div", data.preplot_map);
     tr.classList.remove("table-danger");
     tr.classList.add("table-success");
     setTimeout(() => tr.classList.remove("table-success"), 600);
   }
 
-  // Listen to changes from any input inside table
   table.addEventListener("change", (e) => {
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;
 
-    // Only react to inputs we care about
     if (
       target.classList.contains("is_shape_fill") ||
       target.classList.contains("fill_color") ||
@@ -191,7 +167,6 @@ export function initProjectShapesAutoSave() {
     }
   });
 
-  // Also save while typing in line width (optional)
   table.addEventListener("input", (e) => {
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;

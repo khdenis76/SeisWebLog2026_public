@@ -1,5 +1,7 @@
 import { getCSRFToken } from "./csrf.js";
-import {renderBokehInto} from "./renderBokeh.js";
+import { renderBokehInto } from "./renderBokeh.js";
+import { showAppToast } from "./toast.js";
+import { showConfirmModal } from "./modalConfirm.js";
 
 export function initDeleteLayersBtn() {
   const btn = document.getElementById("deleteLayersBtn");
@@ -9,13 +11,20 @@ export function initDeleteLayersBtn() {
   btn.addEventListener("click", async () => {
     const checkboxes = tbody.querySelectorAll(".layers-checkbox:checked");
     if (checkboxes.length === 0) {
-      alert("Select layers to delete");
+      showAppToast("Select layer rows first.", { title: "Nothing selected", variant: "warning" });
       return;
     }
 
     const ids = Array.from(checkboxes).map(cb => cb.dataset.layerid);
-
-    if (!confirm(`Delete ${ids.length} layer(s)?`)) return;
+    const confirmed = await showConfirmModal({
+      title: "Delete selected layers",
+      message: `Delete ${ids.length} layer(s) from the project?`,
+      details: "This action removes the selected CSV layers from the current project view.",
+      confirmText: "Delete layers",
+      confirmClass: "btn btn-danger seis-btn-danger",
+      iconClass: "fa-layer-group",
+    });
+    if (!confirmed) return;
 
     const url = btn.dataset.deleteUrl;
 
@@ -34,32 +43,30 @@ export function initDeleteLayersBtn() {
       const data = await resp.json();
 
       if (!resp.ok || !data.ok) {
-        alert(data.error || "Delete failed");
+        showAppToast(data.error || "Delete failed.", { title: "Layers not deleted", variant: "danger" });
         return;
       }
-      // ✅ redraw preplot map
       if (data.preplot_map) {
-          renderBokehInto("preplot-map-div", data.preplot_map);
+        renderBokehInto("preplot-map-div", data.preplot_map);
       }
 
-      // ✅ remove rows from table
       ids.forEach(id => {
         const row = tbody.querySelector(`tr[data-id="${id}"]`);
         if (row) row.remove();
       });
 
-      // optional: if table becomes empty, show "No data"
       if (tbody.querySelectorAll("tr").length === 0) {
         tbody.innerHTML = `
-          <tr class="table-warning">
-            <td colspan="6">No data</td>
+          <tr>
+            <td colspan="6" class="text-center text-muted py-4">No layers loaded</td>
           </tr>
         `;
       }
 
+      showAppToast(`${ids.length} layer(s) deleted.`, { title: "Layers updated", variant: "success" });
     } catch (err) {
       console.error(err);
-      alert("Network error");
+      showAppToast("Network error while deleting layers.", { title: "Request failed", variant: "danger" });
     } finally {
       btn.disabled = false;
     }

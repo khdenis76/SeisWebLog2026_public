@@ -988,7 +988,17 @@ class SourceMapGraphics:
 
             with self._connect() as conn:
                 df = pd.read_sql(sql, conn)
+            # -----------------------------
+            # Clean NULL values (IMPORTANT)
+            # -----------------------------
+            df["vessel_name"] = df["vessel_name"].fillna("Unknown Vessel").astype(str).str.strip()
+            df["purpose"] = df["purpose"].fillna("Other").astype(str).str.strip()
+            df["metric"] = df["metric"].fillna("Other").astype(str).str.strip()
 
+            # also clean empty strings
+            df.loc[df["vessel_name"] == "", "vessel_name"] = "Unknown Vessel"
+            df.loc[df["purpose"] == "", "purpose"] = "Other"
+            df.loc[df["metric"] == "", "metric"] = "Other"
             if df is None or df.empty:
                 return self._plotly_error_html(
                     title="No data",
@@ -1060,8 +1070,8 @@ class SourceMapGraphics:
             # -----------------------------
             # Build explicit node arrays (so each ring has its own color set)
             # -----------------------------
-            grp_purpose = df.groupby(["vessel_name", "purpose"], as_index=False)["value"].sum()
-            grp_vessel = df.groupby(["vessel_name"], as_index=False)["value"].sum()
+            grp_purpose = df.groupby(["vessel_name", "purpose"], as_index=False, dropna=False)["value"].sum()
+            grp_vessel = df.groupby(["vessel_name"], as_index=False, dropna=False)["value"].sum()
 
             labels, parents, values, ids, colors = [], [], [], [], []
 

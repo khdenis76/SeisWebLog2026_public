@@ -7,7 +7,6 @@ import {initBBoxConfigSave} from "./initSaveBboxConfigBtn.js";
 import {initSetDefaultBBoxConfig} from "./initSetDefaultBboxCfg.js";
 import {initBboxFileSelectAll} from "./initmainBboxFileCheckbox.js";
 import {initProdCardToggle} from "./initProdCardCollapseBtn.js";
-import {initDsrDeleteDropdown} from "./initDSRdeleteBtn.js";
 import {initDeleteDSRLines} from "./initDeleteDsrLines.js";
 import {initDeleteBboxFiles} from "./initDeleteBboxFile.js";
 import {initBboxPlotClick} from "./initBboxRowClick.js";
@@ -42,7 +41,7 @@ export function initAllJSForRovUpload() {
   initSetDefaultBBoxConfig();
   initBboxFileSelectAll();
   initProdCardToggle();
-  initDsrDeleteDropdown();
+  initDeleteDSRLines();
   initDeleteDSRLines();
   initDeleteBboxFiles();
   initBboxPlotClick();

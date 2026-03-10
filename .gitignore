@@ -13,6 +13,7 @@ local_settings.py
 # Database
 db.sqlite3
 *.sqlite3
+*.zip
 
 # Virtualenv
 myenv/
