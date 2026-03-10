@@ -24,7 +24,7 @@ If Python is not installed, download it from:
 Download and unzip the release archive:
 
 ```
-https://github.com/khdenis76/SeisWebLog/archive/refs/heads/release.zip
+https://github.com/khdenis76/SeisWebLog2026_public/archive/refs/heads/main.zip
 ```
 
 Extract the ZIP to any folder (for example: `D:\SeisWebLog`).
