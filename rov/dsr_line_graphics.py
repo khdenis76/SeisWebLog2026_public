@@ -7,8 +7,8 @@ import pandas as pd
 from bokeh.embed import json_item
 from bokeh.layouts import column, gridplot, row
 from bokeh.models import ColumnDataSource, HoverTool, Range1d, Button, CustomJS, FactorRange, LegendItem, Legend, Div, \
-    Span, TextInput
-from bokeh.palettes import Category10, Turbo256, Category20
+    Span, TextInput, LinearColorMapper, NumeralTickFormatter, PrintfTickFormatter, Rect, MultiSelect, Ray
+from bokeh.palettes import Category10, Turbo256, Category20, Paired
 from bokeh.plotting import figure, show
 import numpy as np
 from bokeh.models import ColumnDataSource, ColorBar
@@ -1992,8 +1992,1137 @@ class DSRLineGraphics(object):
                 json_return=json_return,
             )
 
+    def deployment_offsets_vs_preplot(
+            self,
+            df,
+            line,
+            line_bearing,
+            is_show=False,
+            json_return=False,
+    ):
+        """
+        3 stacked plots for deployment vs preplot using DSR dataframe.
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            DSR dataframe for selected line.
+        line : str|int
+            Receiver line name/number.
+        line_bearing : float
+            Receiver line bearing in degrees.
+        is_show : bool
+            If True -> show plot directly.
+        json_return : bool
+            If True -> return bokeh json_item(layout).
+
+        Required columns in df
+        ----------------------
+        Station, Node, ROV, TimeStamp,
+        PrimaryElevation, SecondaryElevation,
+        PreplotEasting, PreplotNorthing,
+        PrimaryEasting, PrimaryNorthing,
+        SecondaryEasting, SecondaryNorthing
+        """
+        try:
+            if df is None or df.empty:
+                return self._error_layout(
+                    title="Deployment vs Preplot",
+                    message=f"No DSR rows for line {line}.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            required_cols = [
+                "Station",
+                "Node",
+                "ROV",
+                "TimeStamp",
+                "PrimaryElevation",
+                "SecondaryElevation",
+                "PreplotEasting",
+                "PreplotNorthing",
+                "PrimaryEasting",
+                "PrimaryNorthing",
+                "SecondaryEasting",
+                "SecondaryNorthing",
+            ]
+            missing = [c for c in required_cols if c not in df.columns]
+            if missing:
+                return self._error_layout(
+                    title="Deployment vs Preplot",
+                    message="Missing required columns.",
+                    details=", ".join(missing),
+                    level="error",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            if line_bearing is None or str(line_bearing).strip() == "":
+                return self._error_layout(
+                    title="Deployment vs Preplot",
+                    message=f"Line bearing is missing for line {line}.",
+                    level="error",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            d = df.copy()
+
+            numeric_cols = [
+                "Station",
+                "PrimaryElevation",
+                "SecondaryElevation",
+                "PreplotEasting",
+                "PreplotNorthing",
+                "PrimaryEasting",
+                "PrimaryNorthing",
+                "SecondaryEasting",
+                "SecondaryNorthing",
+            ]
+            for c in numeric_cols:
+                d[c] = pd.to_numeric(d[c], errors="coerce")
+
+            d = d.dropna(
+                subset=[
+                    "Station",
+                    "PreplotEasting",
+                    "PreplotNorthing",
+                    "PrimaryEasting",
+                    "PrimaryNorthing",
+                    "SecondaryEasting",
+                    "SecondaryNorthing",
+                ]
+            ).sort_values("Station")
+
+            if d.empty:
+                return self._error_layout(
+                    title="Deployment vs Preplot",
+                    message=f"Line {line} has no valid deployment/preplot coordinates.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            bearing_rad = np.deg2rad(float(line_bearing))
+
+            # along-line unit vector
+            ux = np.sin(bearing_rad)
+            uy = np.cos(bearing_rad)
+
+            # cross-line unit vector
+            vx = np.cos(bearing_rad)
+            vy = -np.sin(bearing_rad)
+
+            # primary delta from preplot
+            dx1 = (
+                    d["PrimaryEasting"].to_numpy(dtype=float)
+                    - d["PreplotEasting"].to_numpy(dtype=float)
+            )
+            dy1 = (
+                    d["PrimaryNorthing"].to_numpy(dtype=float)
+                    - d["PreplotNorthing"].to_numpy(dtype=float)
+            )
+
+            # secondary delta from preplot
+            dx2 = (
+                    d["SecondaryEasting"].to_numpy(dtype=float)
+                    - d["PreplotEasting"].to_numpy(dtype=float)
+            )
+            dy2 = (
+                    d["SecondaryNorthing"].to_numpy(dtype=float)
+                    - d["PreplotNorthing"].to_numpy(dtype=float)
+            )
+
+            # offsets
+            il1 = dx1 * ux + dy1 * uy
+            il2 = dx2 * ux + dy2 * uy
+
+            xl1 = dx1 * vx + dy1 * vy
+            xl2 = dx2 * vx + dy2 * vy
+
+            radial1 = np.sqrt(dx1 ** 2 + dy1 ** 2)
+            radial2 = np.sqrt(dx2 ** 2 + dy2 ** 2)
+
+            # distance between primary and secondary
+            p12x = (
+                    d["SecondaryEasting"].to_numpy(dtype=float)
+                    - d["PrimaryEasting"].to_numpy(dtype=float)
+            )
+            p12y = (
+                    d["SecondaryNorthing"].to_numpy(dtype=float)
+                    - d["PrimaryNorthing"].to_numpy(dtype=float)
+            )
+            range_primary_to_secondary = np.sqrt(p12x ** 2 + p12y ** 2)
+
+            # choose smaller distance to preplot
+            range_to_preplot = np.where(radial1 <= radial2, radial1, radial2)
+
+            source = ColumnDataSource(
+                data=dict(
+                    Station=d["Station"].to_numpy(),
+                    Node=d["Node"].fillna("").astype(str).to_numpy(),
+                    ROV=d["ROV"].fillna("").astype(str).to_numpy(),
+                    Date=d["TimeStamp"].fillna("").astype(str).to_numpy(),
+                    PrimaryElevation=d["PrimaryElevation"].to_numpy(dtype=float),
+                    SecondaryElevation=d["SecondaryElevation"].to_numpy(dtype=float),
+                    il1=il1,
+                    il2=il2,
+                    xl1=xl1,
+                    xl2=xl2,
+                    radial1=radial1,
+                    radial2=radial2,
+                    Rangeprimarytosecondary=range_primary_to_secondary,
+                    RangetoPrePlot=range_to_preplot,
+                )
+            )
+
+            primary_marker = "circle"
+            secondary_marker = "square"
+            marker_size = 8
+
+            x_min = float(d["Station"].min())
+            x_max = float(d["Station"].max())
+            if x_min == x_max:
+                x_min -= 1
+                x_max += 1
+
+            shared_x_range = Range1d(x_min, x_max)
+
+            common_kwargs = dict(
+                x_axis_label="STATION",
+                toolbar_location="above",
+                sizing_mode="stretch_both",
+                width_policy="max",
+                height_policy="max",
+                min_height=230,
+                x_range=shared_x_range,
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+
+            il_offset = figure(
+                title=f"In-Line Offsets (m), REC.LINE: {line}",
+                y_axis_label="IN-LINE OFFSET",
+                **common_kwargs,
+            )
+            xl_offset = figure(
+                title=f"X-Line Offsets (m), REC.LINE: {line}",
+                y_axis_label="CROSS-LINE OFFSET",
+                **common_kwargs,
+            )
+            radial_offset = figure(
+                title=f"Radial Offsets (m), REC.LINE: {line}",
+                y_axis_label="RADIAL OFFSET",
+                **common_kwargs,
+            )
+
+            # In-Line
+            il_point_primary = il_offset.scatter(
+                x="Station",
+                y="il1",
+                source=source,
+                marker=primary_marker,
+                size=marker_size,
+                color="red",
+                fill_color="red",
+                line_width=1.5,
+                legend_label="Primary",
+            )
+            il_line_primary = il_offset.line(
+                x="Station",
+                y="il1",
+                source=source,
+                line_width=2,
+                color="red",
+                legend_label="Primary",
+            )
+            il_point_secondary = il_offset.scatter(
+                x="Station",
+                y="il2",
+                source=source,
+                marker=secondary_marker,
+                size=marker_size,
+                color="blue",
+                fill_color="blue",
+                line_width=1.5,
+                legend_label="Secondary",
+            )
+            il_line_secondary = il_offset.line(
+                x="Station",
+                y="il2",
+                source=source,
+                line_width=2,
+                color="blue",
+                legend_label="Secondary",
+            )
+
+            # X-Line
+            xl_point_primary = xl_offset.scatter(
+                x="Station",
+                y="xl1",
+                source=source,
+                marker=primary_marker,
+                size=marker_size,
+                color="red",
+                fill_color="red",
+                line_width=1.5,
+                legend_label="Primary",
+            )
+            xl_line_primary = xl_offset.line(
+                x="Station",
+                y="xl1",
+                source=source,
+                line_width=2,
+                color="red",
+                legend_label="Primary",
+            )
+            xl_point_secondary = xl_offset.scatter(
+                x="Station",
+                y="xl2",
+                source=source,
+                marker=secondary_marker,
+                size=marker_size,
+                color="blue",
+                fill_color="blue",
+                line_width=1.5,
+                legend_label="Secondary",
+            )
+            xl_line_secondary = xl_offset.line(
+                x="Station",
+                y="xl2",
+                source=source,
+                line_width=2,
+                color="blue",
+                legend_label="Secondary",
+            )
+
+            # Radial
+            rad_point_primary = radial_offset.scatter(
+                x="Station",
+                y="radial1",
+                source=source,
+                marker=primary_marker,
+                size=marker_size,
+                color="red",
+                fill_color="red",
+                line_width=1.5,
+                legend_label="Primary",
+            )
+            rad_line_primary = radial_offset.line(
+                x="Station",
+                y="radial1",
+                source=source,
+                line_width=2,
+                color="red",
+                legend_label="Primary",
+            )
+            rad_point_secondary = radial_offset.scatter(
+                x="Station",
+                y="radial2",
+                source=source,
+                marker=secondary_marker,
+                size=marker_size,
+                color="blue",
+                fill_color="blue",
+                line_width=1.5,
+                legend_label="Secondary",
+            )
+            rad_line_secondary = radial_offset.line(
+                x="Station",
+                y="radial2",
+                source=source,
+                line_width=2,
+                color="blue",
+                legend_label="Secondary",
+            )
+
+            tooltips = [
+                ("Station", "@Station"),
+                ("Node", "@Node"),
+                ("WD Prim.", "@PrimaryElevation{0.0}"),
+                ("WD Sec.", "@SecondaryElevation{0.0}"),
+                ("ROV", "@ROV"),
+                ("IL-Offset Prim.", "@il1{0.00}"),
+                ("IL-Offset Sec.", "@il2{0.00}"),
+                ("XL-Offset Prim.", "@xl1{0.00}"),
+                ("XL-Offset Sec.", "@xl2{0.00}"),
+                ("Radial Off. Prim.", "@radial1{0.00}"),
+                ("Radial Off. Sec.", "@radial2{0.00}"),
+                ("Range Prim. to Sec.", "@Rangeprimarytosecondary{0.00}"),
+                ("Range to Preplot", "@RangetoPrePlot{0.00}"),
+                ("Dep. date", "@Date"),
+            ]
+
+            hover = HoverTool(
+                tooltips=tooltips,
+                renderers=[
+                    il_point_primary,
+                    il_point_secondary,
+                    xl_point_primary,
+                    xl_point_secondary,
+                    rad_point_primary,
+                    rad_point_secondary,
+                ],
+            )
+
+            il_offset.add_tools(hover)
+            xl_offset.add_tools(hover)
+            radial_offset.add_tools(hover)
+
+            il_offset.legend.visible = False
+            xl_offset.legend.visible = False
+            radial_offset.legend.visible = False
+
+            combined_legend = Legend(
+                items=[
+                    LegendItem(
+                        label="Primary",
+                        renderers=[
+                            il_point_primary,
+                            il_line_primary,
+                            xl_point_primary,
+                            xl_line_primary,
+                            rad_point_primary,
+                            rad_line_primary,
+                        ],
+                    ),
+                    LegendItem(
+                        label="Secondary",
+                        renderers=[
+                            il_point_secondary,
+                            il_line_secondary,
+                            xl_point_secondary,
+                            xl_line_secondary,
+                            rad_point_secondary,
+                            rad_line_secondary,
+                        ],
+                    ),
+                ]
+            )
+            combined_legend.orientation = "horizontal"
+            combined_legend.click_policy = "hide"
+
+            il_offset.add_layout(combined_legend, "above")
+
+            layout = gridplot(
+                [[il_offset], [xl_offset], [radial_offset]],
+                sizing_mode="stretch_both",
+                merge_tools=True,
+                toolbar_location="above",
+            )
+
+            if is_show:
+                show(layout)
+                return None
+
+            if json_return:
+                return json_item(layout)
+
+            return layout
+
+        except Exception as e:
+            return self._error_layout(
+                title="Deployment vs Preplot",
+                message="Failed to build plot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+    def graph_recover_time(
+            self,
+            df,
+            line,
+            is_deploy=False,
+            is_show=False,
+            json_return=False,
+    ):
+        """
+        Plot deployment/recovery time vs station and time difference.
+        """
+
+        try:
+
+            if df is None or df.empty:
+                return self._error_layout(
+                    title="Deployment / Recovery Time",
+                    message=f"No DSR data for line {line}",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            d = df.copy()
+
+            if is_deploy:
+
+                title = "DEPLOYMENT TIME vs NODE POSITION"
+                y_title = "DEPLOYMENT TIME"
+                line_title = "Deployment Time"
+
+                required_cols = ["Station", "TimeStamp", "Date", "ROV"]
+
+                missing = [c for c in required_cols if c not in d.columns]
+                if missing:
+                    return self._error_layout(
+                        title="Deployment / Recovery Time",
+                        message="Missing required columns.",
+                        details=", ".join(missing),
+                        level="error",
+                        is_show=is_show,
+                        json_return=json_return,
+                    )
+
+                d["PlotTime"] = pd.to_datetime(d["TimeStamp"], errors="coerce")
+                rov_col = "ROV"
+                date_col = "Date"
+
+            else:
+
+                title = "RETRIEVE TIME vs NODE POSITION"
+                y_title = "RETRIEVE TIME"
+                line_title = "Pick Up Time"
+
+                required_cols = ["Station", "TimeStamp1", "Date1", "ROV1"]
+
+                missing = [c for c in required_cols if c not in d.columns]
+                if missing:
+                    return self._error_layout(
+                        title="Deployment / Recovery Time",
+                        message="Missing required columns.",
+                        details=", ".join(missing),
+                        level="error",
+                        is_show=is_show,
+                        json_return=json_return,
+                    )
+
+                d = d[(d["ROV1"].notna()) & (d["ROV1"].astype(str).str.strip() != "")]
+                d["PlotTime"] = pd.to_datetime(d["TimeStamp1"], errors="coerce")
+
+                rov_col = "ROV1"
+                date_col = "Date1"
+
+            d["Station"] = pd.to_numeric(d["Station"], errors="coerce")
+            d = d.dropna(subset=["Station", "PlotTime"]).sort_values("Station")
+
+            if d.empty:
+                return self._error_layout(
+                    title="Deployment / Recovery Time",
+                    message=f"No valid timestamps for line {line}",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            d["TimeDiff"] = d["PlotTime"].diff()
+            d["Hours"] = d["TimeDiff"].dt.total_seconds() / 3600.0
+
+            stations = np.sort(d["Station"].dropna().unique())
+
+            if len(stations) > 1:
+                diffs = np.diff(stations)
+                diffs = diffs[diffs > 0]
+                width = float(diffs.min()) * 0.8 if len(diffs) else 1.0
+            else:
+                width = 1.0
+
+            max_hours = pd.to_numeric(d["Hours"], errors="coerce").max()
+
+            if pd.isna(max_hours) or max_hours <= 0:
+                max_hours = 1.0
+
+            color_mapper = LinearColorMapper(
+                palette="Turbo256",
+                low=0,
+                high=float(max_hours),
+            )
+
+            source = ColumnDataSource(d)
+
+            x_min = float(d["Station"].min())
+            x_max = float(d["Station"].max())
+
+            if x_min == x_max:
+                x_min -= 1
+                x_max += 1
+
+            line_map = figure(
+                title=f"{title}: {line}",
+                x_axis_label="Station",
+                y_axis_label=y_title,
+                toolbar_location="above",
+                sizing_mode="stretch_both",
+                width_policy="max",
+                height_policy="max",
+                min_height=250,
+                y_axis_type="datetime",
+                x_range=(x_min, x_max),
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+
+            diff_graph = figure(
+                title="Time Difference",
+                x_axis_label="Station",
+                y_axis_label="Hours",
+                toolbar_location="above",
+                sizing_mode="stretch_both",
+                width_policy="max",
+                height_policy="max",
+                min_height=150,
+                max_height=220,
+                x_range=line_map.x_range,
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+
+            scatter = line_map.scatter(
+                x="Station",
+                y="PlotTime",
+                source=source,
+                color="red",
+                size=6,
+                legend_label=line_title,
+            )
+
+            line_map.line(
+                x="Station",
+                y="PlotTime",
+                source=source,
+                color="red",
+                legend_label=line_title,
+            )
+
+            diff_bar = diff_graph.vbar(
+                x="Station",
+                top="Hours",
+                source=source,
+                width=width,
+                fill_color={"field": "Hours", "transform": color_mapper},
+                line_color=None,
+            )
+
+            TOOLTIPS = [
+                ("Station", "@Station"),
+                ("TimeStamp", f"@{date_col}"),
+                ("ROV", f"@{rov_col}"),
+            ]
+
+            TOOLTIPSD = [
+                ("Station", "@Station"),
+                ("TimeStamp", f"@{date_col}"),
+                ("ROV", f"@{rov_col}"),
+                ("Time Diff (h)", "@Hours{0.00}"),
+            ]
+
+            hover = HoverTool(tooltips=TOOLTIPS, renderers=[scatter])
+            hoverd = HoverTool(tooltips=TOOLTIPSD, renderers=[diff_bar])
+
+            line_map.add_tools(hover)
+            diff_graph.add_tools(hoverd)
+
+            diff_graph.yaxis.formatter = NumeralTickFormatter(format="0.0")
+
+            layout = column([line_map, diff_graph], sizing_mode="stretch_both")
+
+            if is_show:
+                show(layout)
+                return None
+
+            if json_return:
+                return json_item(layout)
+
+            return layout
+
+        except Exception as e:
+            return self._error_layout(
+                title="Deployment / Recovery Time",
+                message="Failed to build graph.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+    def get_bbox_config_for_line(self, df):
+        """
+        Detect BBox configuration for a line based on df.ROV values.
+
+        Returns
+        -------
+        dict | None
+            {
+                "config_id": int,
+                "rov1_name": str,
+                "rov2_name": str,
+                "vessel_name": str
+            }
+        """
+
+        if df is None or df.empty or "ROV" not in df.columns:
+            return None
+
+        rov_values = (
+            df["ROV"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .unique()
+            .tolist()
+        )
+
+        if not rov_values:
+            return None
+
+        sql = """
+        SELECT
+            ID,
+            rov1_name,
+            rov2_name,
+            Vessel_name
+        FROM BBox_Configs_List
+        """
+
+        try:
+            with self._connect() as conn:
+                cfg = pd.read_sql(sql, conn)
+        except Exception as e:
+            print("BBox config lookup error:", e)
+            return None
+
+        if cfg.empty:
+            return None
+
+        for r in cfg.itertuples():
+
+            if (
+                    r.rov1_name in rov_values
+                    or r.rov2_name in rov_values
+            ):
+                return {
+                    "config_id": r.ID,
+                    "rov1_name": r.rov1_name,
+                    "rov2_name": r.rov2_name,
+                    "vessel_name": r.Vessel_name,
+                }
+
+        return None
+
+    def plot_line_map(
+            self,
+            df,
+            bbdata,
+            cfg_row,
+            line,
+            is_shape_show=False,
+            isShow=False,
+            point_size=5,
+            rov_size=5,
+    ):
+        colors = Paired[10]
+
+        if df is None:
+            df = pd.DataFrame()
+        else:
+            df = df.copy()
+
+        if bbdata is None:
+            bbdata = pd.DataFrame()
+        else:
+            bbdata = bbdata.copy()
+
+        vessel_name = "Node Vessel"
+        rov1_name = "ROV1"
+        rov2_name = "ROV2"
+
+        if cfg_row is not None:
+            vessel_name = str(cfg_row.get("Vessel_name") or "Node Vessel")
+            rov1_name = str(cfg_row.get("rov1_name") or "ROV1")
+            rov2_name = str(cfg_row.get("rov2_name") or "ROV2")
+
+        line_map = figure(
+            title=f"Line Map. Line: {line}",
+            x_axis_label="Easting, m",
+            y_axis_label="Northing, m",
+            toolbar_location="above",
+            sizing_mode="stretch_both",
+            match_aspect=True,
+            width_policy="max",
+            height_policy="max",
+            min_height=100,
+        )
 
 
+
+        # -------------------------------------------------
+        # PREPLOT
+        # -------------------------------------------------
+        if len(df) > 0 and {"PreplotEasting", "PreplotNorthing"}.issubset(df.columns):
+            ppdata = df.loc[
+                pd.to_numeric(df["PreplotEasting"], errors="coerce").notna()
+                & pd.to_numeric(df["PreplotNorthing"], errors="coerce").notna()
+                ].copy()
+
+            if len(ppdata) > 0:
+                ppdata["PreplotEasting"] = pd.to_numeric(ppdata["PreplotEasting"], errors="coerce")
+                ppdata["PreplotNorthing"] = pd.to_numeric(ppdata["PreplotNorthing"], errors="coerce")
+                ppdata["PointLabel"] = ppdata["Station"].astype(str) if "Station" in ppdata.columns else ""
+
+                pp_source = ColumnDataSource(ppdata)
+
+                line_map.scatter(
+                    x="PreplotEasting",
+                    y="PreplotNorthing",
+                    source=pp_source,
+                    color="grey",
+                    size=point_size,
+                    legend_label="Preplot Stations",
+                )
+
+                line_map.circle(
+                    x="PreplotEasting",
+                    y="PreplotNorthing",
+                    source=pp_source,
+                    fill_color=None,
+                    line_color="green",
+                    radius=5,
+                    radius_units="data",
+                    legend_label="5m Radius",
+                )
+
+                line_map.text(
+                    x="PreplotEasting",
+                    y="PreplotNorthing",
+                    text="PointLabel",
+                    source=pp_source,
+                )
+
+                x_mean = ppdata["PreplotEasting"].mean()
+                y_mean = ppdata["PreplotNorthing"].mean()
+                if pd.notna(x_mean) and pd.notna(y_mean):
+                    line_map.x_range = Range1d(x_mean - 10000, x_mean + 10000)
+                    line_map.y_range = Range1d(y_mean - 10000, y_mean + 10000)
+
+        # -------------------------------------------------
+        # BLACKBOX
+        # -------------------------------------------------
+        if len(bbdata) > 0:
+            bb_numeric_cols = [
+                "VesselEasting", "VesselNorthing", "VesselHDG",
+                "ROV1_INS_Easting", "ROV1_INS_Northing",
+                "ROV1_USBL_Easting", "ROV1_USBL_Northing",
+                "ROV2_INS_Easting", "ROV2_INS_Northing",
+                "ROV2_USBL_Easting", "ROV2_USBL_Northing",
+            ]
+            for c in bb_numeric_cols:
+                if c in bbdata.columns:
+                    bbdata[c] = pd.to_numeric(bbdata[c], errors="coerce")
+
+            if {"VesselEasting", "VesselNorthing", "VesselHDG"}.issubset(bbdata.columns):
+                bb_track = bbdata.loc[
+                    bbdata["VesselEasting"].notna() & bbdata["VesselNorthing"].notna()
+                    ].copy()
+
+                if len(bb_track) > 0:
+                    bb_source = ColumnDataSource(bb_track)
+
+                    vessel_line = line_map.line(
+                        x="VesselEasting",
+                        y="VesselNorthing",
+                        source=bb_source,
+                        line_width=1,
+                        color=colors[0],
+                    )
+
+                    vessel_rect = Rect(
+                        x="VesselEasting",
+                        y="VesselNorthing",
+                        width=24,
+                        height=6,
+                        width_units="data",
+                        angle="VesselHDG",
+                        angle_units="deg",
+                        line_color="#3288bd",
+                        fill_color="white",
+                        line_width=3,
+                    )
+                    vessel_ray = Ray(
+                        x="VesselEasting",
+                        y="VesselNorthing",
+                        length=24,
+                        length_units="data",
+                        angle="VesselHDG",
+                        angle_units="deg",
+                        line_color="#3288bd",
+                        line_width=3,
+                    )
+
+                    rect_renderer = line_map.add_glyph(bb_source, vessel_rect)
+                    ray_renderer = line_map.add_glyph(bb_source, vessel_ray)
+
+                    if len(line_map.legend) == 0:
+                        legend = Legend(items=[
+                            LegendItem(label=f"{vessel_name} Track",
+                                       renderers=[vessel_line, rect_renderer, ray_renderer])
+                        ])
+                        line_map.add_layout(legend, "right")
+                    else:
+                        line_map.legend[0].items.append(
+                            LegendItem(label=f"{vessel_name} Track",
+                                       renderers=[vessel_line, rect_renderer, ray_renderer])
+                        )
+
+            if {"ROV1_INS_Easting", "ROV1_INS_Northing"}.issubset(bbdata.columns):
+                bb1_primary = bbdata.loc[
+                    (bbdata["ROV1_INS_Easting"] > 0) & (bbdata["ROV1_INS_Northing"] > 0)
+                    ].copy()
+                if len(bb1_primary) > 0:
+                    src = ColumnDataSource(bb1_primary)
+                    line_map.scatter(
+                        x="ROV1_INS_Easting",
+                        y="ROV1_INS_Northing",
+                        marker="triangle",
+                        size=rov_size,
+                        color=colors[2],
+                        legend_label=f"{rov1_name} (Primary)",
+                        source=src,
+                    )
+                    line_map.line(
+                        x="ROV1_INS_Easting",
+                        y="ROV1_INS_Northing",
+                        width=1,
+                        color=colors[2],
+                        legend_label=f"{rov1_name} (Primary)",
+                        source=src,
+                    )
+
+            if {"ROV1_USBL_Easting", "ROV1_USBL_Northing"}.issubset(bbdata.columns):
+                bb1_secondary = bbdata.loc[
+                    (bbdata["ROV1_USBL_Easting"] > 0) & (bbdata["ROV1_USBL_Northing"] > 0)
+                    ].copy()
+                if len(bb1_secondary) > 0:
+                    src = ColumnDataSource(bb1_secondary)
+                    line_map.scatter(
+                        x="ROV1_USBL_Easting",
+                        y="ROV1_USBL_Northing",
+                        marker="circle",
+                        size=rov_size,
+                        color=colors[4],
+                        legend_label=f"{rov1_name} (Secondary)",
+                        source=src,
+                    )
+                    line_map.line(
+                        x="ROV1_USBL_Easting",
+                        y="ROV1_USBL_Northing",
+                        width=1,
+                        color=colors[4],
+                        legend_label=f"{rov1_name} (Secondary)",
+                        source=src,
+                    )
+
+            if {"ROV2_INS_Easting", "ROV2_INS_Northing"}.issubset(bbdata.columns):
+                bb2_primary = bbdata.loc[
+                    (bbdata["ROV2_INS_Easting"] > 0) & (bbdata["ROV2_INS_Northing"] > 0)
+                    ].copy()
+                if len(bb2_primary) > 0:
+                    src = ColumnDataSource(bb2_primary)
+                    line_map.scatter(
+                        x="ROV2_INS_Easting",
+                        y="ROV2_INS_Northing",
+                        marker="circle",
+                        size=rov_size,
+                        color=colors[3],
+                        legend_label=f"{rov2_name} (Primary)",
+                        source=src,
+                    )
+                    line_map.line(
+                        x="ROV2_INS_Easting",
+                        y="ROV2_INS_Northing",
+                        width=1,
+                        color=colors[3],
+                        legend_label=f"{rov2_name} (Primary)",
+                        source=src,
+                    )
+
+            if {"ROV2_USBL_Easting", "ROV2_USBL_Northing"}.issubset(bbdata.columns):
+                bb2_secondary = bbdata.loc[
+                    (bbdata["ROV2_USBL_Easting"] > 0) & (bbdata["ROV2_USBL_Northing"] > 0)
+                    ].copy()
+                if len(bb2_secondary) > 0:
+                    src = ColumnDataSource(bb2_secondary)
+                    line_map.scatter(
+                        x="ROV2_USBL_Easting",
+                        y="ROV2_USBL_Northing",
+                        marker="circle",
+                        size=rov_size,
+                        color=colors[5],
+                        legend_label=f"{rov2_name} (Secondary)",
+                        source=src,
+                    )
+                    line_map.line(
+                        x="ROV2_USBL_Easting",
+                        y="ROV2_USBL_Northing",
+                        width=1,
+                        color=colors[5],
+                        legend_label=f"{rov2_name} (Secondary)",
+                        source=src,
+                    )
+
+        # -------------------------------------------------
+        # DSR
+        # -------------------------------------------------
+        if len(df) > 0:
+            if "Station" not in df.columns:
+                df["Station"] = ""
+            if "ROV" not in df.columns:
+                df["ROV"] = ""
+            if "TimeStamp" not in df.columns:
+                df["TimeStamp"] = ""
+            if "Comments" not in df.columns:
+                df["Comments"] = ""
+
+            dsr_source = ColumnDataSource(df)
+
+            if {"PrimaryEasting", "PrimaryNorthing"}.issubset(df.columns):
+                dsr_dep_points = line_map.scatter(
+                    x="PrimaryEasting",
+                    y="PrimaryNorthing",
+                    marker="square",
+                    size=point_size,
+                    fill_color=colors[-1],
+                    color=colors[-1],
+                    legend_label="DSR Deployment",
+                    source=dsr_source,
+                )
+
+                line_map.line(
+                    x="PrimaryEasting",
+                    y="PrimaryNorthing",
+                    width=1,
+                    color=colors[-1],
+                    legend_label="DSR Deployment",
+                    source=dsr_source,
+                    line_dash="dashed",
+                )
+
+                line_map.text(
+                    x="PrimaryEasting",
+                    y="PrimaryNorthing",
+                    text="Station",
+                    source=dsr_source,
+                    color=colors[-2],
+                    text_font_size="18pt",
+                    text_align="right",
+                )
+
+                line_map.text(
+                    x="PrimaryEasting",
+                    y="PrimaryNorthing",
+                    text="Comments",
+                    source=dsr_source,
+                    color="red",
+                    text_font_size="10pt",
+                    text_align="left",
+                )
+
+                TOOLTIPS = [
+                    ("Station", "@Station"),
+                    ("Node", "@Node"),
+                    ("WD Prim.", "@PrimaryElevation{3.1}"),
+                    ("WD Sec.", "@SecondaryElevation{3.1}"),
+                    ("ROV", "@ROV"),
+                    ("Range Prim. 2 Sec.", "@Rangeprimarytosecondary{2.1}"),
+                    ("Range 2 Prep.", "@RangetoPrePlot{2.1}"),
+                    ("Dep date", "@TimeStamp"),
+                ]
+                line_map.add_tools(HoverTool(tooltips=TOOLTIPS, renderers=[dsr_dep_points]))
+
+        # -------------------------------------------------
+        # MULTISELECT
+        # -------------------------------------------------
+        options = []
+        lock_code = []
+
+        if len(df) > 0 and {"Station", "PrimaryEasting", "PrimaryNorthing"}.issubset(df.columns):
+            for p in df.itertuples():
+                try:
+                    station_str = str(p.Station)
+                    x0 = float(p.PrimaryEasting) - 20
+                    x1 = float(p.PrimaryEasting) + 20
+                    y0 = float(p.PrimaryNorthing) - 20
+                    y1 = float(p.PrimaryNorthing) + 20
+                    options.append(station_str)
+                    lock_code.append(
+                        f"'{station_str}': {{x_range: [{x0}, {x1}], y_range: [{y0}, {y1}]}}"
+                    )
+                except Exception:
+                    pass
+
+        multiselect = MultiSelect(
+            title="Select Station",
+            options=options,
+            value=[],
+            size=20,
+            width=120,
+            height=200,
+            sizing_mode="stretch_height",
+        )
+
+        code1 = f"""
+            const locations = {{{", ".join(lock_code)}}};
+            const selected_locations = multiselect.value;
+
+            if (selected_locations.length > 0) {{
+                const selected_location = selected_locations[0];
+                const ranges = locations[selected_location];
+                if (ranges) {{
+                    plot.x_range.start = ranges.x_range[0];
+                    plot.x_range.end = ranges.x_range[1];
+                    plot.y_range.start = ranges.y_range[0];
+                    plot.y_range.end = ranges.y_range[1];
+                    plot.change.emit();
+                }}
+            }}
+        """
+
+        js_callback = CustomJS(args=dict(plot=line_map, multiselect=multiselect), code=code1)
+        multiselect.js_on_change("value", js_callback)
+
+        button = Button(label="Hide Legend", button_type="success")
+        if len(line_map.legend) > 0:
+            callback = CustomJS(
+                args=dict(plot=line_map, button=button, legend=line_map.legend[0]),
+                code="""
+                    if (legend.visible) {
+                        legend.visible = false;
+                        button.label = 'Show Legend';
+                    } else {
+                        legend.visible = true;
+                        button.label = 'Hide Legend';
+                    }
+                """,
+            )
+            button.js_on_click(callback)
+
+        line_map.yaxis.formatter = PrintfTickFormatter(format="%d")
+        line_map.xaxis.formatter = PrintfTickFormatter(format="%d")
+
+        if len(line_map.legend) > 0:
+            line_map.legend.click_policy = "hide"
+
+        controls = column([button, multiselect], sizing_mode="stretch_height")
+        layout = row([line_map, controls], sizing_mode="stretch_both")
+
+        if isShow:
+            #html = file_html(layout, CDN)
+            #with open(f"{line}_view.html", "w", encoding="utf-8") as f:
+            #   f.write(html)
+            show(layout)
+            return
+        return layout
 
 
 

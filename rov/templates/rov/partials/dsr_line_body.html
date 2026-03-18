@@ -79,13 +79,14 @@
 
   </td>
 
-  <td>{{ r.PlannedPoints|default_if_none:"" }}</td>
+
   <td class=" {% if r.Stations == r.PlannedPoints %}text-success fw-bold{% endif %}
               {% if r.Stations < r.PlannedPoints %}bg-warning text-white fw-bold{% endif %}
   ">{{ r.Stations }}</td>
-  <td>{{ r.Nodes }}</td>
-  <td class="text-primary">{{ r.MinStation }}</td>
-  <td class="text-danger">{{ r.MaxStation }}</td>
+    <td class="fw-bold text-nowrap {% if r.MaxRadOffset > max_radial_offset %}text-danger{% elif r.MaxRadOffset  > radial80%}text-warning{% else %}text-success{% endif %}">
+         {% if r.MaxRadOffset > max_radial_offset %}<i class="fas fa-triangle-exclamation me-1"></i> {% endif %}{{ r.MaxRadOffset|floatformat:1 }}
+    </td>
+    <td>{{ r.MaxRangePrimToSec|floatformat:1 }}</td>
   <td class ="
          {% if r.Primary_e95 > warning_sma and r.Primary_e95 <= max_sma   %}bg-warning text-white
          {% elif r.Primary_e95 > max_sma %}bg-danger text-white{% else %}
@@ -102,14 +103,13 @@
             {% endif %}">
    {{ r.Primary_n95|floatformat:2 }}</td>
   <td>{{ r.DeployedCount }}</td>
+  <td {% if r.SMCount == r.Stations %}class="text-success fw-bold"{% endif %}
+      {% if r.SMCount != r.Stations and r.SMCount != 0 %}class="bg-warning text-white fw-bold"{% endif %}
+      {% if r.SMCount == 0 and r.Stations > 0 %}class="bg-danger fw-bold"{% endif %} >
+     {{ r.SMCount }}
+  </td>
   <td>{{ r.RetrievedCount }}</td>
- <td {% if r.SMCount == r.Stations %}class="text-success fw-bold"{% endif %}
-     {% if r.SMCount != r.Stations and r.SMCount != 0 %}class="bg-warning text-white fw-bold"{% endif %}
-     {% if r.SMCount == 0 and r.Stations > 0 %}class="bg-danger fw-bold"{% endif %}
- >
 
-
-    {{ r.SMCount }}</td>
 
   <td {% if r.SMRCount == r.RetrievedCount %}class="text-success fw-bold"{% else %}{% endif %}>
       {{ r.SMRCount }}</td>
@@ -126,7 +126,10 @@
 
   <td>{{ r.RetrievedPct|floatformat:1 }}</td>
   <td>{{ r.ProcessedPct|floatformat:1 }}</td>
-
+  <td>{{ r.PlannedPoints|default_if_none:"" }}</td>
+   <td>{{ r.Nodes }}</td>
+  <td class="text-primary">{{ r.MinStation }}</td>
+  <td class="text-danger">{{ r.MaxStation }}</td>
   <td class="dsr-datetime bg-primary text-white">{{ r.FirstDeployTime|default_if_none:"" }}</td>
   <td class="dsr-datetime bg-success text-white">{{ r.LastDeployTime|default_if_none:"" }}</td>
   <td>{{ r.DeploymentHours|floatformat:2 }}</td>
@@ -135,31 +138,31 @@
   <td>{{ r.RetrievalHours|floatformat:2 }}</td>
   <td>{{ r.TotalOperationHours|floatformat:2 }}</td>
 
-  <td>{{ r.AvgDeltaE|floatformat:2 }}</td>
-  <td>{{ r.MinDeltaE|floatformat:2 }}</td>
-  <td>{{ r.MaxDeltaE|floatformat:2 }}</td>
-  <td>{{ r.AvgDeltaN|floatformat:2 }}</td>
-  <td>{{ r.MinDeltaN|floatformat:2 }}</td>
-  <td>{{ r.MaxDeltaN|floatformat:2 }}</td>
-  <td>{{ r.AvgDeltaE1|floatformat:2 }}</td>
-  <td>{{ r.MinDeltaE1|floatformat:2 }}</td>
-  <td>{{ r.MaxDeltaE1|floatformat:2 }}</td>
-  <td>{{ r.AvgDeltaN1|floatformat:2 }}</td>
-  <td>{{ r.MinDeltaN1|floatformat:2 }}</td>
-  <td>{{ r.MaxDeltaN1|floatformat:2 }}</td>
+  <td>{{ r.AvgDeltaE|floatformat:1 }}</td>
+  <td>{{ r.MinDeltaE|floatformat:1 }}</td>
+  <td>{{ r.MaxDeltaE|floatformat:1 }}</td>
+  <td>{{ r.AvgDeltaN|floatformat:1 }}</td>
+  <td>{{ r.MinDeltaN|floatformat:1 }}</td>
+  <td>{{ r.MaxDeltaN|floatformat:1 }}</td>
+  <td>{{ r.AvgDeltaE1|floatformat:1 }}</td>
+  <td>{{ r.MinDeltaE1|floatformat:1 }}</td>
+  <td>{{ r.MaxDeltaE1|floatformat:1 }}</td>
+  <td>{{ r.AvgDeltaN1|floatformat:1 }}</td>
+  <td>{{ r.MinDeltaN1|floatformat:1 }}</td>
+  <td>{{ r.MaxDeltaN1|floatformat:1 }}</td>
 
-  <td>{{ r.AvgSigma|floatformat:3 }}</td>
-  <td>{{ r.MinSigma|floatformat:3 }}</td>
-  <td>{{ r.MaxSigma|floatformat:3 }}</td>
-  <td>{{ r.AvgSigma1|floatformat:3 }}</td>
-  <td>{{ r.MinSigma1|floatformat:3 }}</td>
-  <td>{{ r.MaxSigma1|floatformat:3 }}</td>
-  <td>{{ r.AvgSigma2|floatformat:3 }}</td>
-  <td>{{ r.MinSigma2|floatformat:3 }}</td>
-  <td>{{ r.MaxSigma2|floatformat:3 }}</td>
-  <td>{{ r.AvgSigma3|floatformat:3 }}</td>
-  <td>{{ r.MinSigma3|floatformat:3 }}</td>
-  <td>{{ r.MaxSigma3|floatformat:3 }}</td>
+  <td>{{ r.AvgSigma|floatformat:1 }}</td>
+  <td>{{ r.MinSigma|floatformat:1 }}</td>
+  <td>{{ r.MaxSigma|floatformat:1 }}</td>
+  <td>{{ r.AvgSigma1|floatformat:1 }}</td>
+  <td>{{ r.MinSigma1|floatformat:1 }}</td>
+  <td>{{ r.MaxSigma1|floatformat:1 }}</td>
+  <td>{{ r.AvgSigma2|floatformat:1 }}</td>
+  <td>{{ r.MinSigma2|floatformat:1 }}</td>
+  <td>{{ r.MaxSigma2|floatformat:1 }}</td>
+  <td>{{ r.AvgSigma3|floatformat:1 }}</td>
+  <td>{{ r.MinSigma3|floatformat:1 }}</td>
+  <td>{{ r.MaxSigma3|floatformat:1 }}</td>
 </tr>
 {% empty %}
 <tr><td colspan="100%" class="text-center text-muted">No data</td></tr>

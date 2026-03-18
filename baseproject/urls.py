@@ -2,6 +2,8 @@
 from django.urls import path
 
 from .views import *
+from .views_logs import log_viewer, export_logs_csv, export_logs_txt
+
 urlpatterns = [
     path("", base_project_settings_view, name="base_project_settings"),
     path("upload/source-sps/", upload_source_sps, name="upload_source_sps"),
@@ -38,5 +40,8 @@ urlpatterns = [
     path("api/projects/<int:project_id>/fleet/add/", api_project_fleet_add_from_django, name="api_project_fleet_add_from_django"),
     path("api/projects/<int:project_id>/fleet/remove/", api_project_fleet_remove, name="api_project_fleet_remove"),
     path("api/fleet/django/import-csv/", api_import_master_fleet_csv, name="api_import_master_fleet_csv"),
+    path("logs/", log_viewer, name="log_viewer"),
+    path("logs/export/csv/", export_logs_csv, name="export_logs_csv"),
+    path("logs/export/txt/", export_logs_txt, name="export_logs_txt"),
 
 ]

@@ -58,11 +58,30 @@
             <div class="card shadow-sm">
                 <div class="card-body">
                     <div>
-                        <button type="button"
-                                class="btn btn-primary"
-                                id="shot-table-filter-btn">
-                            <i class="fas fa-filter"></i>
-                        </button>
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                                 <button
+                                     type="button"
+                                     class="btn btn-outline-primary btn-sm"
+                                     data-bs-toggle="modal"
+                                     data-bs-target="#shotSummaryFilterModal">
+                                   <i class="fas fa-filter me-1"></i> Filter
+                                 </button>
+
+                                 <button
+                                     type="button"
+                                     class="btn btn-outline-secondary btn-sm"
+                                     id="shot-summary-clear-filters">
+                                   <i class="fas fa-eraser me-1"></i> Clear
+                                 </button>
+
+                                 <span class="small text-muted" id="shot-summary-filter-status">
+                                   Showing {{ rows_count|default:0 }} rows
+                                 </span>
+                         </div>
+                       <button type="button" class="btn btn-outline-primary btn-sm"
+        data-bs-toggle="modal" data-bs-target="#shotFilterModal">
+  <i class="fas fa-filter me-1"></i> Filter
+</button>
                         <button type="button"
                                 class="btn btn-sm btn-outline-primary"
                                 data-bs-toggle="modal"
@@ -83,6 +102,7 @@
             <div class="card shadow-sm">
                 <div class="card-body">
                     <h5>Shot Data</h5>
+
                     <button type="button"
                              class="btn btn-outline-info btn-sm position-relative"
                              data-bs-toggle="modal"

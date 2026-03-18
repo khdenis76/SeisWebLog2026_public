@@ -2866,3 +2866,444 @@ class SourceData:
         finally:
             if own_conn:
                 conn.close()
+
+    def create_v_shot_linesummary_view(self, conn=None) -> None:
+        """
+        Rebuild V_SHOT_LineSummary view.
+
+        Adds:
+            - sequence_vessel_assignment.purpose
+            - sequence_vessel_assignment.vessel_id
+            - project_fleet.vessel_name
+
+        Join logic:
+            a.seq BETWEEN sva.seq_first AND sva.seq_last
+
+        Notes:
+            - If sequence_vessel_assignment has overlapping seq ranges,
+              the view can return duplicate rows for the same shot line.
+            - In SQLite, unicode(text) uses only the first character.
+              Kept as-is because it matches your existing logic.
+        """
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+
+            cur.executescript("""
+            DROP VIEW IF EXISTS V_SHOT_LineSummary;
+
+            CREATE VIEW V_SHOT_LineSummary AS
+            WITH
+            pg AS (
+                SELECT
+                    UPPER(COALESCE(production_code,''))      AS prod_codes,
+                    UPPER(COALESCE(non_production_code,''))  AS nonprod_codes,
+                    UPPER(COALESCE(kill_code,''))            AS kill_codes
+                FROM project_geometry
+                LIMIT 1
+            ),
+
+            -- ===============================
+            -- SHOT base
+            -- ===============================
+            shot_base AS (
+                SELECT
+                    s.nav_line_code,
+                    s.nav_line,
+                    s.attempt,
+                    s.seq,
+
+                    s.shot_station,
+                    s.shot_index,
+                    s.shot_status,
+
+                    s.post_point_code,
+                    s.fire_code,
+
+                    s.gun_depth,
+                    s.water_depth,
+
+                    s.shot_x,
+                    s.shot_y,
+
+                    s.shot_day,
+                    s.shot_hour,
+                    s.shot_minute,
+                    s.shot_second,
+                    s.shot_microsecond,
+                    s.shot_year,
+
+                    s.array_id,
+                    s.source_id,
+                    s.nav_station,
+                    s.shot_group_id,
+                    s.elevation,
+
+                    CASE WHEN INSTR(pg.prod_codes,    UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_prod,
+                    CASE WHEN INSTR(pg.nonprod_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_nonprod,
+                    CASE WHEN INSTR(pg.kill_codes,    UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_kill
+                FROM SHOT_TABLE s
+                CROSS JOIN pg
+                WHERE s.nav_line_code IS NOT NULL
+                  AND TRIM(s.nav_line_code) <> ''
+            ),
+
+            -- ===============================
+            -- SHOT aggregation
+            -- ===============================
+            shot_agg AS (
+                SELECT
+                    nav_line_code,
+
+                    MAX(nav_line) AS nav_line,
+                    MAX(attempt)  AS attempt,
+                    MAX(seq)      AS seq,
+
+                    COUNT(*) AS ShotCount,
+
+                    SUM(is_prod)    AS ProdShots,
+                    SUM(is_nonprod) AS NonProdShots,
+                    SUM(is_kill)    AS KillShots,
+
+                    MIN(nav_station) AS FSP,
+                    MAX(nav_station) AS LSP,
+                    MIN(CASE WHEN is_prod=1 THEN nav_station END) AS FGSP,
+                    MAX(CASE WHEN is_prod=1 THEN nav_station END) AS LGSP,
+
+                    -- SHOT sums / checksums
+                    SUM(shot_station)     AS Sum_shot_station,
+                    SUM(shot_index)       AS Sum_shot_index,
+                    SUM(shot_status)      AS Sum_shot_status,
+
+                    SUM(attempt)          AS Sum_attempt,
+                    SUM(seq)              AS Sum_seq,
+
+                    SUM(unicode(post_point_code)) AS Sum_post_point_code,
+                    SUM(unicode(fire_code))       AS Sum_fire_code,
+
+                    SUM(gun_depth)        AS Sum_gun_depth,
+                    SUM(water_depth)      AS Sum_water_depth,
+
+                    SUM(shot_x)           AS Sum_shot_x,
+                    SUM(shot_y)           AS Sum_shot_y,
+
+                    SUM(shot_day)         AS Sum_shot_day,
+                    SUM(shot_hour)        AS Sum_shot_hour,
+                    SUM(shot_minute)      AS Sum_shot_minute,
+                    SUM(shot_second)      AS Sum_shot_second,
+                    SUM(shot_microsecond) AS Sum_shot_microsecond,
+                    SUM(shot_year)        AS Sum_shot_year,
+
+                    SUM(unicode(array_id)) AS Sum_array_id,
+
+                    SUM(source_id)     AS Sum_source_id,
+                    SUM(nav_station)   AS Sum_nav_station,
+                    SUM(shot_group_id) AS Sum_shot_group_id,
+                    SUM(elevation)     AS Sum_elevation
+
+                FROM shot_base
+                GROUP BY nav_line_code
+            ),
+
+            -- ===============================
+            -- SPSolution aggregation
+            -- ===============================
+            sps_agg AS (
+                SELECT
+                    SailLine,
+                    Line,
+                    Attempt,
+                    Seq,
+
+                    SUM(Line)    AS sps_Sum_Line,
+                    SUM(Attempt) AS sps_Sum_Attempt,
+                    SUM(Seq)     AS sps_Sum_Seq,
+                    SUM(Point)   AS sps_Sum_Point,
+
+                    SUM(unicode(PointCode)) AS sps_Sum_PointCode,
+                    SUM(unicode(FireCode))  AS sps_Sum_FireCode,
+                    SUM(unicode(ArrayCode)) AS sps_Sum_ArrayCode,
+
+                    SUM(Static)     AS sps_Sum_Static,
+                    SUM(PointDepth) AS sps_Sum_PointDepth,
+                    SUM(Datum)      AS sps_Sum_Datum,
+                    SUM(Uphole)     AS sps_Sum_Uphole,
+                    SUM(WaterDepth) AS sps_Sum_WaterDepth,
+
+                    SUM(Easting)   AS sps_Sum_Easting,
+                    SUM(Northing)  AS sps_Sum_Northing,
+                    SUM(Elevation) AS sps_Sum_Elevation,
+
+                    SUM(JDay)        AS sps_Sum_JDay,
+                    SUM(Hour)        AS sps_Sum_Hour,
+                    SUM(Minute)      AS sps_Sum_Minute,
+                    SUM(Second)      AS sps_Sum_Second,
+                    SUM(Microsecond) AS sps_Sum_Microsecond
+
+                FROM SPSolution
+                GROUP BY SailLine, Line, Attempt, Seq
+            )
+
+            -- ===============================
+            -- FINAL SELECT
+            -- ===============================
+            SELECT
+                a.nav_line_code,
+                a.nav_line,
+                a.attempt,
+                a.seq,
+
+                sva.purpose,
+                sva.vessel_id,
+                pf.vessel_name,
+
+                CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM SLSolution sl
+                    WHERE sl.SailLine = a.nav_line_code
+                ) THEN 1 ELSE 0 END AS IsInSLSolution,
+
+                a.ShotCount,
+                a.ProdShots,
+                a.NonProdShots,
+                a.KillShots,
+
+                a.FSP,
+                a.LSP,
+                a.FGSP,
+                a.LGSP,
+
+                -- SHOT sums
+                a.Sum_shot_station,
+                a.Sum_shot_index,
+                a.Sum_shot_status,
+                a.Sum_attempt,
+                a.Sum_seq,
+                a.Sum_post_point_code,
+                a.Sum_fire_code,
+                a.Sum_gun_depth,
+                a.Sum_water_depth,
+                a.Sum_shot_x,
+                a.Sum_shot_y,
+                a.Sum_shot_day,
+                a.Sum_shot_hour,
+                a.Sum_shot_minute,
+                a.Sum_shot_second,
+                a.Sum_shot_microsecond,
+                a.Sum_shot_year,
+                a.Sum_array_id,
+                a.Sum_source_id,
+                a.Sum_nav_station,
+                a.Sum_shot_group_id,
+                a.Sum_elevation,
+
+                -- SPS sums
+                s.SailLine AS sps_SailLine,
+                s.sps_Sum_Line,
+                s.sps_Sum_Attempt,
+                s.sps_Sum_Seq,
+                s.sps_Sum_Point,
+                s.sps_Sum_PointCode,
+                s.sps_Sum_FireCode,
+                s.sps_Sum_ArrayCode,
+                s.sps_Sum_Static,
+                s.sps_Sum_PointDepth,
+                s.sps_Sum_Datum,
+                s.sps_Sum_Uphole,
+                s.sps_Sum_WaterDepth,
+                s.sps_Sum_Easting,
+                s.sps_Sum_Northing,
+                s.sps_Sum_Elevation,
+                s.sps_Sum_JDay,
+                s.sps_Sum_Hour,
+                s.sps_Sum_Minute,
+                s.sps_Sum_Second,
+                s.sps_Sum_Microsecond,
+
+                -- ---------------------------------
+                -- Comparisons (1=match, 0=mismatch)
+                -- ---------------------------------
+                CASE WHEN COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999)        THEN 1 ELSE 0 END AS cmp_Line,
+                CASE WHEN COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999)     THEN 1 ELSE 0 END AS cmp_Attempt,
+                CASE WHEN COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999)         THEN 1 ELSE 0 END AS cmp_Seq,
+
+                CASE WHEN COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999)       THEN 1 ELSE 0 END AS cmp_Point,
+
+                CASE WHEN COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999)   THEN 1 ELSE 0 END AS cmp_PointCode,
+                CASE WHEN COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999)    THEN 1 ELSE 0 END AS cmp_FireCode,
+
+                CASE WHEN COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999)  THEN 1 ELSE 0 END AS cmp_WaterDepth,
+                CASE WHEN COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999)     THEN 1 ELSE 0 END AS cmp_Easting,
+                CASE WHEN COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999)    THEN 1 ELSE 0 END AS cmp_Northing,
+                CASE WHEN COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999)   THEN 1 ELSE 0 END AS cmp_Elevation,
+
+                CASE WHEN COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999)        THEN 1 ELSE 0 END AS cmp_JDay,
+                CASE WHEN COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999)        THEN 1 ELSE 0 END AS cmp_Hour,
+                CASE WHEN COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999)      THEN 1 ELSE 0 END AS cmp_Minute,
+                CASE WHEN COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999)      THEN 1 ELSE 0 END AS cmp_Second,
+                CASE WHEN COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999) THEN 1 ELSE 0 END AS cmp_Microsecond,
+
+                -- diffs (SHOT - SPS)
+                (COALESCE(a.Sum_attempt,0)          - COALESCE(s.sps_Sum_Attempt,0))      AS diff_Attempt,
+                (COALESCE(a.Sum_seq,0)              - COALESCE(s.sps_Sum_Seq,0))          AS diff_Seq,
+                (COALESCE(a.Sum_nav_station,0)      - COALESCE(s.sps_Sum_Point,0))        AS diff_Point,
+                (COALESCE(a.Sum_post_point_code,0)  - COALESCE(s.sps_Sum_PointCode,0))    AS diff_PointCode,
+                (COALESCE(a.Sum_fire_code,0)        - COALESCE(s.sps_Sum_FireCode,0))     AS diff_FireCode,
+                (COALESCE(a.Sum_water_depth,0)      - COALESCE(s.sps_Sum_WaterDepth,0))   AS diff_WaterDepth,
+                (COALESCE(a.Sum_shot_x,0)           - COALESCE(s.sps_Sum_Easting,0))      AS diff_Easting,
+                (COALESCE(a.Sum_shot_y,0)           - COALESCE(s.sps_Sum_Northing,0))     AS diff_Northing,
+                (COALESCE(a.Sum_elevation,0)        - COALESCE(s.sps_Sum_Elevation,0))    AS diff_Elevation,
+                (COALESCE(a.Sum_shot_day,0)         - COALESCE(s.sps_Sum_JDay,0))         AS diff_JDay,
+                (COALESCE(a.Sum_shot_hour,0)        - COALESCE(s.sps_Sum_Hour,0))         AS diff_Hour,
+                (COALESCE(a.Sum_shot_minute,0)      - COALESCE(s.sps_Sum_Minute,0))       AS diff_Minute,
+                (COALESCE(a.Sum_shot_second,0)      - COALESCE(s.sps_Sum_Second,0))       AS diff_Second,
+                (COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0))  AS diff_Microsecond,
+
+                -- Sum of absolute diffs
+                ABS(COALESCE(a.Sum_attempt,0)          - COALESCE(s.sps_Sum_Attempt,0)) +
+                ABS(COALESCE(a.Sum_seq,0)              - COALESCE(s.sps_Sum_Seq,0)) +
+                ABS(COALESCE(a.Sum_nav_station,0)      - COALESCE(s.sps_Sum_Point,0)) +
+                ABS(COALESCE(a.Sum_post_point_code,0)  - COALESCE(s.sps_Sum_PointCode,0)) +
+                ABS(COALESCE(a.Sum_fire_code,0)        - COALESCE(s.sps_Sum_FireCode,0)) +
+                ABS(COALESCE(a.Sum_water_depth,0)      - COALESCE(s.sps_Sum_WaterDepth,0)) +
+                ABS(COALESCE(a.Sum_shot_x,0)           - COALESCE(s.sps_Sum_Easting,0)) +
+                ABS(COALESCE(a.Sum_shot_y,0)           - COALESCE(s.sps_Sum_Northing,0)) +
+                ABS(COALESCE(a.Sum_elevation,0)        - COALESCE(s.sps_Sum_Elevation,0)) +
+                ABS(COALESCE(a.Sum_shot_day,0)         - COALESCE(s.sps_Sum_JDay,0)) +
+                ABS(COALESCE(a.Sum_shot_hour,0)        - COALESCE(s.sps_Sum_Hour,0)) +
+                ABS(COALESCE(a.Sum_shot_minute,0)      - COALESCE(s.sps_Sum_Minute,0)) +
+                ABS(COALESCE(a.Sum_shot_second,0)      - COALESCE(s.sps_Sum_Second,0)) +
+                ABS(COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0))
+                AS SumDiff,
+
+                CASE WHEN
+                    (COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999)) AND
+                    (COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999)) AND
+                    (COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999)) AND
+                    (COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999)) AND
+                    (COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999)) AND
+                    (COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999)) AND
+                    (COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999)) AND
+                    (COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999)) AND
+                    (COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999)) AND
+                    (COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999)) AND
+                    (COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999)) AND
+                    (COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999)) AND
+                    (COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999)) AND
+                    (COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999)) AND
+                    (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
+                THEN 1 ELSE 0 END AS QC_AllMatch,
+
+                CASE WHEN
+                     (COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999))
+                  OR (COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999))
+                  OR (COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999))
+                  OR (COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999))
+                  OR (COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999))
+                  OR (COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999))
+                  OR (COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999))
+                  OR (COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999))
+                  OR (COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999))
+                  OR (COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999))
+                  OR (COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999))
+                  OR (COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999))
+                  OR (COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999))
+                  OR (COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999))
+                  OR (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
+                THEN 1 ELSE 0 END AS QC_AnyMatch
+
+            FROM shot_agg a
+            LEFT JOIN sps_agg s
+                ON s.Line    = a.nav_line
+               AND s.Attempt = a.attempt
+               AND s.Seq     = a.seq
+            LEFT JOIN sequence_vessel_assignment sva
+                ON a.seq BETWEEN sva.seq_first AND sva.seq_last
+            LEFT JOIN project_fleet pf
+                ON pf.id = sva.vessel_id;
+            """)
+
+            if own_conn:
+                conn.commit()
+
+        finally:
+            if own_conn:
+                conn.close()
+
+    def list_v_shot_linesummary(self, filters: dict | None = None) -> list[dict]:
+        """
+        Read V_SHOT_LineSummary with optional backend filters.
+        """
+        filters = filters or {}
+
+        sql = """
+            SELECT *
+            FROM V_SHOT_LineSummary
+            WHERE 1=1
+        """
+        params = []
+
+        nav_line_code = (filters.get("nav_line_code") or "").strip()
+        if nav_line_code:
+            sql += " AND nav_line_code LIKE ? "
+            params.append(f"%{nav_line_code}%")
+
+        seq = filters.get("seq")
+        if seq not in (None, ""):
+            sql += " AND seq = ? "
+            params.append(seq)
+
+        attempt = filters.get("attempt")
+        if attempt not in (None, ""):
+            sql += " AND attempt = ? "
+            params.append(attempt)
+
+        vessel_name = (filters.get("vessel_name") or "").strip()
+        if vessel_name:
+            sql += " AND COALESCE(vessel_name, '') LIKE ? "
+            params.append(f"%{vessel_name}%")
+
+        purpose = (filters.get("purpose") or "").strip()
+        if purpose:
+            sql += " AND COALESCE(purpose, '') LIKE ? "
+            params.append(f"%{purpose}%")
+
+        is_in_sl = filters.get("is_in_sl")
+        if is_in_sl in (0, 1, "0", "1"):
+            sql += " AND IsInSLSolution = ? "
+            params.append(int(is_in_sl))
+
+        qc_allmatch = filters.get("qc_allmatch")
+        if qc_allmatch in (0, 1, "0", "1"):
+            sql += " AND QC_AllMatch = ? "
+            params.append(int(qc_allmatch))
+
+        diff_status = (filters.get("diff_status") or "").strip().lower()
+        if diff_status == "ok":
+            sql += " AND COALESCE(SumDiff, 0) = 0 "
+        elif diff_status == "error":
+            sql += " AND COALESCE(SumDiff, 0) <> 0 "
+
+        shotcount_min = filters.get("shotcount_min")
+        if shotcount_min not in (None, ""):
+            sql += " AND COALESCE(ShotCount, 0) >= ? "
+            params.append(shotcount_min)
+
+        shotcount_max = filters.get("shotcount_max")
+        if shotcount_max not in (None, ""):
+            sql += " AND COALESCE(ShotCount, 0) <= ? "
+            params.append(shotcount_max)
+
+        sql += " ORDER BY seq, attempt, nav_line_code "
+
+        conn = self._connect()
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            rows = cur.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()

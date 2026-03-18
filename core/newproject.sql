@@ -1758,6 +1758,10 @@ SELECT
     a.attempt,
     a.seq,
 
+    sva.purpose,
+    sva.vessel_id,
+    pf.vessel_name,
+
     CASE WHEN EXISTS (
         SELECT 1
         FROM SLSolution sl
@@ -1825,30 +1829,30 @@ SELECT
     -- Comparisons (1=match, 0=mismatch)
     -- ArrayCode removed from flags
     -- ---------------------------------
-    CASE WHEN COALESCE(a.nav_line,0)            = COALESCE(s.sps_Sum_Line, -999999999)        THEN 1 ELSE 0 END AS cmp_Line,
-    CASE WHEN COALESCE(a.Sum_attempt,0)         = COALESCE(s.sps_Sum_Attempt, -999999999)     THEN 1 ELSE 0 END AS cmp_Attempt,
-    CASE WHEN COALESCE(a.Sum_seq,0)             = COALESCE(s.sps_Sum_Seq, -999999999)         THEN 1 ELSE 0 END AS cmp_Seq,
+    CASE WHEN COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999)        THEN 1 ELSE 0 END AS cmp_Line,
+    CASE WHEN COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999)     THEN 1 ELSE 0 END AS cmp_Attempt,
+    CASE WHEN COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999)         THEN 1 ELSE 0 END AS cmp_Seq,
 
-    CASE WHEN COALESCE(a.Sum_nav_station,0)    = COALESCE(s.sps_Sum_Point, -999999999)       THEN 1 ELSE 0 END AS cmp_Point,
+    CASE WHEN COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999)       THEN 1 ELSE 0 END AS cmp_Point,
 
-    CASE WHEN COALESCE(a.Sum_post_point_code,0) = COALESCE(s.sps_Sum_PointCode, -999999999)   THEN 1 ELSE 0 END AS cmp_PointCode,
-    CASE WHEN COALESCE(a.Sum_fire_code,0)       = COALESCE(s.sps_Sum_FireCode, -999999999)    THEN 1 ELSE 0 END AS cmp_FireCode,
+    CASE WHEN COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999)   THEN 1 ELSE 0 END AS cmp_PointCode,
+    CASE WHEN COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999)    THEN 1 ELSE 0 END AS cmp_FireCode,
 
-    CASE WHEN COALESCE(a.Sum_water_depth,0)     = COALESCE(s.sps_Sum_WaterDepth, -999999999)  THEN 1 ELSE 0 END AS cmp_WaterDepth,
-    CASE WHEN COALESCE(a.Sum_shot_x,0)          = COALESCE(s.sps_Sum_Easting, -999999999)     THEN 1 ELSE 0 END AS cmp_Easting,
-    CASE WHEN COALESCE(a.Sum_shot_y,0)          = COALESCE(s.sps_Sum_Northing, -999999999)    THEN 1 ELSE 0 END AS cmp_Northing,
-    CASE WHEN COALESCE(a.Sum_elevation,0)       = COALESCE(s.sps_Sum_Elevation, -999999999)   THEN 1 ELSE 0 END AS cmp_Elevation,
+    CASE WHEN COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999)  THEN 1 ELSE 0 END AS cmp_WaterDepth,
+    CASE WHEN COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999)     THEN 1 ELSE 0 END AS cmp_Easting,
+    CASE WHEN COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999)    THEN 1 ELSE 0 END AS cmp_Northing,
+    CASE WHEN COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999)   THEN 1 ELSE 0 END AS cmp_Elevation,
 
-    CASE WHEN COALESCE(a.Sum_shot_day,0)        = COALESCE(s.sps_Sum_JDay, -999999999)        THEN 1 ELSE 0 END AS cmp_JDay,
-    CASE WHEN COALESCE(a.Sum_shot_hour,0)       = COALESCE(s.sps_Sum_Hour, -999999999)        THEN 1 ELSE 0 END AS cmp_Hour,
-    CASE WHEN COALESCE(a.Sum_shot_minute,0)     = COALESCE(s.sps_Sum_Minute, -999999999)      THEN 1 ELSE 0 END AS cmp_Minute,
-    CASE WHEN COALESCE(a.Sum_shot_second,0)     = COALESCE(s.sps_Sum_Second, -999999999)      THEN 1 ELSE 0 END AS cmp_Second,
-    CASE WHEN COALESCE(a.Sum_shot_microsecond,0)= COALESCE(s.sps_Sum_Microsecond, -999999999) THEN 1 ELSE 0 END AS cmp_Microsecond,
+    CASE WHEN COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999)        THEN 1 ELSE 0 END AS cmp_JDay,
+    CASE WHEN COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999)        THEN 1 ELSE 0 END AS cmp_Hour,
+    CASE WHEN COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999)      THEN 1 ELSE 0 END AS cmp_Minute,
+    CASE WHEN COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999)      THEN 1 ELSE 0 END AS cmp_Second,
+    CASE WHEN COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999) THEN 1 ELSE 0 END AS cmp_Microsecond,
 
     -- diffs (SHOT - SPS), ArrayCode removed
     (COALESCE(a.Sum_attempt,0)          - COALESCE(s.sps_Sum_Attempt,0))      AS diff_Attempt,
     (COALESCE(a.Sum_seq,0)              - COALESCE(s.sps_Sum_Seq,0))          AS diff_Seq,
-    (COALESCE(a.Sum_nav_station,0)     - COALESCE(s.sps_Sum_Point,0))        AS diff_Point,
+    (COALESCE(a.Sum_nav_station,0)      - COALESCE(s.sps_Sum_Point,0))        AS diff_Point,
     (COALESCE(a.Sum_post_point_code,0)  - COALESCE(s.sps_Sum_PointCode,0))    AS diff_PointCode,
     (COALESCE(a.Sum_fire_code,0)        - COALESCE(s.sps_Sum_FireCode,0))     AS diff_FireCode,
     (COALESCE(a.Sum_water_depth,0)      - COALESCE(s.sps_Sum_WaterDepth,0))   AS diff_WaterDepth,
@@ -1864,7 +1868,7 @@ SELECT
     -- Sum of absolute diffs (QC severity). 0 = perfect match.
     ABS(COALESCE(a.Sum_attempt,0)          - COALESCE(s.sps_Sum_Attempt,0)) +
     ABS(COALESCE(a.Sum_seq,0)              - COALESCE(s.sps_Sum_Seq,0)) +
-    ABS(COALESCE(a.Sum_nav_station,0)     - COALESCE(s.sps_Sum_Point,0)) +
+    ABS(COALESCE(a.Sum_nav_station,0)      - COALESCE(s.sps_Sum_Point,0)) +
     ABS(COALESCE(a.Sum_post_point_code,0)  - COALESCE(s.sps_Sum_PointCode,0)) +
     ABS(COALESCE(a.Sum_fire_code,0)        - COALESCE(s.sps_Sum_FireCode,0)) +
     ABS(COALESCE(a.Sum_water_depth,0)      - COALESCE(s.sps_Sum_WaterDepth,0)) +
@@ -1878,12 +1882,12 @@ SELECT
     ABS(COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0))
     AS SumDiff,
 
-    -- overall QC flag (all must match), ArrayCode removed
+    -- overall QC flag
     CASE WHEN
         (COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999)) AND
         (COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999)) AND
         (COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999)) AND
-        (COALESCE(a.Sum_nav_station,0)     = COALESCE(s.sps_Sum_Point, -999999999)) AND
+        (COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999)) AND
         (COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999)) AND
         (COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999)) AND
         (COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999)) AND
@@ -1897,12 +1901,12 @@ SELECT
         (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
     THEN 1 ELSE 0 END AS QC_AllMatch,
 
-    -- any match flag (if any single compare matches => 1), ArrayCode removed
+    -- any match flag
     CASE WHEN
          (COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999))
       OR (COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999))
       OR (COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999))
-      OR (COALESCE(a.Sum_nav_station,0)     = COALESCE(s.sps_Sum_Point, -999999999))
+      OR (COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999))
       OR (COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999))
       OR (COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999))
       OR (COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999))
@@ -1920,7 +1924,11 @@ FROM shot_agg a
 LEFT JOIN sps_agg s
     ON s.Line    = a.nav_line
    AND s.Attempt = a.attempt
-   AND s.Seq     = a.seq;
+   AND s.Seq     = a.seq
+LEFT JOIN sequence_vessel_assignment sva
+    ON a.seq BETWEEN sva.seq_first AND sva.seq_last
+LEFT JOIN project_fleet pf
+    ON pf.id = sva.vessel_id;
 
 CREATE TABLE IF NOT EXISTS REC_DB
 (

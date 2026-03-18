@@ -1,52 +1,89 @@
-// initDSRLineQCTabs.js
 import { getCSRFToken } from "../../baseproject/js/csrf.js";
-import { renderBokehInto } from "../../baseproject/js/renderBokeh.js"; // your helper
+import { renderBokehInto } from "../../baseproject/js/renderBokeh.js";
 
 export function initDSRLineQCTabs() {
   const qcRoot = document.getElementById("dsr-qc-root");
-  const lineTabPill =document.getElementById("pills-line-tab")
+  const lineTabPill = document.getElementById("pills-line-tab");
   if (!qcRoot) return;
 
   const plotUrl = qcRoot.dataset.plotItemUrl;
   if (!plotUrl) return;
 
   const TAB_TO_PLOT = {
-    "pane-water":  { key: "water",   divId: "plot-water" },
-    "pane-primsec":{ key: "primsec", divId: "plot-primsec" },
-    "pane-ellipse":{ key: "ellipse", divId: "plot-ellipse" },
-    "pane-deplpre":{ key: "deplpre", divId: "plot-deplpre" },
-    "pane-lineinfo":{ key: "lineinfo", divId: "dsr-table-body" },
-    "pane-map":    { key: "map",     divId: "plot-map" },
-    "pane-delta":  { key: "delta",   divId: "plot-delta" },
-    "pane-xline":  { key: "xline",   divId: "plot-xline" },
-    "pane-timing": { key: "timing",  divId: "plot-timing" },
-    "pane-3d":     { key: "3d",      divId: "plot-3d" },
+    "pane-water":   { key: "water",   divId: "plot-water" },
+    "pane-primsec": { key: "primsec", divId: "plot-primsec" },
+    "pane-ellipse": { key: "ellipse", divId: "plot-ellipse" },
+    "pane-deplpre": { key: "deplpre", divId: "plot-deplpre" },
+    "pane-lineinfo": { key: "lineinfo", divId: "dsr-table-body" },
+    "pane-map":     { key: "map",     divId: "plot-map" },
+    "pane-delta":   { key: "delta",   divId: "plot-delta" },
+    "pane-xline":   { key: "xline",   divId: "plot-xline" },
+
+    // two target divs for one backend key
+    "pane-timing": {
+      key: "timing",
+      divIds: ["plot-timing", "plot-rec-timing"],
+    },
+
+    "pane-3d":      { key: "3d",      divId: "plot-3d" },
   };
 
   let selectedLine = null;
   let controller = null;
   const loaded = new Map(); // line -> Set(plot_key)
 
-  function setMsg(divId, msg) {
-    const el = document.getElementById(divId);
-    if (el) el.innerHTML = `<div class="text-muted p-2">${msg}</div>`;
+  function getTargetIds(cfg) {
+    if (!cfg) return [];
+    if (Array.isArray(cfg.divIds)) return cfg.divIds;
+    if (cfg.divId) return [cfg.divId];
+    return [];
   }
 
-  function resetPanels() {
-    Object.values(TAB_TO_PLOT).forEach(({ key, divId }) => {
-      setMsg(divId, `Open tab to load… (${key})`);
+  function setMsg(target, msg) {
+    const ids = Array.isArray(target) ? target : [target];
+    ids.forEach((divId) => {
+      const el = document.getElementById(divId);
+      if (el) {
+        el.innerHTML = `<div class="text-muted p-2">${msg}</div>`;
+      }
     });
   }
 
-  async function loadPane(paneId, force=false) {
+  function clearTargets(target) {
+    const ids = Array.isArray(target) ? target : [target];
+    ids.forEach((divId) => {
+      const el = document.getElementById(divId);
+      if (el) el.innerHTML = "";
+    });
+  }
+
+  function resetPanels() {
+    Object.values(TAB_TO_PLOT).forEach((cfg) => {
+      setMsg(getTargetIds(cfg), `Open tab to load… (${cfg.key})`);
+    });
+  }
+
+  function renderHtmlInto(divId, html) {
+    const el = document.getElementById(divId);
+    if (el) el.innerHTML = html;
+  }
+
+  async function loadPane(paneId, force = false) {
     const cfg = TAB_TO_PLOT[paneId];
     if (!cfg) return;
 
+    const targetIds = getTargetIds(cfg);
+
     if (!selectedLine) {
-      setMsg(cfg.divId, "Select a line…");
+      setMsg(targetIds, "Select a line…");
       return;
     }
-    lineTabPill.innerHTML = `<i class="fas fa-arrow-down-up-across-line me-2"></i>LINE:${selectedLine}`;
+
+    if (lineTabPill) {
+      lineTabPill.innerHTML =
+        `<i class="fas fa-arrow-down-up-across-line me-2"></i>LINE:${selectedLine}`;
+    }
+
     const lineKey = String(selectedLine);
     if (!loaded.has(lineKey)) loaded.set(lineKey, new Set());
     const set = loaded.get(lineKey);
@@ -56,7 +93,7 @@ export function initDSRLineQCTabs() {
     if (controller) controller.abort();
     controller = new AbortController();
 
-    setMsg(cfg.divId, `Loading ${cfg.key}…`);
+    setMsg(targetIds, `Loading ${cfg.key}…`);
 
     try {
       const resp = await fetch(plotUrl, {
@@ -65,70 +102,109 @@ export function initDSRLineQCTabs() {
           "Content-Type": "application/json",
           "X-CSRFToken": getCSRFToken(),
         },
-        body: JSON.stringify({ line: selectedLine, plot_key: cfg.key }),
+        body: JSON.stringify({
+          line: selectedLine,
+          plot_key: cfg.key,
+        }),
         signal: controller.signal,
       });
 
       const data = await resp.json();
 
       if (!resp.ok || !data.ok) {
-        setMsg(cfg.divId, data.error || "Failed to load");
+        setMsg(targetIds, data.error || "Failed to load");
         return;
       }
 
-      // bokeh
+      // multi-bokeh response: { items: [item1, item2, ...] }
+      if (Array.isArray(data.items) && data.items.length) {
+        targetIds.forEach((divId, i) => {
+          if (data.items[i]) {
+            clearTargets(divId);
+            renderBokehInto(divId, data.items[i]);
+          } else {
+            setMsg(divId, "No content returned");
+          }
+        });
+        set.add(cfg.key);
+        return;
+      }
+
+      // single-bokeh response: { item: {...} }
       if (data.item) {
+        if (!cfg.divId) {
+          setMsg(targetIds, "No target div configured");
+          return;
+        }
+        clearTargets(cfg.divId);
         renderBokehInto(cfg.divId, data.item);
         set.add(cfg.key);
         return;
       }
 
-      // html fallback
+      // single html response: { html: "..." }
       if (typeof data.html === "string") {
-        document.getElementById(cfg.divId).innerHTML = data.html;
+        if (!cfg.divId) {
+          setMsg(targetIds, "No target div configured");
+          return;
+        }
+        renderHtmlInto(cfg.divId, data.html);
         set.add(cfg.key);
         return;
       }
 
-      setMsg(cfg.divId, "No content returned");
+      // multi-html response: { htmls: ["...", "..."] }
+      if (Array.isArray(data.htmls) && data.htmls.length) {
+        targetIds.forEach((divId, i) => {
+          if (typeof data.htmls[i] === "string") {
+            renderHtmlInto(divId, data.htmls[i]);
+          } else {
+            setMsg(divId, "No content returned");
+          }
+        });
+        set.add(cfg.key);
+        return;
+      }
+
+      setMsg(targetIds, "No content returned");
 
     } catch (err) {
       if (err?.name === "AbortError") return;
       console.error(err);
-      setMsg(cfg.divId, "Error loading");
+      setMsg(targetIds, "Error loading");
     }
   }
 
-  // 1) click on DSR line row
+  // click on DSR line row
   document.addEventListener("click", (e) => {
     const tr = e.target.closest("tr.dsr-line[data-line]");
     if (!tr) return;
-    const icon = tr?.querySelector("i.dsr-line-click");
-    icon.classList.remove("d-none");  // show
+
+    const icon = tr.querySelector("i.dsr-line-click");
+    if (icon) icon.classList.remove("d-none");
+
     selectedLine = tr.dataset.line;
 
-    // highlight (optional)
     const tbody = tr.parentElement;
-    tbody?.querySelectorAll("tr.dsr-line.is-active").forEach(r => r.classList.remove("is-active"));
+    tbody?.querySelectorAll("tr.dsr-line.is-active")
+      .forEach((r) => r.classList.remove("is-active"));
     tr.classList.add("is-active");
 
     resetPanels();
 
-    // load currently active pane immediately
     const activePane = document.querySelector("#qcTabsContent .tab-pane.active");
     if (activePane) loadPane(activePane.id, true);
   });
 
-  // 2) tab open triggers load
+  // tab open triggers load
   const tabs = document.getElementById("qcTabs");
   if (tabs) {
     tabs.addEventListener("shown.bs.tab", (event) => {
-      const target = event.target.getAttribute("data-bs-target"); // #pane-water
+      const target = event.target.getAttribute("data-bs-target");
       const paneId = (target || "").replace("#", "");
       if (paneId) loadPane(paneId, false);
     });
   }
 
-  // initial message
   resetPanels();
 }

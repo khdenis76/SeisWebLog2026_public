@@ -1,7 +1,7 @@
 @echo off
-title SeisWebLog Django Server
+title SeisWebLog Survey Viewer
 echo ===============================
-echo   Starting SeisWebLog Server
+echo   Starting Survey Viewer
 echo ===============================
 REM Get the current directory path where the batch file resides
 set "CURRENT_DIR=%~dp0"

@@ -74,9 +74,17 @@ In dataviewer fixed wrong ROV name
 In dataviewer bbox timegraphs added.
 Baseproject module replaced modals and tosats were added 
 ### Fixed
-   
- 
+## [2026.1.1.0] - 2026-03-18
+### Added
+New nodule OCR studio added
+tesseract library added runlocal changed to control instalation of tesseral
+Line map, Dep vs Preplot and Timing graphs were added to the browser
+Active project location check on start up. if path is wrong and folder/file not exists user will be sent to project page 
+Logs functional added to the baseprojecr 
+### Fixed
+ROV filter fixed 
 ### Changed
- 
+The collumns order on DSR line table was changed in order to better view  
+
 
    

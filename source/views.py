@@ -12,11 +12,14 @@ from core.models import UserSettings,SPSRevision
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 import re
+
+from utils.decorators import log_action
 from .source_data import SourceData   # adjust path
 from .source_map_graph import SourceMapGraphics
 
 
 @login_required
+@log_action("open source home", object_type="SOU")
 def source_home(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -30,7 +33,8 @@ def source_home(request):
 
     pdb = ProjectDB(project.db_path)
     sd = SourceData(project.db_path)
-    sd.ensure_shot_table_schema()
+    #sd.ensure_shot_table_schema()
+    sd.create_v_shot_linesummary_view()
     gun_qc = pdb.get_gun_qc()
     min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
     max_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
@@ -87,8 +91,7 @@ def source_home(request):
         },)
 @login_required
 @require_POST
-@login_required
-@require_POST
+@log_action("upload source files", object_type="SOU_UPL")
 def source_upload_files(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -263,6 +266,7 @@ def source_upload_files(request):
 
 @login_required
 @require_POST
+@log_action("delete sps", object_type="SOU_DEL")
 def sps_delete_selected(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -297,6 +301,7 @@ def sps_delete_selected(request):
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
 
 @login_required
+@log_action("upload QC map", object_type="SOU")
 def source_qc_progress_map_json(request):
     # build your SourceData / whatever class you use
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
@@ -321,6 +326,7 @@ def source_qc_progress_map_json(request):
     )
     return JsonResponse(item)
 @login_required
+@log_action("upload source chart", object_type="SOU")
 def source_qc_sunburst_json(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -345,6 +351,7 @@ def source_qc_sunburst_json(request):
     )
     return JsonResponse(item)
 @login_required
+@log_action("upload source dbd graph", object_type="SOU")
 def source_daybyday_production_json(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -379,6 +386,7 @@ def source_daybyday_production_json(request):
     )
 
     return JsonResponse(item)
+@log_action("convert to int", object_type="AUX_MATH")
 def _to_int_or_none(v):
     try:
         v = str(v or "").strip()
@@ -386,7 +394,7 @@ def _to_int_or_none(v):
     except Exception:
         return None
 
-
+@log_action("convert to float", object_type="AUX_MATH")
 def _to_float_or_none(v):
     try:
         s = str(v).strip()
@@ -411,6 +419,7 @@ def _row_text_for_search(row):
 
 
 @login_required
+@log_action("get sps data", object_type="SOU")
 def source_sps_table_data(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -466,6 +475,7 @@ def source_sps_table_data(request):
     })
 
 @login_required
+@log_action("source_sp_solution_vs_preplot", object_type="SOU")
 def source_sp_solution_vs_preplot_json(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -521,3 +531,5 @@ def source_sp_solution_vs_preplot_json(request):
         }, status=500)
 
 
+def shot_line_summary_table(request):
+    return None

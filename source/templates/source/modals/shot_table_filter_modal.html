@@ -1,0 +1,116 @@
+<div class="modal fade" id="shotFilterModal" tabindex="-1" aria-labelledby="shotFilterModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+
+      <form id="shot-filter-form" method="get" action="{% url 'shot_line_summary_filter' %}">
+        <div class="modal-header">
+          <h5 class="modal-title" id="shotFilterModalLabel">
+            <i class="fas fa-filter me-2"></i> Filter shot line summary
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+
+          <div class="mb-3">
+            <label class="form-label">Line code</label>
+            <input
+              type="text"
+              class="form-control"
+              name="nav_line_code"
+              value="{{ request.GET.nav_line_code|default:'' }}"
+              placeholder="e.g. RL12649">
+          </div>
+
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label">Seq</label>
+              <input
+                type="number"
+                class="form-control"
+                name="seq"
+                value="{{ request.GET.seq|default:'' }}"
+                placeholder="6500">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Attempt</label>
+              <input
+                type="number"
+                class="form-control"
+                name="attempt"
+                value="{{ request.GET.attempt|default:'' }}"
+                placeholder="1">
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Vessel</label>
+            <input
+              type="text"
+              class="form-control"
+              name="vessel_name"
+              value="{{ request.GET.vessel_name|default:'' }}"
+              placeholder="Eagle Explorer">
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Purpose</label>
+            <input
+              type="text"
+              class="form-control"
+              name="purpose"
+              value="{{ request.GET.purpose|default:'' }}"
+              placeholder="Production">
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Status</label>
+            <select class="form-select" name="status_filter">
+              <option value="">All</option>
+              <option value="in_sl" {% if request.GET.status_filter == "in_sl" %}selected{% endif %}>Only in SLSolution</option>
+              <option value="not_in_sl" {% if request.GET.status_filter == "not_in_sl" %}selected{% endif %}>Only not in SLSolution</option>
+              <option value="matched" {% if request.GET.status_filter == "matched" %}selected{% endif %}>Only QC matched</option>
+              <option value="mismatch" {% if request.GET.status_filter == "mismatch" %}selected{% endif %}>Only QC mismatch</option>
+            </select>
+            <div class="form-text">
+              Tip: use <b>QC mismatch</b> to show only problematic lines.
+            </div>
+          </div>
+
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">ShotCount min</label>
+              <input
+                type="number"
+                class="form-control"
+                name="shotcount_min"
+                value="{{ request.GET.shotcount_min|default:'' }}"
+                placeholder="0">
+            </div>
+            <div class="col-6">
+              <label class="form-label">ShotCount max</label>
+              <input
+                type="number"
+                class="form-control"
+                name="shotcount_max"
+                value="{{ request.GET.shotcount_max|default:'' }}"
+                placeholder="999999">
+            </div>
+          </div>
+
+        </div>
+
+        <div class="modal-footer">
+          <a href="{% url 'shot_line_summary_table' %}" class="btn btn-outline-secondary">
+            <i class="fas fa-rotate-left me-1"></i> Reset
+          </a>
+
+          <button type="submit" class="btn btn-primary">
+            <i class="fas fa-check me-1"></i> Apply
+          </button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+</div>

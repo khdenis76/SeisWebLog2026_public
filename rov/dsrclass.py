@@ -331,11 +331,13 @@ class DSRDB:
         max_sma = self.pdb.get_node_qc().max_sma
         warning_sma = self.pdb.get_node_qc().warning_sma
         max_radial_offset = self.pdb.get_node_qc().max_radial_offset
+        radial80 = max_radial_offset*0.8
         context = {
             "lines": rows,
             "max_sma": max_sma,
             "warning_sma": warning_sma,
             "max_radial_offset": max_radial_offset,
+            "radial80": radial80,
         }
         return render_to_string(
             "rov/partials/dsr_line_body.html",
@@ -2773,6 +2775,148 @@ WHERE Area IS NOT NULL
                     "error": str(e),
                 }
 
+    def get_blackbox_for_line(
+            self,
+            line: int,
+            config_id: int,
+            each_point: int = 1,
+    ):
+        """
+        Return BlackBox data for selected DSR line and config_id.
+
+        Filter:
+            BlackBox.TimeStamp between MIN/MAX DSR.TimeStamp for selected DSR.Line
+            BlackBox.File_FK -> BlackBox_Files.ID
+            BlackBox_Files.Config_FK == config_id
+        """
+        each_point = max(1, int(each_point))
+
+        sql = """
+        WITH dsr_time AS (
+            SELECT
+                MIN(TimeStamp) AS ts_min,
+                MAX(TimeStamp) AS ts_max
+            FROM DSR
+            WHERE Line = ?
+              AND TimeStamp IS NOT NULL
+              AND TRIM(TimeStamp) <> ''
+        )
+        SELECT
+            bb.ID,
+            bb.TimeStamp,
+            bb.VesselEasting,
+            bb.VesselNorthing,
+            bb.VesselHDG,
+            bb.ROV1_INS_Easting,
+            bb.ROV1_INS_Northing,
+            bb.ROV1_USBL_Easting,
+            bb.ROV1_USBL_Northing,
+            bb.ROV2_INS_Easting,
+            bb.ROV2_INS_Northing,
+            bb.ROV2_USBL_Easting,
+            bb.ROV2_USBL_Northing,
+            bb.File_FK,
+            bf.Config_FK
+        FROM BlackBox bb
+        JOIN dsr_time dt
+          ON bb.TimeStamp >= dt.ts_min
+         AND bb.TimeStamp <= dt.ts_max
+        JOIN BlackBox_Files bf
+          ON bb.File_FK = bf.ID
+        WHERE dt.ts_min IS NOT NULL
+          AND dt.ts_max IS NOT NULL
+          AND bf.Config_FK = ?
+          AND (bb.ID % ?) = 0
+        ORDER BY bb.TimeStamp, bb.ID
+        """
+
+        try:
+            with self._connect() as conn:
+                df = pd.read_sql_query(sql, conn, params=(line, config_id, each_point))
+        except Exception as e:
+            print(f"get_blackbox_for_line error: {e}")
+            return pd.DataFrame()
+
+        if df.empty:
+            return df
+
+        numeric_cols = [
+            "VesselEasting", "VesselNorthing", "VesselHDG",
+            "ROV1_INS_Easting", "ROV1_INS_Northing",
+            "ROV1_USBL_Easting", "ROV1_USBL_Northing",
+            "ROV2_INS_Easting", "ROV2_INS_Northing",
+            "ROV2_USBL_Easting", "ROV2_USBL_Northing",
+            "File_FK", "Config_FK",
+        ]
+        for c in numeric_cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        return df
+
+    def get_bbox_config_for_line(self, df):
+        """
+        Detect BBox configuration for a line based on df.ROV values.
+
+        Returns
+        -------
+        dict | None
+            {
+                "config_id": int,
+                "rov1_name": str,
+                "rov2_name": str,
+                "vessel_name": str
+            }
+        """
+
+        if df is None or df.empty or "ROV" not in df.columns:
+            return None
+
+        rov_values = (
+            df["ROV"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .unique()
+            .tolist()
+        )
+
+        if not rov_values:
+            return None
+
+        sql = """
+        SELECT
+            ID,
+            rov1_name,
+            rov2_name,
+            Vessel_name
+        FROM BBox_Configs_List
+        """
+
+        try:
+            with self._connect() as conn:
+                cfg = pd.read_sql(sql, conn)
+        except Exception as e:
+            print("BBox config lookup error:", e)
+            return None
+
+        if cfg.empty:
+            return None
+
+        for r in cfg.itertuples():
+
+            if (
+                    r.rov1_name in rov_values
+                    or r.rov2_name in rov_values
+            ):
+                return {
+                    "config_id": r.ID,
+                    "rov1_name": r.rov1_name,
+                    "rov2_name": r.rov2_name,
+                    "vessel_name": r.Vessel_name,
+                }
+
+        return None
 
 
 

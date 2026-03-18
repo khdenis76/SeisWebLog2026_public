@@ -1,43 +1,67 @@
 from django.core.exceptions import PermissionDenied
 from django.utils.deprecation import MiddlewareMixin
-
 from .models import UserSettings
+from pathlib import Path
+from django.shortcuts import redirect
+from django.contrib import messages
 
+class ActiveProjectMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
 
-class ActiveProjectMiddleware(MiddlewareMixin):
-    """
-    Adds:
-      request.active_project (or None)
-      request.active_project_can_edit (bool)
-    Optionally blocks if active project is not viewable.
-    """
-    def process_request(self, request):
+    def __call__(self, request):
         request.active_project = None
-        request.active_project_can_edit = False
 
-        u = getattr(request, "user", None)
-        if not u or not u.is_authenticated:
-            return None
+        if not request.user.is_authenticated:
+            return self.get_response(request)
+
+        # prevent redirect loop on project page itself
+        allowed_names = {"projects", "login", "logout"}
+        match = getattr(request, "resolver_match", None)
+        current_url_name = match.url_name if match else None
 
         try:
-            settings = u.settings  # related_name="settings" :contentReference[oaicite:4]{index=4}
+            from core.models import UserSettings
+
+            settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
+            project = settings_obj.active_project
+
+            if not project:
+                return self.get_response(request)
+
+            db_path = getattr(project, "db_path", None)
+
+            if not db_path or not Path(db_path).exists():
+                settings_obj.active_project = None
+                settings_obj.save(update_fields=["active_project"])
+
+                if current_url_name not in allowed_names:
+                    messages.warning(
+                        request,
+                        "Your active project was not found. Please select a project again."
+                    )
+                    return redirect("projects")
+
+                return self.get_response(request)
+
+            request.active_project = project
+            return self.get_response(request)
+
         except Exception:
-            return None
+            # fail safe
+            try:
+                from core.models import UserSettings
+                settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
+                settings_obj.active_project = None
+                settings_obj.save(update_fields=["active_project"])
+            except Exception:
+                pass
 
-        project = getattr(settings, "active_project", None)
-        if not project:
-            return None
+            if current_url_name not in {"projects", "login", "logout"}:
+                messages.error(
+                    request,
+                    "Could not open active project. Please select a project again."
+                )
+                return redirect("projects")
 
-        # if soft delete exists and project deleted -> ignore
-        if getattr(project, "is_deleted", False):
-            request.active_project = None
-            request.active_project_can_edit = False
-            return None
-
-        # Must be viewable, otherwise treat as forbidden (or silently clear)
-        if not project.can_view(u):  # :contentReference[oaicite:5]{index=5}
-            raise PermissionDenied("Active project is not accessible.")
-
-        request.active_project = project
-        request.active_project_can_edit = project.can_edit(u)  # :contentReference[oaicite:6]{index=6}
-        return None
+            return self.get_response(request)

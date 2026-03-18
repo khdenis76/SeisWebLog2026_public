@@ -11,6 +11,7 @@ import {initSpsRowLinePlot} from "./initSpsRowLinePlot.js";
 import {initSourceUploadSubmit} from "./initSourceUploadModal.js"
 import {initSpsTableAdvancedSort} from "./initSPSTableSortModal.js";
 import {initShotTableSort} from "./initShotTableSort.js";
+import {initShotSummaryBackendFilters} from "./initShotTableFilterModal.js";
 
 export function initAllJSForSource() {
     initSourceUploadSubmit()
@@ -29,6 +30,7 @@ export function initAllJSForSource() {
     initShotTableSort();
     initDailyProductionTab();
     initSpsRowLinePlot();
+    initShotSummaryBackendFilters();
     initShotLineSort({ tbodyId: "shot-summary-tbody" }); // <-- your tbody id
     initSpsTableAdvancedSort({
     tableId: "sps-table",

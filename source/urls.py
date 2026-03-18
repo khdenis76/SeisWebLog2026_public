@@ -1,5 +1,7 @@
 from django.urls import path
 from . import views
+from source.filter_view import shot_line_summary_filter
+from source.filter_view import shot_line_summary_table
 
 urlpatterns = [
     path("", views.source_home, name="source_home"),
@@ -10,4 +12,6 @@ urlpatterns = [
     path("daybyday-production/json/",views.source_daybyday_production_json,name="source_daybyday_production_json",),
     path("sps/table-data/", views.source_sps_table_data, name="source_sps_table_data"),
     path("sp-solution-vs-preplot-json/",views.source_sp_solution_vs_preplot_json,name="source_sp_solution_vs_preplot_json",),
+    path("shot-line-summary/filter/",shot_line_summary_filter,   name="shot_line_summary_filter",),
+    path("shot-table/filter/",shot_line_summary_table,   name="shot_line_summary_table",),
 ]

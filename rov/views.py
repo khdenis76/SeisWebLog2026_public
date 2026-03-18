@@ -26,8 +26,11 @@ from rov.dsr_map_graphics import DSRMapPlots
 from rov.dsrclass import DSRDB
 from rov.bbox_graphics import BlackBoxGraphics
 from django.core.cache import cache
+from utils.decorators import log_action
+from utils.audit import audit_event
 # Create your views here.
 @login_required
+@log_action("show_rov_page", object_type="ROV")
 def rov_main_view(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -154,6 +157,7 @@ def rov_main_view(request):
                    })
 @require_POST
 @login_required
+@log_action("upload_dsr", object_type="DSR")
 def rov_upload_dsr(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     if not user_settings or not user_settings.active_project:
@@ -230,6 +234,7 @@ def rov_upload_dsr(request):
     })
 @require_POST
 @login_required
+@log_action("upload_survey_manager", object_type="SM")
 def rov_upload_survey_manager(request):
     """
     Upload Survey Manager files (CSV/TXT) directly from memory
@@ -325,6 +330,7 @@ def rov_upload_survey_manager(request):
     )
 @require_POST
 @login_required
+@log_action("upload_blackbox", object_type="BBOX")
 def rov_upload_black_box(request):
     try:
         # --- read inputs ---
@@ -401,6 +407,7 @@ def rov_upload_black_box(request):
         return JsonResponse({"error": str(e)}, status=500)
 @require_POST
 @login_required
+@log_action("upload_recdb", object_type="REC_DB")
 def rov_upload_rec_db(request):
     """
     Upload FB/REC_DB (whitespace-delimited) files using the SAME modal logic:
@@ -470,6 +477,7 @@ def rov_upload_rec_db(request):
 
 @require_POST
 @login_required
+@log_action("click_on_dsr", object_type="DSR")
 def rov_dsr_line_click(request):
     user_settings = getattr(request.user, "usersettings", None)
     if not user_settings or not user_settings.active_project:
@@ -496,11 +504,13 @@ def rov_dsr_line_click(request):
     })
 @require_POST
 @login_required
+@log_action("read_bbox_header", object_type="BBOX")
 def read_bbox_headers(request):
     """This function take csv file from POST and read headers from the top and return list of them"""
     pass
 @require_POST
 @login_required
+@log_action("save_cfg", object_type="CFG")
 def save_bbox_config(request):
     try:
         user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
@@ -560,6 +570,7 @@ def save_bbox_config(request):
         return JsonResponse({"error": str(e)}, status=500)
 @require_POST
 @login_required
+@log_action("set_cfg", object_type="CFG")
 def set_default_bbox_config(request):
     try:
         user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
@@ -581,6 +592,7 @@ def set_default_bbox_config(request):
         return JsonResponse({"error": str(e)}, status=500)
 @require_POST
 @login_required
+@log_action("delete_dsr", object_type="DSR")
 def delete_selected_dsr_lines(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -676,6 +688,7 @@ def delete_selected_dsr_lines(request):
     })
 @login_required
 @require_POST
+@log_action("delete_bbox", object_type="BBOX")
 def delete_bbox_files(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -713,6 +726,7 @@ def delete_bbox_files(request):
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 @require_POST
 @login_required
+@log_action("bbox_click", object_type="BBOX")
 def bbox_file_selected(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -770,6 +784,7 @@ def bbox_file_selected(request):
 
 @require_GET
 @login_required
+@log_action("loaf_cfg", object_type="CFG")
 def bbox_configs_list(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -865,6 +880,7 @@ def read_bbox_headers(request):
         )
 @require_POST
 @login_required
+@log_action("sm_export", object_type="SM")
 def dsr_export_sm(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -953,12 +969,6 @@ def dsr_export_sm(request):
         "filename": result.get("filename"),
         "rows": int(result.get("rows", 0)),
     })
-
-
-
-
-# rov/views.py
-
 @require_POST
 def dsr_rovs_for_timeframe(request):
     """
@@ -1368,6 +1378,7 @@ def dsr_line_qc_plot_item(request):
         g = DSRLineGraphics(project.db_path)
         pdb=ProjectDB(project.db_path)
         pdb.set_line_clicked (line)
+        ldb=DSRDB(project.db_path)
         # Load df for this line (use your existing DB method)
         # Example: df = g.read_dsr_for_line(line)  (use your real function)
         df = g.line_df = g.read_dsr_for_line(line)
@@ -1463,6 +1474,64 @@ def dsr_line_qc_plot_item(request):
                 target_id="dxdy_plot",
             )
             return JsonResponse({"ok": True, "plot_key": plot_key,"item": json_item(layout)})
+        elif plot_key == "deplpre":
+            layout = g.deployment_offsets_vs_preplot(
+                df=df,
+                line=line,
+                line_bearing = pdb.get_geometry().rl_heading,
+                is_show=False,
+                json_return=False,
+            )
+            return JsonResponse({
+                "ok": True,
+                "plot_key": plot_key,
+                "item": json_item(layout)
+            })
+        elif plot_key == "timing":
+            deploy_layout = g.graph_recover_time(
+                df=df,
+                line=line,
+                is_deploy=True,
+                is_show=False,
+                json_return=False,
+            )
+            recover_layout = g.graph_recover_time(
+                df=df,
+                line=line,
+                is_deploy=False,
+                is_show=False,
+                json_return=False,
+            )
+            return JsonResponse({
+                "ok": True,
+                "plot_key": plot_key,
+                "items": [
+                    json_item(deploy_layout),
+                    json_item(recover_layout)
+                ]
+            })
+        elif plot_key == "map":
+            cfg = ldb.get_bbox_config_for_line(df)
+            if cfg:
+                config_id = cfg["config_id"]
+
+                bbox_df = ldb.get_blackbox_for_line(
+                    line=line,
+                    config_id=config_id,
+                    each_point=10
+                )
+
+                layout = g.plot_line_map(
+                    df=df,
+                    bbdata=bbox_df,
+                    cfg_row=cfg,
+                    line=line
+                )
+            return JsonResponse({
+                "ok": True,
+                "plot_key": plot_key,
+                "item": json_item(layout)
+            })
 
         return JsonResponse({"ok": False, "error": f"Unknown plot_key: {plot_key}"}, status=400)
 

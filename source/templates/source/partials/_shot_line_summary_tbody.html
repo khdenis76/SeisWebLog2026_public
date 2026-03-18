@@ -11,7 +11,8 @@
               data-prod="{{ r.ProdShots|default_if_none:0 }}"
               data-nonprod="{{ r.NonProdShots|default_if_none:0 }}"
               data-kill="{{ r.KillShots|default_if_none:0 }}"
-
+              data-vessel="{{ r.vessel_name }}"
+              data-prupose="{{ r.purpose }}"
               data-fsp="{{ r.FSP|default_if_none:0 }}"
               data-lsp="{{ r.LSP|default_if_none:0 }}"
               data-fgsp="{{ r.FGSP|default_if_none:0 }}"

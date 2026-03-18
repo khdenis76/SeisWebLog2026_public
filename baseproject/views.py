@@ -29,6 +29,7 @@ from core.projectshp import ProjectShape
 from baseproject.preplot_graphics import PreplotGraphics
 from fleet.models import Vessel
 from fleet.utils import import_vessels_from_csv_if_missing
+from utils.decorators import log_action
 from .models import BaseProjectFile
 from .forms import BaseProjectUploadForm
 from django.http import JsonResponse
@@ -43,6 +44,7 @@ class ShapeFile:
     file_size:int=0
     is_indb:int=0
 @login_required
+@log_action("bp_settings_view", object_type="BP")
 def base_project_settings_view(request):
     """
     Upload base project files (SPS, headers, shapefiles, etc.)
@@ -143,6 +145,7 @@ def base_project_settings_view(request):
     )
 #================================================= UPLOAD SPS FILES====================================================
 @login_required
+@log_action("upload source pp", object_type="PP_SPS")
 def upload_source_sps(request):
     """ view for upload source preplot from sps file"""
     if request.method != "POST":
@@ -218,6 +221,7 @@ def upload_source_sps(request):
             "prep_stat": prep_stat,
         })
 @login_required
+@log_action("upload rec pp", object_type="PP_RPS")
 def upload_receiver_sps(request):
     """ view for upload receiver preplot from sps file"""
     if request.method != "POST":
@@ -298,6 +302,7 @@ def upload_receiver_sps(request):
         })
 @login_required
 @require_POST
+@log_action("upload header", object_type="SPS_HDR")
 def upload_header_sps(request):
     # 1) file
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
@@ -349,6 +354,7 @@ def upload_header_sps(request):
     })
 @login_required
 @require_POST
+@log_action("delete rl", object_type="PP_DEL")
 def delete_selected_receiver_lines(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -398,6 +404,7 @@ def delete_selected_receiver_lines(request):
     })
 @login_required
 @require_POST
+@log_action("delete sou", object_type="PP_DEL")
 def delete_selected_source_lines(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
@@ -444,6 +451,7 @@ def delete_selected_source_lines(request):
         "preplot_map": json_item(layout),
         "prep_stat": prep_stat
     })
+@log_action("get shapes", object_type="PP_SHP")
 def get_shape_list(folder_name)->list[ShapeFile]:
     flist = glob.glob(folder_name + "/*.shp")
     shp_list:list[ShapeFile] = []
@@ -461,6 +469,7 @@ def get_shape_list(folder_name)->list[ShapeFile]:
     return shp_list
 @login_required
 @require_POST
+@log_action("shape_search", object_type="PP_SHP")
 def shape_search(request):
     try:
         payload = json.loads(request.body)
@@ -476,6 +485,7 @@ def shape_search(request):
     })
 @login_required
 @require_POST
+@log_action("shape2db", object_type="PP_SHP")
 def add_shape_to_db(request):
     """Add shape file from the folder to project database with default values for line_width & colors"""
     try:
@@ -534,6 +544,7 @@ def add_shape_to_db(request):
         return JsonResponse({"error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("shapes update", object_type="PP_SHP")
 def project_shapes_update(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -580,6 +591,7 @@ def project_shapes_update(request):
         return JsonResponse({"error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("layers upd", object_type="PP_LAY")
 def project_layers_update(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -625,6 +637,7 @@ def project_layers_update(request):
         return JsonResponse({"error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("shapes delete", object_type="PP_SHP")
 def project_shapes_delete(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -680,6 +693,7 @@ def project_shapes_delete(request):
 
 @login_required
 @require_POST
+@log_action("shapes folder update", object_type="PP_SHP")
 def update_shape_folder_view(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -713,6 +727,7 @@ def update_shape_folder_view(request):
 #============================================================ EXPORTS=============================================
 @login_required
 @require_POST
+@log_action("export sol eol", object_type="PP_EXP")
 def export_sol_eol_to_csv(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -740,6 +755,7 @@ def export_sol_eol_to_csv(request):
         return JsonResponse({"error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("export 2 csv", object_type="PP_EXP")
 def export_to_csv(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -764,6 +780,7 @@ def export_to_csv(request):
         return JsonResponse({"error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("export line sps", object_type="PP_EXP")
 def export_splited_csv(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -787,6 +804,7 @@ def export_splited_csv(request):
         return JsonResponse({"error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("export gpkg", object_type="PP_EXP")
 def export_gpkg(request):
     """ This function does not work so far """
     try:
@@ -814,6 +832,7 @@ def export_gpkg(request):
         return JsonResponse({"error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("export 2 shape", object_type="PP_EXP")
 def export_to_shapes(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -843,6 +862,7 @@ def export_to_shapes(request):
         return JsonResponse({"error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("export 2 sps", object_type="PP_EXP")
 def export_to_sps(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -870,6 +890,7 @@ def export_to_sps(request):
 #====================================LOAD CSV LAYERS=====================================================================
 @login_required
 @require_POST
+@log_action("get csv header", object_type="PP_CSV")
 def csv_headers(request):
     f = request.FILES.get("csv_file")
     if not f:
@@ -913,6 +934,7 @@ def csv_headers(request):
         "options_html": "".join(options),
     })
 @login_required
+@log_action("upload csv", object_type="PP_CSV")
 def upload_csv_layer_ajax(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST only"}, status=405)
@@ -991,6 +1013,7 @@ def upload_csv_layer_ajax(request):
     })
 @login_required
 @require_POST
+@log_action("delete csv", object_type="PP_CSV")
 def delete_csv_layers(request):
     try:
         data = json.loads(request.body.decode("utf-8"))
@@ -1030,6 +1053,7 @@ def delete_csv_layers(request):
 #===================================Line CLick ===========================================================================
 @login_required
 @require_POST
+@log_action("rl click", object_type="PP_RL")
 def rl_line_click(request):
     try:
         payload = json.loads(request.body.decode("utf-8"))
@@ -1066,6 +1090,7 @@ def rl_line_click(request):
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("sl click", object_type="PP_SL")
 def sl_line_click(request):
     try:
         payload = json.loads(request.body.decode("utf-8"))
@@ -1102,6 +1127,7 @@ def sl_line_click(request):
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("rp delete", object_type="PP_RP")
 def rp_points_delete(request):
     try:
         payload = json.loads(request.body.decode("utf-8"))
@@ -1126,6 +1152,7 @@ def rp_points_delete(request):
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 @login_required
 @require_POST
+@log_action("sp delete", object_type="PP_SP")
 def sp_points_delete(request):
     try:
         payload = json.loads(request.body.decode("utf-8"))
@@ -1181,6 +1208,7 @@ def _vessel_to_dict(v: Vessel) -> dict:
 
 @require_GET
 @login_required
+@log_action("get vessel list", object_type="PP_VES")
 def api_django_vessels_list(request):
     """
     Returns Django master fleet list for right table.
@@ -1203,6 +1231,7 @@ def api_django_vessels_list(request):
 
 @require_POST
 @login_required
+@log_action("new vessel", object_type="PP_VES")
 def api_django_vessel_create(request):
     payload = _json_body(request)
     if not payload:
@@ -1234,6 +1263,7 @@ def api_django_vessel_create(request):
 
 @require_POST
 @login_required
+@log_action("vessel update", object_type="PP_VES")
 def api_django_vessel_update(request, pk: int):
     payload = _json_body(request)
     if not payload:
@@ -1268,6 +1298,7 @@ def api_django_vessel_update(request, pk: int):
 
 @require_POST
 @login_required
+@log_action("vessel delete", object_type="PP_VES")
 def api_django_vessel_delete(request, pk: int):
     try:
         v = Vessel.objects.get(pk=pk)
@@ -1284,6 +1315,7 @@ def api_django_vessel_delete(request, pk: int):
 
 @require_GET
 @login_required
+@log_action("fleet list", object_type="PP_VES")
 def api_project_fleet_list(request, project_id: int):
     project = _get_project_or_404(project_id)
     pdb = ProjectDB(project.db_path)
@@ -1298,6 +1330,7 @@ def api_project_fleet_list(request, project_id: int):
 
 @require_POST
 @login_required
+@log_action("add fleet from django", object_type="PP_VES")
 def api_project_fleet_add_from_django(request, project_id: int):
     """
     Adds a Django vessel into ProjectDB project_fleet by vessel_id.
@@ -1327,6 +1360,7 @@ def api_project_fleet_add_from_django(request, project_id: int):
 
 @require_POST
 @login_required
+@log_action("remove project fleet", object_type="PP_VES")
 def api_project_fleet_remove(request, project_id: int):
     """
     Removes a project_fleet row by project_fleet_id.
@@ -1353,6 +1387,7 @@ def api_project_fleet_remove(request, project_id: int):
 
 @require_POST
 @login_required
+@log_action("import fleet csv", object_type="PP_VES")
 def api_import_master_fleet_csv(request):
     """
     Imports missing vessels into Django master fleet from fleet/vessels_list.csv

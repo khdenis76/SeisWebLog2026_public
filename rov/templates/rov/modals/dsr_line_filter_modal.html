@@ -46,13 +46,18 @@
                   </div>
 
                   <div class="btn-group w-100 dsr-tri" role="group" data-filter="deployed">
-                    <button type="button" class="btn btn-sm dsr-any active" data-value="any">Any</button>
-                    <button type="button" class="btn btn-sm dsr-yes" data-value="1">
+                    <input type="radio" class="btn-check" name="dsrFilterDeployed" id="dsrFilterDeployedAny" value="any" checked>
+                    <label class="btn btn-sm dsr-any" for="dsrFilterDeployedAny">Any</label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterDeployed" id="dsrFilterDeployedYes" value="1">
+                    <label class="btn btn-sm dsr-yes" for="dsrFilterDeployedYes">
                       <i class="fa-solid fa-check me-1"></i>Yes
-                    </button>
-                    <button type="button" class="btn btn-sm dsr-no" data-value="0">
+                    </label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterDeployed" id="dsrFilterDeployedNo" value="0">
+                    <label class="btn btn-sm dsr-no" for="dsrFilterDeployedNo">
                       <i class="fa-solid fa-xmark me-1"></i>No
-                    </button>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -65,13 +70,18 @@
                   </div>
 
                   <div class="btn-group w-100 dsr-tri" role="group" data-filter="recovered">
-                    <button type="button" class="btn btn-sm dsr-any active" data-value="any">Any</button>
-                    <button type="button" class="btn btn-sm dsr-yes" data-value="1">
+                    <input type="radio" class="btn-check" name="dsrFilterRecovered" id="dsrFilterRecoveredAny" value="any" checked>
+                    <label class="btn btn-sm dsr-any" for="dsrFilterRecoveredAny">Any</label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterRecovered" id="dsrFilterRecoveredYes" value="1">
+                    <label class="btn btn-sm dsr-yes" for="dsrFilterRecoveredYes">
                       <i class="fa-solid fa-check me-1"></i>Yes
-                    </button>
-                    <button type="button" class="btn btn-sm dsr-no" data-value="0">
+                    </label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterRecovered" id="dsrFilterRecoveredNo" value="0">
+                    <label class="btn btn-sm dsr-no" for="dsrFilterRecoveredNo">
                       <i class="fa-solid fa-xmark me-1"></i>No
-                    </button>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -79,18 +89,23 @@
               <div class="col-md-6">
                 <div class="dsr-status-card">
                   <div class="dsr-status-title">
-                    <span class="dsr-ico dsr-ico-amber"><i class="fa-solid fa-file-circle-check"></i></span>
+                    <span class="dsr-ico dsr-ico-amber"><i class="fa-solid fa-box"></i></span>
                     SM Loaded (Deploy)
                   </div>
 
                   <div class="btn-group w-100 dsr-tri" role="group" data-filter="sm">
-                    <button type="button" class="btn btn-sm dsr-any active" data-value="any">Any</button>
-                    <button type="button" class="btn btn-sm dsr-yes" data-value="1">
+                    <input type="radio" class="btn-check" name="dsrFilterSm" id="dsrFilterSmAny" value="any" checked>
+                    <label class="btn btn-sm dsr-any" for="dsrFilterSmAny">Any</label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterSm" id="dsrFilterSmYes" value="1">
+                    <label class="btn btn-sm dsr-yes" for="dsrFilterSmYes">
                       <i class="fa-solid fa-check me-1"></i>Yes
-                    </button>
-                    <button type="button" class="btn btn-sm dsr-no" data-value="0">
+                    </label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterSm" id="dsrFilterSmNo" value="0">
+                    <label class="btn btn-sm dsr-no" for="dsrFilterSmNo">
                       <i class="fa-solid fa-xmark me-1"></i>No
-                    </button>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -98,18 +113,23 @@
               <div class="col-md-6">
                 <div class="dsr-status-card">
                   <div class="dsr-status-title">
-                    <span class="dsr-ico dsr-ico-purple"><i class="fa-solid fa-file-shield"></i></span>
+                    <span class="dsr-ico dsr-ico-purple"><i class="fa-solid fa-box-open"></i></span>
                     SM Loaded (Recovery)
                   </div>
 
                   <div class="btn-group w-100 dsr-tri" role="group" data-filter="smr">
-                    <button type="button" class="btn btn-sm dsr-any active" data-value="any">Any</button>
-                    <button type="button" class="btn btn-sm dsr-yes" data-value="1">
+                    <input type="radio" class="btn-check" name="dsrFilterSmr" id="dsrFilterSmrAny" value="any" checked>
+                    <label class="btn btn-sm dsr-any" for="dsrFilterSmrAny">Any</label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterSmr" id="dsrFilterSmrYes" value="1">
+                    <label class="btn btn-sm dsr-yes" for="dsrFilterSmrYes">
                       <i class="fa-solid fa-check me-1"></i>Yes
-                    </button>
-                    <button type="button" class="btn btn-sm dsr-no" data-value="0">
+                    </label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterSmr" id="dsrFilterSmrNo" value="0">
+                    <label class="btn btn-sm dsr-no" for="dsrFilterSmrNo">
                       <i class="fa-solid fa-xmark me-1"></i>No
-                    </button>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -118,15 +138,14 @@
             <div class="form-text mt-2">
               Example: Recovered = <b>No</b> and Deployed = <b>Yes</b> → lines deployed but not fully recovered.
             </div>
-
           </div>
         </div>
 
-        <!-- Section: Date/Time -->
+        <!-- Section: Date & Time -->
         <div class="dsr-section">
           <div class="dsr-section-head">
             <span class="dsr-badge">
-              <span class="dsr-dot" style="background:linear-gradient(135deg,#0dcaf0,#0d6efd); box-shadow:0 0 0 4px rgba(13,202,240,.18);"></span>
+              <span class="dsr-dot" style="background:linear-gradient(135deg,#60a5fa,#3b82f6); box-shadow:0 0 0 4px rgba(59,130,246,.18);"></span>
               Date & Time
             </span>
             <span class="text-muted small">optional</span>

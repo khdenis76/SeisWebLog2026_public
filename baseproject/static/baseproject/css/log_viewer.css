@@ -1,0 +1,13 @@
+.log-message-cell {
+  max-width: 600px;
+  white-space: normal;
+}
+
+.table td, .table th {
+  vertical-align: middle;
+}
+
+.badge {
+  font-size: .78rem;
+  letter-spacing: .02em;
+}
