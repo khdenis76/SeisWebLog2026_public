@@ -1,0 +1,15 @@
+{% extends "reports/base_report.html" %}
+{% block title %}Delete Report{% endblock %}
+{% block content %}
+<div class="report-shell">
+    <div class="card">
+        <h1>Delete Report</h1>
+        <p>Are you sure you want to delete <strong>{{ report.title }}</strong>?</p>
+        <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">Delete</button>
+            <a href="{% url 'reports:detail' report.pk %}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

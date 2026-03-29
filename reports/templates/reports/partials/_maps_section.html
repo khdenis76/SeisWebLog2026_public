@@ -1,0 +1,13 @@
+<div class="card section-card">
+    <h2>Progress Maps</h2>
+    <div class="media-grid">
+        {% for key, url in payload.maps.items %}
+            <div class="media-card">
+                <h3>{{ key|title|cut:"_" }}</h3>
+                <img src="{{ url }}" alt="{{ key }}">
+            </div>
+        {% empty %}
+            <p class="muted">No map images available for this period.</p>
+        {% endfor %}
+    </div>
+</div>

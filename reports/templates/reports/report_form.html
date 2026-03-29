@@ -1,0 +1,39 @@
+{% extends "reports/base_report.html" %}
+{% block title %}Generate Report{% endblock %}
+{% block content %}
+<div class="report-shell">
+    <div class="report-header-bar">
+        <div>
+            <h1>Generate Report</h1>
+            <p class="muted">Project: {{ project.name }}</p>
+        </div>
+        <div>
+            <a class="btn btn-secondary" href="{% url 'reports:home' %}">Back</a>
+        </div>
+    </div>
+
+    <div class="card form-card">
+        <form method="post">
+            {% csrf_token %}
+            <div class="form-grid">
+                {% for field in form %}
+                    <div class="form-field {% if field.name in 'include_activity include_qc include_maps include_charts include_fleet include_comments save_report' %}checkbox-field{% endif %}">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}
+                            <small class="muted">{{ field.help_text }}</small>
+                        {% endif %}
+                        {% if field.errors %}
+                            <div class="error-text">{{ field.errors }}</div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div class="actions-row">
+                <button type="submit" class="btn btn-primary">Build Report</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,130 @@
+.svp-page {
+    min-height: calc(100vh - 80px);
+}
+
+/* force split row on desktop */
+.svp-page .svp-split-wrap {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: stretch;
+    gap: 0;
+    width: 100%;
+    height: calc(100vh - 220px);
+    min-height: 420px;
+    overflow: hidden;
+}
+
+.svp-page .svp-panel {
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    display: block;
+}
+
+.svp-page .svp-panel > .card {
+    height: 100%;
+    border-radius: 0.9rem;
+}
+
+.svp-page .svp-panel-left {
+    width: 38%;
+    flex: 0 0 38%;
+    max-width: 80%;
+}
+
+.svp-page .svp-panel-right {
+    width: calc(62% - 8px);
+    flex: 1 1 auto;
+}
+
+.svp-page .svp-divider {
+    width: 8px;
+    min-width: 8px;
+    flex: 0 0 8px;
+    cursor: col-resize;
+    position: relative;
+    user-select: none;
+    background: transparent;
+}
+
+.svp-page .svp-divider::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 64px;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+    background: rgba(120, 120, 120, 0.55);
+}
+
+.svp-page .svp-divider:hover::before,
+.svp-page .svp-divider.is-dragging::before {
+    background: rgba(120, 120, 120, 0.95);
+}
+
+.svp-page .svp-hidden {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    flex: 0 0 0 !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    border: 0 !important;
+}
+
+.svp-page .svp-table-wrap {
+    height: 100%;
+    overflow: auto;
+}
+
+.svp-page #svpTable tbody tr {
+    cursor: pointer;
+}
+
+.svp-page #svpTable tbody tr.table-active td {
+    font-weight: 600;
+}
+
+body.svp-resizing,
+body.svp-resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+/* only stack on real small screens */
+@media (max-width: 991.98px) {
+    .svp-page .svp-split-wrap {
+        display: flex !important;
+        flex-direction: column !important;
+        height: auto;
+        min-height: 0;
+    }
+
+    .svp-page .svp-panel-left,
+    .svp-page .svp-panel-right {
+        width: 100% !important;
+        max-width: 100% !important;
+        flex: 1 1 auto !important;
+        min-height: 280px;
+    }
+
+    .svp-page .svp-divider {
+        width: 100%;
+        min-width: 100%;
+        height: 8px;
+        cursor: row-resize;
+        flex: 0 0 8px;
+    }
+
+    .svp-page .svp-divider::before {
+        width: 64px;
+        height: 4px;
+    }
+
+    body.svp-resizing,
+    body.svp-resizing * {
+        cursor: row-resize !important;
+    }
+}

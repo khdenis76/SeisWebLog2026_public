@@ -1,0 +1,27 @@
+<div class="card section-card">
+    <h2>QC Summary</h2>
+    <div class="two-col-grid">
+        <div>
+            <h3>Battery Life</h3>
+            <table class="report-table compact">
+                <tbody>
+                    <tr><th>Count</th><td>{{ payload.qc.battery_life.count|default:"-" }}</td></tr>
+                    <tr><th>Min</th><td>{{ payload.qc.battery_life.min|default:"-" }}</td></tr>
+                    <tr><th>Max</th><td>{{ payload.qc.battery_life.max|default:"-" }}</td></tr>
+                    <tr><th>Avg</th><td>{{ payload.qc.battery_life.avg|default:"-" }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div>
+            <h3>Radial Offset</h3>
+            <table class="report-table compact">
+                <tbody>
+                    <tr><th>Count</th><td>{{ payload.qc.radial_offset.count|default:"-" }}</td></tr>
+                    <tr><th>Min</th><td>{{ payload.qc.radial_offset.min|default:"-" }}</td></tr>
+                    <tr><th>Max</th><td>{{ payload.qc.radial_offset.max|default:"-" }}</td></tr>
+                    <tr><th>Avg</th><td>{{ payload.qc.radial_offset.avg|default:"-" }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

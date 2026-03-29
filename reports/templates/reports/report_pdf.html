@@ -1,0 +1,27 @@
+{% extends "reports/base_report.html" %}
+{% block title %}{{ payload.header.title }}{% endblock %}
+{% block content %}
+<div class="pdf-shell">
+    <h1>{{ payload.header.title }}</h1>
+    <p>{{ payload.header.project_name }}</p>
+    <p>{{ payload.header.start_date }} → {{ payload.header.end_date }}</p>
+
+    {% include "reports/partials/_summary_cards.html" %}
+
+    {% if payload.options.include_maps %}
+        {% include "reports/partials/_maps_section.html" %}
+    {% endif %}
+
+    {% if payload.options.include_charts %}
+        {% include "reports/partials/_charts_grid.html" %}
+    {% endif %}
+
+    {% if payload.options.include_fleet %}
+        {% include "reports/partials/_fleet_section.html" %}
+    {% endif %}
+
+    {% if payload.options.include_qc %}
+        {% include "reports/partials/_qc_section.html" %}
+    {% endif %}
+</div>
+{% endblock %}

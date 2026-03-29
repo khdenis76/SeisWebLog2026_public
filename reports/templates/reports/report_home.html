@@ -1,0 +1,55 @@
+{% extends "reports/base_report.html" %}
+{% block title %}Reports Home{% endblock %}
+{% block content %}
+<div class="report-shell">
+    <div class="report-header-bar">
+        <div>
+            <h1>Reports</h1>
+            <p class="muted">Project: {{ project.name }}</p>
+        </div>
+        <div>
+            <a class="btn btn-primary" href="{% url 'reports:generate' %}">Generate New Report</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Saved Reports</h2>
+        {% if reports %}
+            <div class="table-wrap">
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Type</th>
+                            <th>Period</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in reports %}
+                        <tr>
+                            <td>{{ r.title }}</td>
+                            <td>{{ r.get_report_type_display }}</td>
+                            <td>{{ r.start_date }} → {{ r.end_date }}</td>
+                            <td>{{ r.get_status_display }}</td>
+                            <td>{{ r.created_at }}</td>
+                            <td>
+                                <a href="{% url 'reports:detail' r.pk %}">Open</a>
+                                |
+                                <a href="{% url 'reports:pdf' r.pk %}">PDF</a>
+                                |
+                                <a href="{% url 'reports:delete' r.pk %}">Delete</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="muted">No reports generated yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+<div class="card section-card">
+    <h2>Fleet / ROV Summary</h2>
+    <div class="two-col-grid">
+        <div>
+            <h3>By Vessel</h3>
+            <table class="report-table">
+                <thead><tr><th>Name</th><th>Count</th></tr></thead>
+                <tbody>
+                {% for row in payload.fleet.by_vessel %}
+                    <tr><td>{{ row.name }}</td><td>{{ row.count }}</td></tr>
+                {% empty %}
+                    <tr><td colspan="2">No vessel summary available.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div>
+            <h3>By ROV</h3>
+            <table class="report-table">
+                <thead><tr><th>Name</th><th>Count</th></tr></thead>
+                <tbody>
+                {% for row in payload.fleet.by_rov %}
+                    <tr><td>{{ row.name }}</td><td>{{ row.count }}</td></tr>
+                {% empty %}
+                    <tr><td colspan="2">No ROV summary available.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

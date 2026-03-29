@@ -1,0 +1,36 @@
+{% extends "reports/base_report.html" %}
+{% block title %}Report Preview{% endblock %}
+{% block content %}
+<div class="report-shell preview-shell">
+    <div class="report-header-bar">
+        <div>
+            <h1>{{ payload.header.title }}</h1>
+            <p class="muted">{{ payload.header.project_name }} | {{ payload.header.start_date }} → {{ payload.header.end_date }}</p>
+        </div>
+        <div>
+            <a class="btn btn-secondary" href="{% url 'reports:generate' %}">Back to Form</a>
+            {% if report %}
+                <a class="btn btn-primary" href="{% url 'reports:pdf' report.pk %}">Export PDF</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% include "reports/partials/_summary_cards.html" %}
+
+    {% if payload.options.include_maps %}
+        {% include "reports/partials/_maps_section.html" %}
+    {% endif %}
+
+    {% if payload.options.include_charts %}
+        {% include "reports/partials/_charts_grid.html" %}
+    {% endif %}
+
+    {% if payload.options.include_fleet %}
+        {% include "reports/partials/_fleet_section.html" %}
+    {% endif %}
+
+    {% if payload.options.include_qc %}
+        {% include "reports/partials/_qc_section.html" %}
+    {% endif %}
+</div>
+{% endblock %}
