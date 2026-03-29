@@ -1,39 +1,27 @@
 {% extends "reports/base_report.html" %}
-{% block title %}Generate Report{% endblock %}
 {% block content %}
-<div class="report-shell">
-    <div class="report-header-bar">
-        <div>
-            <h1>Generate Report</h1>
-            <p class="muted">Project: {{ project.name }}</p>
-        </div>
-        <div>
-            <a class="btn btn-secondary" href="{% url 'reports:home' %}">Back</a>
-        </div>
-    </div>
-
-    <div class="card form-card">
-        <form method="post">
-            {% csrf_token %}
-            <div class="form-grid">
-                {% for field in form %}
-                    <div class="form-field {% if field.name in 'include_activity include_qc include_maps include_charts include_fleet include_comments save_report' %}checkbox-field{% endif %}">
-                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                        {{ field }}
-                        {% if field.help_text %}
-                            <small class="muted">{{ field.help_text }}</small>
-                        {% endif %}
-                        {% if field.errors %}
-                            <div class="error-text">{{ field.errors }}</div>
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            </div>
-
-            <div class="actions-row">
-                <button type="submit" class="btn btn-primary">Build Report</button>
-            </div>
-        </form>
-    </div>
-</div>
+<form method="post" class="swl-card">
+  {% csrf_token %}
+  <div class="swl-card-header"><h2>Generate Interactive Report</h2></div>
+  <div class="swl-form-grid">
+    <div class="swl-field"><label>Report Type</label>{{ form.report_type }}</div>
+    <div class="swl-field"><label>Custom Title</label>{{ form.title }}</div>
+    <div class="swl-field"><label>Start Date</label>{{ form.start_date }}</div>
+    <div class="swl-field"><label>End Date</label>{{ form.end_date }}</div>
+    <div class="swl-field swl-span-2"><label>Template</label>{{ form.template }}</div>
+    <div class="swl-field swl-span-2"><label>Narrative / Operations Comment</label>{{ form.narrative }}</div>
+  </div>
+  <div class="swl-check-grid">
+    <label>{{ form.include_summary }} Summary</label>
+    <label>{{ form.include_activity }} Activity</label>
+    <label>{{ form.include_qc }} QC</label>
+    <label>{{ form.include_maps }} Maps</label>
+    <label>{{ form.include_fleet }} Fleet</label>
+    <label>{{ form.include_narrative }} Narrative</label>
+    <label>{{ form.save_report }} Save snapshot</label>
+    <label>{{ form.build_pdf }} Prepare PDF later</label>
+  </div>
+  {% if form.errors %}<div class="swl-message error">{{ form.errors }}</div>{% endif %}
+  <div class="swl-toolbar"><button class="swl-btn swl-btn-primary" type="submit">Build Interactive Report</button></div>
+</form>
 {% endblock %}

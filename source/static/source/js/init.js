@@ -1,4 +1,4 @@
-import {initSourceUpload} from "./initSourceUpload.js";
+//import {initSourceUpload} from "./initSourceUpload.js";
 import {initColumnToggles} from "../../rov/js/initColumnToggles.js";
 import {initSpsTableSelection} from "./initSPSTableSelection.js";
 import {initSpsDelete} from "./initSPSDelete.js";
@@ -11,15 +11,23 @@ import {initSpsRowLinePlot} from "./initSpsRowLinePlot.js";
 import {initSourceUploadSubmit} from "./initSourceUploadModal.js"
 import {initSpsTableAdvancedSort} from "./initSPSTableSortModal.js";
 import {initShotTableSort} from "./initShotTableSort.js";
-import {initShotSummaryBackendFilters} from "./initShotTableFilterModal.js";
+//import {initShotSummaryBackendFilters} from "./initShotTableFilterModal.js";
+import {initClickOnSTLine} from "./initClickOnSTLine.js";
+import {initShotSummaryDelete} from "./initShotSummaryDelete.js";
+import {initShotSummaryRecalc} from "./initShotSummaryRecalc.js";
+import {initShotSummaryFilters} from "./initShotSummaryFilters.js";
+//import {initRecalcLines} from "./initRecalcLines.js";
 
-export function initAllJSForSource() {
-    initSourceUploadSubmit()
-    initSourceUpload();
+document.addEventListener("DOMContentLoaded", () => {
+  initSourceUploadSubmit()
+    //initSourceUpload();
     initSpsTableSelection();
     initSpsDelete();
     //initSpsTableFilterModal();
     initSourceQCMap();
+    initShotSummaryRecalc();
+    initShotSummaryFilters();
+    //initRecalcLines();
     initSpsTableFilterModal({
     tbodyId: "sps-table-tbody",
     countId: "sps-filter-count",
@@ -27,10 +35,12 @@ export function initAllJSForSource() {
     endpoint: "/source/sps/table-data/"
   });
     initSourceQCStats();
+    initClickOnSTLine();
     initShotTableSort();
     initDailyProductionTab();
     initSpsRowLinePlot();
-    initShotSummaryBackendFilters();
+    //initShotSummaryBackendFilters();
+    initShotSummaryDelete();
     initShotLineSort({ tbodyId: "shot-summary-tbody" }); // <-- your tbody id
     initSpsTableAdvancedSort({
     tableId: "sps-table",
@@ -53,4 +63,4 @@ export function initAllJSForSource() {
     "source_right-rov-toggle-icon",
     { toggleElId: "source_left-rov-col", divOn: "col-12", divOff: "col-4" }
   );
-}
+});

@@ -24,44 +24,56 @@ def source_home(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
     if not project:
-        # No active project → go to project list
         return redirect("projects")
 
     if not project.can_view(request.user):
         raise PermissionDenied("You are not a member of this project.")
 
-
     pdb = ProjectDB(project.db_path)
     sd = SourceData(project.db_path)
+    schema_result = sd.ensure_source_runtime_schema()
+    print(schema_result)
+    #sd.ensure_stfiles_schema()
     #sd.ensure_shot_table_schema()
-    sd.create_v_shot_linesummary_view()
+    sd.create_shot_table_indexes()
+    #sd.ensure_shot_linesummary_table()
+
+
+
     gun_qc = pdb.get_gun_qc()
     min_depth_limit = gun_qc.depth - gun_qc.depth_tolerance
     max_depth_limit = gun_qc.depth + gun_qc.depth_tolerance
-    shot_table_rows = sd.list_shot_table_summary()
 
-    st_summary = render_to_string("source/partials/shot_table_tbody.html",{"rows":shot_table_rows})
+    shot_table_rows = sd.list_shot_table_summary()
+    st_summary = render_to_string("source/partials/shot_table_tbody.html", {"rows": shot_table_rows})
+
     sps_table_rows = sd.list_sps_files_summary()
-    sps_summary = render_to_string("source/partials/sps_table_tbody.html",
-                                   {"rows":sps_table_rows,
-                                    "min_depth_limit":min_depth_limit,
-                                    "max_depth_limit":max_depth_limit,
-                                    "gun_qc":gun_qc,
-                                    })
+    sps_summary = render_to_string(
+        "source/partials/sps_table_tbody.html",
+        {
+            "rows": sps_table_rows,
+            "min_depth_limit": min_depth_limit,
+            "max_depth_limit": max_depth_limit,
+            "gun_qc": gun_qc,
+        }
+    )
+
     res = sd.read_vessel_purpose_summary()
     project_summary = render_to_string(
         "source/partials/vessel_purpose_summary.html",
         {"rows": res["rows"], "totals": res["totals"]},
-        request=request)
-    data = sd.get_shot_line_summary()  # or your existing read method
+        request=request
+    )
+
+    data = sd.get_shot_line_summary()
     shot_line_summary = render_to_string(
-        "source/partials/_shot_line_summary_tbody.html",{"rows": data["rows"]})
+        "source/partials/_shot_line_summary_tbody.html",
+        {"rows": data["rows"]},
+        request=request,
+    )
+    shot_line_summary_count = len(data["rows"])
+    fleet = pdb.list_project_fleet()
 
-
-    # Project fleet (project-specific)
-    fleet = pdb.list_project_fleet()  # list[dict]
-
-    # Filter: active + Source
     fleet_vessels = []
     for v in fleet:
         vtype = str(v.get("vessel_type") or "").strip().lower()
@@ -69,11 +81,11 @@ def source_home(request):
         if is_active == 1 and vtype == "source":
             fleet_vessels.append(v)
 
-    years = list(range(date.today().year, 1999, -1))  # now..2000
-    tiers = list(range(1, 11))  # 1..10
-
-    sps_revisions = SPSRevision.objects.all()  # adjust field
-
+    years = list(range(date.today().year, 1999, -1))
+    tiers = list(range(1, 11))
+    sps_revisions = SPSRevision.objects.all()
+    shot_filter_options = sd.get_shot_summary_filter_options()
+    st_file_name = sd.get_latest_stfile_name()
     return render(
         request,
         "source/source_home.html",
@@ -84,11 +96,14 @@ def source_home(request):
             "sps_revisions": sps_revisions,
             "st_summary": st_summary,
             "sps_summary": sps_summary,
-            "gun_qc":gun_qc,
-            "project_summary":project_summary,
-            "shot_line_summary":shot_line_summary,
-
-        },)
+            "gun_qc": gun_qc,
+            "project_summary": project_summary,
+            "shot_line_summary": shot_line_summary,
+            "shot_filter_options": shot_filter_options,
+            "shot_line_summary_count": shot_line_summary_count,
+            "st_file_name": st_file_name,
+        },
+    )
 @login_required
 @require_POST
 @log_action("upload source files", object_type="SOU_UPL")
@@ -97,6 +112,7 @@ def source_upload_files(request):
     project = user_settings.active_project
     if not project:
         return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+
     if not project.can_edit(request.user):
         return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
 
@@ -128,7 +144,6 @@ def source_upload_files(request):
             return JsonResponse({"ok": False, "error": "Missing SPS Revision."}, status=400)
         if not tier_raw:
             return JsonResponse({"ok": False, "error": "Missing TIER."}, status=400)
-
         if (not auto_year_by_jday) and (not year_raw):
             return JsonResponse({"ok": False, "error": "Missing Year."}, status=400)
 
@@ -170,27 +185,101 @@ def source_upload_files(request):
         extras = {}
 
         if file_type == "SHOT":
-            # full replace shot table
-            inserted = 0
-            for f in files:
-                inserted = sd.load_shot_table_h26_replace_all_fast(
-                    f.file,
-                    chunk_size=10000,
-                    conn=None,
-                )
-                total_inserted += int(inserted)
-                file_results.append({
-                    "name": f.name,
-                    "inserted": int(inserted),
-                })
+            total_duplicates = 0
+            changed_lines = set()
+            deleted_lines = set()
+            tracked_lines = 0
+            total_skipped_deleted = 0
+            total_restored_deleted = 0
 
-            shot_table_rows = sd.list_shot_table_summary()
+            use_tail_import = str(request.POST.get("shot_use_tail_import") or "").strip().lower() in (
+            "1", "true", "on", "yes")
+            track_line_bytes = str(request.POST.get("shot_track_line_bytes") or "").strip().lower() in (
+            "1", "true", "on", "yes")
+            delete_missing_lines = str(request.POST.get("shot_delete_missing_lines") or "").strip().lower() in (
+            "1", "true", "on", "yes")
+            restore_deleted_lines = str(request.POST.get("shot_restore_deleted_lines") or "").strip().lower() in (
+            "1", "true", "on", "yes")
+
+            with sd.get_conn() as conn:
+                sd.ensure_stfiles_schema(conn=conn)
+                sd.ensure_shot_table_schema(conn=conn)
+                sd.ensure_shot_linesummary_table(conn=conn)
+                sd.create_shot_table_indexes(conn=conn, drop_duplicates=False)
+
+                if not getattr(sd, "seq_ranges", None):
+                    sd.load_sequence_mapping(conn=conn)
+
+                conn.execute("BEGIN IMMEDIATE;")
+
+                for f in files:
+                    res = sd.load_shot_table_h26_incremental(
+                        f,
+                        conn=conn,
+                        chunk_size=100000,
+                        use_tail_import=use_tail_import,
+                        track_line_bytes=track_line_bytes,
+                        delete_missing_lines=delete_missing_lines,
+                        restore_deleted_lines=restore_deleted_lines,
+                        debug=True,
+                    )
+
+                    inserted_this = int(res.get("inserted") or 0)
+                    duplicates_this = int(res.get("duplicates") or 0)
+                    skipped_deleted_this = int(res.get("skipped_deleted") or 0)
+                    restored_deleted_this = int(res.get("restored_deleted") or 0)
+                    lines_this = res.get("changed_lines") or []
+                    deleted_this = res.get("deleted_lines") or []
+
+                    total_inserted += inserted_this
+                    total_duplicates += duplicates_this
+                    total_skipped_deleted += skipped_deleted_this
+                    total_restored_deleted += restored_deleted_this
+                    tracked_lines += int(res.get("tracked_lines") or 0)
+                    changed_lines.update(lines_this)
+                    deleted_lines.update(deleted_this)
+
+                    file_results.append({
+                        "name": f.name,
+                        "stfile_id": int(res.get("stfile_id") or 0),
+                        "import_mode": res.get("import_mode"),
+                        "start_byte": int(res.get("start_byte") or 0),
+                        "end_byte": int(res.get("end_byte") or 0),
+                        "inserted": inserted_this,
+                        "duplicates": duplicates_this,
+                        "skipped_deleted": skipped_deleted_this,
+                        "restored_deleted": restored_deleted_this,
+                        "changed_lines": len(lines_this),
+                        "deleted_lines": len(deleted_this),
+                        "tracked_lines": int(res.get("tracked_lines") or 0),
+                    })
+
+                affected_lines = sorted(changed_lines | deleted_lines)
+                if affected_lines:
+                    sd.refresh_shot_linesummary_lines(affected_lines, conn=conn)
+
+            shot_line_data = sd.get_shot_line_summary()
+            latest_st_file_name = sd.get_latest_stfile_name()
             tbody_html = render_to_string(
-                "source/partials/shot_table_tbody.html",
-                {"rows": shot_table_rows},
+                "source/partials/_shot_line_summary_tbody.html",
+                {"rows": shot_line_data["rows"]},
                 request=request,
             )
-            target_tbody = "shot-table-tbody"
+            target_tbody = "shot-summary-tbody"
+
+            extras = {
+                "duplicates": int(total_duplicates),
+                "changed_lines": len(changed_lines),
+                "deleted_lines": len(deleted_lines),
+                "tracked_lines": int(tracked_lines),
+                "skipped_deleted": int(total_skipped_deleted),
+                "restored_deleted": int(total_restored_deleted),
+                "use_tail_import": bool(use_tail_import),
+                "track_line_bytes": bool(track_line_bytes),
+                "delete_missing_lines": bool(delete_missing_lines),
+                "restore_deleted_lines": bool(restore_deleted_lines),
+                "st_file_name": latest_st_file_name,
+            }
 
         elif file_type == "SPS":
             for f in files:
@@ -216,6 +305,10 @@ def source_upload_files(request):
 
                 total_inserted += int(res.get("points") or 0)
                 file_results.append({"name": f.name, **res})
+
+            with sd.get_conn() as conn:
+                sd.ensure_shot_linesummary_table(conn=conn)
+                sd.create_shot_line_summary_table(conn=conn)
 
             gun_qc = pdb.get_gun_qc()
             min_depth_limit = None
@@ -533,3 +626,198 @@ def source_sp_solution_vs_preplot_json(request):
 
 def shot_line_summary_table(request):
     return None
+@login_required
+@log_action("click on st sailline", object_type="SOU")
+@login_required
+@log_action("click on st sailline", object_type="SOU")
+def source_sps_shot_compare_tbody(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+
+    if not project.can_view(request.user):
+        return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
+
+    line_code = (request.GET.get("line_code") or "").strip()
+    mismatches_only = request.GET.get("mismatches_only") == "1"
+
+    rows = []
+    if line_code:
+        sd = SourceData(project.db_path)
+        rows = sd.get_sps_shot_compare_by_sailline(
+            sailline=line_code,
+            mismatches_only=mismatches_only,
+        )
+
+    tbody_html = render_to_string(
+        "source/partials/sps_shot_compare_tbody.html",
+        {
+            "rows": rows,
+        },
+        request=request,
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "tbody_html": tbody_html,
+        "line_code": line_code,
+        "row_count": len(rows),
+        "mismatches_only": mismatches_only,
+    })
+
+@login_required
+@require_POST
+@log_action("delete sailline from ST", object_type="SOU")
+def shot_delete_selected_lines(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return redirect("projects")
+
+    if not project.can_edit(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        nav_line_codes = payload.get("nav_line_codes", [])
+
+        if not isinstance(nav_line_codes, list):
+            return JsonResponse({
+                "success": False,
+                "error": "nav_line_codes must be a list."
+            }, status=400)
+
+        nav_line_codes = [str(x).strip() for x in nav_line_codes if str(x).strip()]
+        nav_line_codes = list(dict.fromkeys(nav_line_codes))
+
+        if not nav_line_codes:
+            return JsonResponse({
+                "success": False,
+                "error": "No lines selected."
+            }, status=400)
+
+        sd = SourceData(project.db_path)
+
+        result = sd.delete_lines(
+            nav_line_codes,
+            deleted_by=getattr(request.user, "username", None),
+        )
+
+        return JsonResponse({
+            "success": True,
+            "deleted_lines": result.get("deleted_lines", 0),
+            "deleted_shots": result.get("deleted_shot_rows", 0),
+            "deleted_summary_rows": result.get("deleted_summary_rows", 0),
+            "marked_deleted_lines": result.get("marked_deleted_lines", 0),
+            "lines": result.get("lines", []),
+        })
+
+    except Exception as exc:
+        return JsonResponse({
+            "success": False,
+            "error": str(exc)
+        }, status=500)
+@login_required
+@require_POST
+@log_action("recalc saillines from ST", object_type="SOU")
+def recalc_selected_lines(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({
+            "success": False,
+            "error": "No active project."
+        }, status=400)
+
+    if not project.can_edit(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        nav_line_codes = payload.get("nav_line_codes", [])
+
+        if not isinstance(nav_line_codes, list):
+            return JsonResponse({
+                "success": False,
+                "error": "nav_line_codes must be a list."
+            }, status=400)
+
+        nav_line_codes = [str(x).strip() for x in nav_line_codes if str(x).strip()]
+        nav_line_codes = list(dict.fromkeys(nav_line_codes))
+
+        if not nav_line_codes:
+            return JsonResponse({
+                "success": False,
+                "error": "No lines selected."
+            }, status=400)
+
+        sd = SourceData(project.db_path)
+
+        with sd.get_conn() as conn:
+            sd.ensure_shot_table_schema(conn=conn)
+            sd.ensure_shot_linesummary_table(conn=conn)
+            sd.create_shot_table_indexes(conn=conn, drop_duplicates=False)
+            sd.refresh_shot_linesummary_lines(nav_line_codes, conn=conn)
+
+        shot_line_data = sd.get_shot_line_summary()
+        tbody_html = render_to_string(
+            "source/partials/_shot_line_summary_tbody.html",
+            {"rows": shot_line_data["rows"]},
+            request=request,
+        )
+
+        return JsonResponse({
+            "success": True,
+            "recalculated_lines": len(nav_line_codes),
+            "lines": nav_line_codes,
+            "target_tbody": "shot-summary-tbody",
+            "tbody_html": tbody_html,
+        })
+
+    except Exception as exc:
+        return JsonResponse({
+            "success": False,
+            "error": str(exc)
+        }, status=500)
+@login_required
+@log_action("filter shot line summary", object_type="SOU")
+def source_shot_line_summary_tbody(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+
+    if not project.can_view(request.user):
+        return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
+
+    sd = SourceData(project.db_path)
+
+    # 🔥 reuse your style
+    rows = sd.get_shot_line_summary_filtered(
+        nav_line_code=request.GET.get("nav_line_code"),
+        nav_line=_to_int_or_none(request.GET.get("nav_line")),
+        attempt=request.GET.get("attempt"),
+        seq_from=_to_int_or_none(request.GET.get("seq_from")),
+        seq_to=_to_int_or_none(request.GET.get("seq_to")),
+        purpose_id=_to_int_or_none(request.GET.get("purpose_id")),
+        vessel_id=_to_int_or_none(request.GET.get("vessel_id")),
+        is_in_sl=_to_int_or_none(request.GET.get("is_in_sl")),
+        qc_all_match=_to_int_or_none(request.GET.get("qc_all_match")),
+        qc_any_match=_to_int_or_none(request.GET.get("qc_any_match")),
+        diffsum=request.GET.get("diffsum"),
+        limit=5000,
+    )
+
+    tbody_html = render_to_string(
+        "source/partials/_shot_line_summary_tbody.html",
+        {"rows": rows},
+        request=request,
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "tbody_html": tbody_html,
+        "count": len(rows),
+    })

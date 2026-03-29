@@ -185,7 +185,9 @@ class SourceSPSData:
     array_code: int = 0
 
     # depths/coords
+    static: int = 0
     point_depth: float = 0.0
+    datum: int =0
     water_depth: float = 0.0
     easting: float = 0.0
     northing: float = 0.0
@@ -281,10 +283,12 @@ class SourceSPSData:
             self.point,
 
             self.point_code,
+            self.static,
             self.fire_code,
             self.array_code,
 
             self.point_depth,
+            self.datum,
             self.water_depth,
             self.easting,
             self.northing,

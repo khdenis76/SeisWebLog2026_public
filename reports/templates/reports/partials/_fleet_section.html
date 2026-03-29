@@ -1,31 +1,24 @@
-<div class="card section-card">
-    <h2>Fleet / ROV Summary</h2>
-    <div class="two-col-grid">
-        <div>
-            <h3>By Vessel</h3>
-            <table class="report-table">
-                <thead><tr><th>Name</th><th>Count</th></tr></thead>
-                <tbody>
-                {% for row in payload.fleet.by_vessel %}
-                    <tr><td>{{ row.name }}</td><td>{{ row.count }}</td></tr>
-                {% empty %}
-                    <tr><td colspan="2">No vessel summary available.</td></tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        <div>
-            <h3>By ROV</h3>
-            <table class="report-table">
-                <thead><tr><th>Name</th><th>Count</th></tr></thead>
-                <tbody>
-                {% for row in payload.fleet.by_rov %}
-                    <tr><td>{{ row.name }}</td><td>{{ row.count }}</td></tr>
-                {% empty %}
-                    <tr><td colspan="2">No ROV summary available.</td></tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
+<section class="swl-card">
+  <div class="swl-card-header"><h2>Fleet Summary</h2></div>
+  <div class="swl-grid swl-grid-2">
+    <div class="swl-card swl-inner-card">
+      <h3>Average Speed by Vessel</h3>
+      <div class="swl-table-wrap">
+        <table class="swl-table">
+          <thead><tr><th>Vessel</th><th>Avg Speed</th></tr></thead>
+          <tbody>
+            {% for row in payload.metrics.fleet.avg_speed %}
+            <tr><td>{{ row.name }}</td><td>{{ row.avg_speed }}</td></tr>
+            {% empty %}
+            <tr><td colspan="2" class="swl-muted">No BlackBox speed data.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-</div>
+    <div class="swl-card swl-inner-card">
+      <h3>Notes</h3>
+      <p class="swl-muted">This fleet block is a starter layout. It is ready for your later SeisWebLog tables such as vessel purpose, ROV pairing, productive time, line contribution and sequence assignment summaries.</p>
+    </div>
+  </div>
+</section>

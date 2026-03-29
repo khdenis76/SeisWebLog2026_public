@@ -1,36 +1,24 @@
 {% extends "reports/base_report.html" %}
-{% block title %}Report Preview{% endblock %}
 {% block content %}
-<div class="report-shell preview-shell">
-    <div class="report-header-bar">
-        <div>
-            <h1>{{ payload.header.title }}</h1>
-            <p class="muted">{{ payload.header.project_name }} | {{ payload.header.start_date }} → {{ payload.header.end_date }}</p>
-        </div>
-        <div>
-            <a class="btn btn-secondary" href="{% url 'reports:generate' %}">Back to Form</a>
-            {% if report %}
-                <a class="btn btn-primary" href="{% url 'reports:pdf' report.pk %}">Export PDF</a>
-            {% endif %}
-        </div>
+  {{ all_bokeh_scripts|safe }}
+  <section class="swl-card">
+    <div class="swl-report-title-row">
+      <div>
+        <div class="swl-kicker">{{ report_type|title }} Report</div>
+        <h2>{{ report_title }}</h2>
+        <div class="swl-muted">{{ payload.start_date }} → {{ payload.end_date }}</div>
+      </div>
     </div>
-
-    {% include "reports/partials/_summary_cards.html" %}
-
-    {% if payload.options.include_maps %}
-        {% include "reports/partials/_maps_section.html" %}
-    {% endif %}
-
-    {% if payload.options.include_charts %}
-        {% include "reports/partials/_charts_grid.html" %}
-    {% endif %}
-
-    {% if payload.options.include_fleet %}
-        {% include "reports/partials/_fleet_section.html" %}
-    {% endif %}
-
-    {% if payload.options.include_qc %}
-        {% include "reports/partials/_qc_section.html" %}
-    {% endif %}
-</div>
+  </section>
+  {% include "reports/partials/_summary_cards.html" %}
+  {% include "reports/partials/_maps_section.html" %}
+  {% include "reports/partials/_charts_grid.html" %}
+  {% include "reports/partials/_fleet_section.html" %}
+  {% include "reports/partials/_qc_section.html" %}
+  {% if payload.narrative %}
+  <section class="swl-card">
+    <div class="swl-card-header"><h2>Narrative</h2></div>
+    <div class="swl-preline">{{ payload.narrative }}</div>
+  </section>
+  {% endif %}
 {% endblock %}

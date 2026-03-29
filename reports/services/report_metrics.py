@@ -1,182 +1,105 @@
 """
-Metric calculation layer for report generation.
-
-This module converts raw data frames into compact dictionaries that are
-safe to serialize to JSON and easy to display in templates.
+Metric aggregation for SeisWebLog reports.
 """
-from __future__ import annotations
 
-from typing import Any, Dict, List
+from __future__ import annotations
 
 import pandas as pd
 
 
 class ReportMetrics:
-    """
-    Convert raw data frames into summary metrics.
-    """
+    """Build summary/fleet/QC metrics from raw DataFrames."""
 
-    def __init__(self, raw: Dict[str, pd.DataFrame]):
+    def __init__(self, raw):
         self.raw = raw
 
-    def build_all(self, report_type: str = "weekly") -> Dict[str, Any]:
-        """
-        Build all metric groups used by the report preview.
-        """
-        return {
-            "summary": self.build_summary(),
-            "fleet": self.build_fleet_metrics(),
-            "qc": self.build_qc_metrics(),
-            "daily": self.build_daily_metrics(),
-            "report_type": report_type,
-        }
+    @staticmethod
+    def _safe_len(df: pd.DataFrame) -> int:
+        return 0 if df is None or df.empty else int(len(df))
 
-    def build_summary(self) -> Dict[str, Any]:
-        """
-        Build the top summary numbers shown in the report header/cards.
-        """
+    def build_summary(self):
         dsr = self.raw.get("dsr", pd.DataFrame())
         shots = self.raw.get("shots", pd.DataFrame())
-
-        deployed = 0
-        recovered = 0
-        unique_lines = 0
-
-        if not dsr.empty:
-            if "Status" in dsr.columns:
-                deployed = int(dsr[dsr["Status"].astype(str).str.strip().eq("Deployed")].shape[0])
-                recovered = int(dsr[dsr["Status"].astype(str).str.strip().eq("Recovered")].shape[0])
-
-            line_col = next((c for c in ["Line", "line", "dsr_line"] if c in dsr.columns), None)
-            if line_col:
-                unique_lines = int(dsr[line_col].astype(str).nunique())
-
+        status_col = "Status" if "Status" in dsr.columns else None
+        deployed = int((dsr[status_col].astype(str).str.lower() == "deployed").sum()) if status_col else 0
+        recovered = int((dsr[status_col].astype(str).str.lower() == "recovered").sum()) if status_col else 0
+        total_nodes = self._safe_len(dsr)
+        shot_count = self._safe_len(shots)
+        line_col = "Line" if "Line" in dsr.columns else None
+        active_lines = int(dsr[line_col].nunique()) if line_col else 0
         return {
             "deployed_nodes": deployed,
             "recovered_nodes": recovered,
-            "shot_count": int(len(shots.index)) if not shots.empty else 0,
-            "active_lines": unique_lines,
-            "has_dsr_data": not dsr.empty,
-            "has_shot_data": not shots.empty,
+            "shot_count": shot_count,
+            "total_nodes": total_nodes,
+            "active_lines": active_lines,
         }
 
-    def build_fleet_metrics(self) -> Dict[str, Any]:
-        """
-        Build per-vessel and per-ROV summaries.
-        """
-        dsr = self.raw.get("dsr", pd.DataFrame())
-        result: Dict[str, Any] = {
-            "by_vessel": [],
-            "by_rov": [],
-        }
-
+    def build_daily_activity(self):
+        dsr = self.raw.get("dsr", pd.DataFrame()).copy()
         if dsr.empty:
-            return result
+            return pd.DataFrame(columns=["day", "deployed", "recovered"])
+        time_col = "Timestamp" if "Timestamp" in dsr.columns else ("Timestamp1" if "Timestamp1" in dsr.columns else None)
+        if not time_col:
+            return pd.DataFrame(columns=["day", "deployed", "recovered"])
+        dsr["day"] = pd.to_datetime(dsr[time_col], errors="coerce").dt.date
+        dsr["status_l"] = dsr.get("Status", "").astype(str).str.lower()
+        daily = (
+            dsr.groupby("day", dropna=True)["status_l"]
+            .agg(
+                deployed=lambda s: int((s == "deployed").sum()),
+                recovered=lambda s: int((s == "recovered").sum()),
+            )
+            .reset_index()
+        )
+        return daily
 
+    def build_fleet_metrics(self):
+        dsr = self.raw.get("dsr", pd.DataFrame()).copy()
+        blackbox = self.raw.get("blackbox", pd.DataFrame()).copy()
         vessel_col = next((c for c in ["Vessel", "vessel_name", "VesselName"] if c in dsr.columns), None)
-        rov_col = next((c for c in ["ROV", "rov", "dsr_rov"] if c in dsr.columns), None)
-
-        if vessel_col:
-            vessel_counts = (
-                dsr[vessel_col]
-                .astype(str)
-                .str.strip()
-                .replace("", pd.NA)
-                .dropna()
-                .value_counts()
-                .reset_index()
-            )
-            vessel_counts.columns = ["name", "count"]
-            result["by_vessel"] = vessel_counts.to_dict(orient="records")
-
-        if rov_col:
-            rov_counts = (
-                dsr[rov_col]
-                .astype(str)
-                .str.strip()
-                .replace("", pd.NA)
-                .dropna()
-                .value_counts()
-                .reset_index()
-            )
-            rov_counts.columns = ["name", "count"]
-            result["by_rov"] = rov_counts.to_dict(orient="records")
-
-        return result
-
-    def build_qc_metrics(self) -> Dict[str, Any]:
-        """
-        Build simple QC statistics used in the first version.
-
-        The code tries several likely column names because SeisWebLog
-        tables may differ slightly between projects.
-        """
-        dsr = self.raw.get("dsr", pd.DataFrame())
-        qc: Dict[str, Any] = {
-            "battery_life": {},
-            "radial_offset": {},
+        rov_col = next((c for c in ["ROV", "ROV1", "rov_name"] if c in dsr.columns), None)
+        vessel_summary = dsr.groupby(vessel_col).size().reset_index(name="count") if vessel_col else pd.DataFrame(columns=["name", "count"])
+        if not vessel_summary.empty:
+            vessel_summary.columns = ["name", "count"]
+        rov_summary = dsr.groupby(rov_col).size().reset_index(name="count") if rov_col else pd.DataFrame(columns=["name", "count"])
+        if not rov_summary.empty:
+            rov_summary.columns = ["name", "count"]
+        speed_col = next((c for c in ["Speed", "speed", "VesselSpeed"] if c in blackbox.columns), None)
+        vessel_bb_col = next((c for c in ["Vessel", "vessel_name", "VesselName"] if c in blackbox.columns), None)
+        avg_speed = blackbox.groupby(vessel_bb_col)[speed_col].mean().reset_index() if speed_col and vessel_bb_col else pd.DataFrame(columns=["name", "avg_speed"])
+        if not avg_speed.empty:
+            avg_speed.columns = ["name", "avg_speed"]
+            avg_speed["avg_speed"] = avg_speed["avg_speed"].round(2)
+        return {
+            "vessel_summary": vessel_summary,
+            "rov_summary": rov_summary,
+            "avg_speed": avg_speed,
         }
 
-        if dsr.empty:
-            return qc
-
-        for label, candidates in {
-            "battery_life": ["BatteryLifeDays", "BatteryLife", "battery_life_days"],
-            "radial_offset": ["RadialOffset", "Radial_Offset", "radial_offset"],
-        }.items():
-            col = next((c for c in candidates if c in dsr.columns), None)
-            if not col:
-                continue
-
-            series = pd.to_numeric(dsr[col], errors="coerce").dropna()
-            if series.empty:
-                continue
-
-            qc[label] = {
-                "count": int(series.count()),
-                "min": round(float(series.min()), 3),
-                "max": round(float(series.max()), 3),
-                "avg": round(float(series.mean()), 3),
-            }
-
-        return qc
-
-    def build_daily_metrics(self) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Build daily tables for simple preview charts/tables.
-        """
-        dsr = self.raw.get("dsr", pd.DataFrame())
-        shots = self.raw.get("shots", pd.DataFrame())
-
-        result = {
-            "deployment_daily": [],
-            "shots_daily": [],
+    def build_qc_metrics(self):
+        dsr = self.raw.get("dsr", pd.DataFrame()).copy()
+        if {"REC_X", "REC_Y", "PreplotEasting", "PreplotNorthing"}.issubset(dsr.columns):
+            dsr["radial_offset"] = (
+                ((pd.to_numeric(dsr["REC_X"], errors="coerce") - pd.to_numeric(dsr["PreplotEasting"], errors="coerce")) ** 2)
+                + ((pd.to_numeric(dsr["REC_Y"], errors="coerce") - pd.to_numeric(dsr["PreplotNorthing"], errors="coerce")) ** 2)
+            ) ** 0.5
+        else:
+            dsr["radial_offset"] = pd.Series(dtype=float)
+        battery_col = next((c for c in ["BatteryLifeDays", "battery_life_days", "BatteryLife"] if c in dsr.columns), None)
+        battery_values = pd.to_numeric(dsr[battery_col], errors="coerce").dropna().tolist() if battery_col else []
+        radial_values = pd.to_numeric(dsr["radial_offset"], errors="coerce").dropna().tolist()
+        return {
+            "battery_values": battery_values,
+            "radial_offset_values": radial_values,
+            "battery_avg": round(float(pd.Series(battery_values).mean()), 2) if battery_values else None,
+            "radial_avg": round(float(pd.Series(radial_values).mean()), 2) if radial_values else None,
         }
 
-        if not dsr.empty:
-            ts_col = next((c for c in ["dsr_timestamp", "Timestamp", "timestamp"] if c in dsr.columns), None)
-            status_col = "Status" if "Status" in dsr.columns else None
-            if ts_col and status_col:
-                temp = dsr.copy()
-                temp[ts_col] = pd.to_datetime(temp[ts_col], errors="coerce")
-                temp = temp.dropna(subset=[ts_col])
-                temp["date"] = temp[ts_col].dt.date.astype(str)
-                dep = (
-                    temp[temp[status_col].astype(str).str.strip().eq("Deployed")]
-                    .groupby("date")
-                    .size()
-                    .reset_index(name="count")
-                )
-                result["deployment_daily"] = dep.to_dict(orient="records")
-
-        if not shots.empty:
-            shot_ts_col = next((c for c in ["shot_time", "source_time", "Timestamp"] if c in shots.columns), None)
-            if shot_ts_col:
-                temp = shots.copy()
-                temp[shot_ts_col] = pd.to_datetime(temp[shot_ts_col], errors="coerce")
-                temp = temp.dropna(subset=[shot_ts_col])
-                temp["date"] = temp[shot_ts_col].dt.date.astype(str)
-                shp = temp.groupby("date").size().reset_index(name="count")
-                result["shots_daily"] = shp.to_dict(orient="records")
-
-        return result
+    def build_all(self):
+        return {
+            "summary": self.build_summary(),
+            "daily_activity": self.build_daily_activity().to_dict(orient="records"),
+            "fleet": {key: df.to_dict(orient="records") for key, df in self.build_fleet_metrics().items()},
+            "qc": self.build_qc_metrics(),
+        }

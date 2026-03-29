@@ -84,7 +84,22 @@ Logs functional added to the baseprojecr
 ### Fixed
 ROV filter fixed 
 ### Changed
-The collumns order on DSR line table was changed in order to better view  
+The collumns order on DSR line table was changed in order to better view
+## [2026.1.02.00] - 2026-03-24
+### Added
+ ST Filter added
+ ST tail load
+ ST SailLine datavie on seq click 
+ ST file name show up in window
+ Recalc function added 
+ST delete function added 
+### Fixed
+Datum and Static fields were not loaded for Source SPS before this issue was fixed.
+Change shot_table loader. loading more fast but database should be isolated
+
+### Changed
+
+
 
 
    

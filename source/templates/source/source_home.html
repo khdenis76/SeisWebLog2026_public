@@ -1,5 +1,9 @@
 {% extends "base.html" %}
-{% block title %}SOURCE (SPS,SHOT TABLE ETC) — {{ project.name }}{% endblock %}
+{% load static %}
+{% block extra_head %}
+   <link rel="stylesheet" href="{% static 'source/css/st_compare_table.css' %}">
+  <link rel="stylesheet" href="{% static 'source/css/st_table_selected.css' %}">
+{% endblock %}
 {% block content %}
 
 <div class="container-fluid">
@@ -56,10 +60,20 @@
     </div>
   </div>
 </div>
+{% include "source/partials/_shot_delete_toast.html" %}
+{% include "source/partials/shot_table_recalc_toast.html" %}
 {% include "source/modals/source_upload_modal.html" %}
 {% include "source/modals/delete_sps_modal.html" %}
 {% include "source/modals/sps_table_filter_modal.html" %}
 {% include "source/modals/sps_sort_modal.html" %}
 {% include "source/modals/_shot_sort_modal.html" %}
-{% include "source/modals/shot_table_filter_modal.html" %}
+{% include "source/modals/shot_summary_filter_modal.html" %}
+{% include "source/modals/_shot_delete_modal.html" %}
+{% include "source/modals/_shot_recalc_modal.html" %}
+
+
+
+{% endblock %}
+{% block extra_js %}
+    <script type="module" src="{% static 'source/js/init.js' %}"></script>
 {% endblock %}

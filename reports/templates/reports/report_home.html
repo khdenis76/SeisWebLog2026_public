@@ -1,55 +1,51 @@
 {% extends "reports/base_report.html" %}
-{% block title %}Reports Home{% endblock %}
 {% block content %}
-<div class="report-shell">
-    <div class="report-header-bar">
-        <div>
-            <h1>Reports</h1>
-            <p class="muted">Project: {{ project.name }}</p>
-        </div>
-        <div>
-            <a class="btn btn-primary" href="{% url 'reports:generate' %}">Generate New Report</a>
-        </div>
+<section class="swl-grid swl-grid-2">
+  <div class="swl-card">
+    <h2>Interactive Reporting</h2>
+    <p class="swl-muted">Build SeisWebLog-style weekly, monthly and survey-wide reports with interactive Bokeh maps, interactive Plotly charts and optional PDF export.</p>
+    <div class="swl-badge-row">
+      <span class="swl-badge">Weekly</span>
+      <span class="swl-badge">Monthly</span>
+      <span class="swl-badge">Survey Wide</span>
+      <span class="swl-badge">Bokeh</span>
+      <span class="swl-badge">Plotly</span>
+      <span class="swl-badge">PDF</span>
     </div>
+    <div class="swl-toolbar"><a class="swl-btn swl-btn-primary" href="{% url 'reports:generate' %}">Create New Report</a></div>
+  </div>
 
-    <div class="card">
-        <h2>Saved Reports</h2>
-        {% if reports %}
-            <div class="table-wrap">
-                <table class="report-table">
-                    <thead>
-                        <tr>
-                            <th>Title</th>
-                            <th>Type</th>
-                            <th>Period</th>
-                            <th>Status</th>
-                            <th>Created</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for r in reports %}
-                        <tr>
-                            <td>{{ r.title }}</td>
-                            <td>{{ r.get_report_type_display }}</td>
-                            <td>{{ r.start_date }} → {{ r.end_date }}</td>
-                            <td>{{ r.get_status_display }}</td>
-                            <td>{{ r.created_at }}</td>
-                            <td>
-                                <a href="{% url 'reports:detail' r.pk %}">Open</a>
-                                |
-                                <a href="{% url 'reports:pdf' r.pk %}">PDF</a>
-                                |
-                                <a href="{% url 'reports:delete' r.pk %}">Delete</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        {% else %}
-            <p class="muted">No reports generated yet.</p>
-        {% endif %}
-    </div>
-</div>
+  <div class="swl-card">
+    <h2>Design Direction</h2>
+    <ul class="swl-list">
+      <li>Dark SeisWebLog dashboard styling</li>
+      <li>Interactive first, PDF second</li>
+      <li>Saved report snapshots for archive</li>
+      <li>Easy extension for vessel / ROV / line filters later</li>
+    </ul>
+  </div>
+</section>
+
+<section class="swl-card">
+  <div class="swl-card-header"><h2>Recent Saved Reports</h2></div>
+  <div class="swl-table-wrap">
+    <table class="swl-table">
+      <thead><tr><th>Title</th><th>Type</th><th>Period</th><th>Status</th><th>Created</th><th></th></tr></thead>
+      <tbody>
+        {% for r in reports %}
+        <tr>
+          <td>{{ r.title }}</td>
+          <td>{{ r.get_report_type_display }}</td>
+          <td>{{ r.start_date }} → {{ r.end_date }}</td>
+          <td>{{ r.status }}</td>
+          <td>{{ r.created_at|date:"Y-m-d H:i" }}</td>
+          <td class="text-end"><a class="swl-btn" href="{% url 'reports:detail' r.pk %}">Open</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="swl-muted">No saved reports yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

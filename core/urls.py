@@ -27,4 +27,5 @@ urlpatterns = [
     path("logout/", logout_view, name="logout"),
     path("ui/theme/", set_theme_view, name="set_theme"),
     path("api/version/", version_status, name="api_version"),
+
 ]

@@ -3,7 +3,7 @@
 import { initAllJSForRovUpload } from "../../rov/js/init.js";
 import {initAllJSForBaseproject} from "./init.js";
 import { initAllJSForFleet } from "../../fleet/js/init.js";
-import {initAllJSForSource} from "../../source/js/init.js";
+//import {initAllJSForSource} from "../../source/js/init.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   const current = window.location.pathname;
@@ -19,7 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
   //fleet js
   initAllJSForFleet();
   //source js
-  initAllJSForSource();
+  //initAllJSForSource();
 
   console.log("Init Delete Buttons")
 

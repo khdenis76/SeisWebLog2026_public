@@ -14,4 +14,8 @@ urlpatterns = [
     path("sp-solution-vs-preplot-json/",views.source_sp_solution_vs_preplot_json,name="source_sp_solution_vs_preplot_json",),
     path("shot-line-summary/filter/",shot_line_summary_filter,   name="shot_line_summary_filter",),
     path("shot-table/filter/",shot_line_summary_table,   name="shot_line_summary_table",),
+    path("source/sps-shot-compare-tbody/",views.source_sps_shot_compare_tbody,name="source_sps_shot_compare_tbody",),
+    path("api/shot/delete-lines/",views.shot_delete_selected_lines,name="shot_delete_selected_lines",),
+    path("api/recalc-lines/", views.recalc_selected_lines, name="recalc_selected_lines"),
+    path("source/shot-summary/filter/",views.source_shot_line_summary_tbody,name="source_shot_line_summary_tbody",),
 ]

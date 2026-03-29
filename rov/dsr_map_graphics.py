@@ -3471,27 +3471,40 @@ class DSRMapPlots:
           Ring 2: Total(metric) vs Remaining = baseline - SUM(metric)
           Ring 3: metric by ROV
 
+        Notes
+        -----
+        Plotly Sunburst with branchvalues="total" requires:
+            parent >= sum(children)
+
+        So when Total > Baseline, this function automatically expands the root
+        displayed value to max(Baseline, Total) so the chart still renders.
+        The real baseline is still shown in the center annotation.
+
         Parameters
         ----------
         metric : str
-            Column name from DEPLOY_ROV_Summary (e.g. "Stations", "RECStations", "Nodes", "RECNodes", ...)
+            Column name from DEPLOY_ROV_Summary
+            (e.g. "Stations", "RECStations", "Nodes", "RECNodes", ...)
         title : str | None
             Optional plot title override. If None -> auto based on metric.
         labels : dict | None
             Optional label overrides:
               {
                 "baseline": "Baseline",
-                "total": "Deployment",      # the ring-2 total label
+                "total": "Deployment",
                 "remaining": "Remaining",
-                "unit": "stations",         # used in hover (optional)
+                "unit": "stations",
               }
-            If None -> auto based on metric.
         is_show : bool
             If True -> fig.show() and returns None
         json_return : bool
-            If True -> returns fig.to_json() (Plotly JSON)
+            If True -> returns fig.to_json()
+        template : str
+            Plotly template, e.g. "plotly_dark" or "plotly_white"
 
-        Requires module-level: import plotly.graph_objects as go
+        Requires module-level:
+            import pandas as pd
+            import plotly.graph_objects as go
         """
 
         allowed_metrics = {
@@ -3512,11 +3525,9 @@ class DSRMapPlots:
                 json_return=False,
             )
 
-        # ---- auto naming based on metric
         m = str(metric).strip()
         m_upper = m.upper()
 
-        # heuristics
         is_recovery = m_upper.startswith("REC") or m_upper.endswith("REC") or "REC" in m_upper
         is_processed = m_upper.startswith("PROC") or "PROC" in m_upper
         is_sm = m_upper.startswith("SM")
@@ -3532,12 +3543,11 @@ class DSRMapPlots:
 
         default_title = f"{default_total} — {m}"
 
-        # defaults for labels
         lbl = {
             "baseline": "Baseline",
             "total": default_total,
             "remaining": "Remaining",
-            "unit": m,  # shown in hover
+            "unit": m,
         }
         if isinstance(labels, dict):
             lbl.update({k: v for k, v in labels.items() if v is not None})
@@ -3558,7 +3568,6 @@ class DSRMapPlots:
 
         sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
 
-        # ---- read
         try:
             if hasattr(self, "_connect") and callable(getattr(self, "_connect")):
                 with self._connect() as conn:
@@ -3587,7 +3596,6 @@ class DSRMapPlots:
                 json_return=False,
             )
 
-        # ---- baseline
         try:
             baseline = int(base_df.iloc[0]["Total"]) if (base_df is not None and len(base_df) > 0) else 0
             baseline = int(baseline) if baseline else 0
@@ -3604,11 +3612,11 @@ class DSRMapPlots:
                 json_return=False,
             )
 
-        # ---- normalize + compute
         try:
             df["Rov"] = df["Rov"].astype(str).str.strip()
             df["Val"] = pd.to_numeric(df["Val"], errors="coerce").fillna(0).astype("float64").clip(lower=0)
             df = df[df["Rov"] != ""]
+
             if len(df) == 0:
                 return self._plotly_error_html(
                     title="Sunburst failed",
@@ -3623,14 +3631,11 @@ class DSRMapPlots:
 
             total_val = float(sum(rov_vals))
             remaining_val = float(max(0.0, baseline - total_val))
-
             over = total_val > baseline
-            if over:
-                remaining_val = 0.0
 
-            baseline_disp = format(int(baseline), ",")
-            total_disp = format(int(total_val), ",")
-            remaining_disp = format(int(remaining_val), ",")
+            baseline_disp = format(int(round(baseline)), ",")
+            total_disp = format(int(round(total_val)), ",")
+            remaining_disp = format(int(round(remaining_val)), ",")
 
         except Exception as e:
             return self._plotly_error_html(
@@ -3642,16 +3647,22 @@ class DSRMapPlots:
                 json_return=False,
             )
 
-        # ---- build sunburst (3 layers)
         try:
-            # Hierarchy:
-            # baseline
-            #   total
-            #     rovs...
-            #   remaining
-            labels_sb = [lbl["baseline"], lbl["total"], lbl["remaining"]] + rovs
-            parents_sb = ["", lbl["baseline"], lbl["baseline"]] + ([lbl["total"]] * len(rovs))
-            values_sb = [float(baseline), float(total_val), float(remaining_val)] + rov_vals
+            root_label = lbl["baseline"]
+            root_value = float(max(baseline, total_val))
+
+            labels_sb = [root_label, lbl["total"]]
+            parents_sb = ["", root_label]
+            values_sb = [root_value, float(total_val)]
+
+            if remaining_val > 0:
+                labels_sb.append(lbl["remaining"])
+                parents_sb.append(root_label)
+                values_sb.append(float(remaining_val))
+
+            labels_sb += rovs
+            parents_sb += [lbl["total"]] * len(rovs)
+            values_sb += rov_vals
 
             palette = [
                 "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
@@ -3660,7 +3671,6 @@ class DSRMapPlots:
             ]
             rov_colors = [palette[i % len(palette)] for i in range(len(rovs))]
 
-            # color for total depends on meaning (deployment/recovery/processed/etc.)
             total_color_map = {
                 "Deployment": "#2563eb",
                 "Recovery": "#22c55e",
@@ -3669,11 +3679,10 @@ class DSRMapPlots:
             }
             total_color = total_color_map.get(lbl["total"], "#2563eb")
 
-            colors_sb = [
-                            "#0b1220",  # baseline
-                            total_color,  # total
-                            "#e5e7eb",  # remaining
-                        ] + rov_colors
+            colors_sb = ["#0b1220", total_color]
+            if remaining_val > 0:
+                colors_sb.append("#e5e7eb")
+            colors_sb += rov_colors
 
             final_title = title
             if over:
@@ -3686,20 +3695,22 @@ class DSRMapPlots:
                     values=values_sb,
                     branchvalues="total",
                     maxdepth=3,
-                    marker=dict(colors=colors_sb, line=dict(color="white", width=1)),
+                    marker=dict(
+                        colors=colors_sb,
+                        line=dict(color="white", width=1)
+                    ),
                     insidetextorientation="radial",
                     textinfo="label+percent root",
                     hovertemplate=(
                             "<b>%{label}</b><br>"
                             + f"{lbl['unit']}: %{{value:,.0f}}<br>"
-                            + "Percent of baseline: %{percentRoot:.1%}<br>"
+                            + "Percent of root: %{percentRoot:.1%}<br>"
                             + "Percent of parent: %{percentParent:.1%}"
                             + "<extra></extra>"
                     ),
                 )
             )
 
-            # Legend workaround (Sunburst has no native legend)
             for rov, c in zip(rovs, rov_colors):
                 fig.add_trace(go.Scatter(
                     x=[None], y=[None],
@@ -3708,6 +3719,7 @@ class DSRMapPlots:
                     name=rov,
                     showlegend=True
                 ))
+
             fig.add_trace(go.Scatter(
                 x=[None], y=[None],
                 mode="markers",
@@ -3715,21 +3727,35 @@ class DSRMapPlots:
                 name=lbl["total"],
                 showlegend=True
             ))
-            fig.add_trace(go.Scatter(
-                x=[None], y=[None],
-                mode="markers",
-                marker=dict(size=10, color="#e5e7eb"),
-                name=lbl["remaining"],
-                showlegend=True
-            ))
-            if template =="plotly_dark":
-                paper_bgcolor:str = "#111827"  # outer background
-                plot_bgcolor:str = "#111827"  # inner background
-                text_color:str="white"
+
+            if remaining_val > 0:
+                fig.add_trace(go.Scatter(
+                    x=[None], y=[None],
+                    mode="markers",
+                    marker=dict(size=10, color="#e5e7eb"),
+                    name=lbl["remaining"],
+                    showlegend=True
+                ))
+
+            if template == "plotly_dark":
+                paper_bgcolor = "#111827"
+                plot_bgcolor = "#111827"
+                text_color = "white"
+                center_text_color = "white"
             else:
-                paper_bgcolor:str = "white"
-                plot_bgcolor:str = "white"
-                text_color:str = "black"
+                paper_bgcolor = "white"
+                plot_bgcolor = "white"
+                text_color = "black"
+                center_text_color = "black"
+
+            annotation_lines = [
+                f"<b>{lbl['baseline']}</b><br>{baseline_disp}",
+                f"<b>{lbl['total']}</b><br>{total_disp}",
+            ]
+            if remaining_val > 0:
+                annotation_lines.append(f"<b>{lbl['remaining']}</b><br>{remaining_disp}")
+            if over:
+                annotation_lines.append(f"<b>Over baseline</b><br>{format(int(round(total_val - baseline)), ',')}")
 
             fig.update_layout(
                 title=dict(text=final_title, x=0.02, xanchor="left"),
@@ -3744,21 +3770,19 @@ class DSRMapPlots:
                 ),
                 annotations=[
                     dict(
-                        text=(
-                            f"<b>{lbl['baseline']}</b><br>{baseline_disp}<br>"
-                            f"<b>{lbl['total']}</b><br>{total_disp}<br>"
-                            f"<b>{lbl['remaining']}</b><br>{remaining_disp}"
-                        ),
-                        x=0.5, y=0.5, showarrow=False,
+                        text="<br>".join(annotation_lines),
+                        x=0.5,
+                        y=0.5,
+                        showarrow=False,
                         align="center",
-                        font=dict(size=12, color="#111827"),
+                        font=dict(size=12, color=center_text_color),
                     )
                 ],
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 template=template,
-                paper_bgcolor=paper_bgcolor,  # outer background
-                plot_bgcolor=plot_bgcolor,  # inner background
+                paper_bgcolor=paper_bgcolor,
+                plot_bgcolor=plot_bgcolor,
                 font=dict(color=text_color),
             )
 
@@ -3779,9 +3803,10 @@ class DSRMapPlots:
             return fig.to_json()
         else:
             plot_html = fig.to_html(
-            full_html=False,
-            include_plotlyjs="cdn",
-            config={"responsive": True})
+                full_html=False,
+                include_plotlyjs="cdn",
+                config={"responsive": True}
+            )
             return plot_html
 
     def build_offsets_histograms_by_rov(

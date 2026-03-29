@@ -64,15 +64,20 @@
         <a class="nav-link" href="{% url 'source_home' %}">
           <i class="fa-solid fa-table"></i>SOURCE QC
         </a>
-      </li>  
+      </li>
+      <li class="nav-item" title="Sound Velocity Profile">
+        <a class="nav-link"  href="{% url 'svp:home' %}">
+          <i class="fa-solid fa-table"></i>SVP
+        </a>
+      </li>    
     </ul>
 
     <!-- QC -->
-    <div class="sidebar-section-title">Item 2</div>
+    <div class="sidebar-section-title">QC reports</div>
     <ul class="nav flex-column">
       <li class="nav-item">
-        <a class="nav-link" href="#">
-          <i class="fa-solid fa-chart-line"></i>QC Dashboard
+        <a class="nav-link" href="{% url 'reports:home' %}">
+          <i class="fa-solid fa-chart-line"></i>Daily Monthly Weekly
         </a>
       </li>
       

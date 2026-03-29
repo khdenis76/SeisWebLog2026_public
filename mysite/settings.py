@@ -26,6 +26,8 @@ INSTALLED_APPS = [
     'project_users.apps.ProjectUsersConfig',
     'source.apps.SourceConfig',
     'fleet.apps.FleetConfig',
+    'reports.apps.ReportsConfig',
+    "svp.apps.SvpConfig"
 ]
 
 MIDDLEWARE = [

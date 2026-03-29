@@ -713,7 +713,7 @@ ON SLSolution (Vessel_FK);
 -- Most queries: points of a line
 CREATE INDEX IF NOT EXISTS idx_spsolution_line_point
 ON SPSolution (SailLine_FK, Point);
-
+CREATE INDEX IF NOT EXISTS idx_sps_compare ON SPSolution(SailLine, Point);
 -- If you use PointIdx as well
 CREATE INDEX IF NOT EXISTS idx_spsolution_line_pointidx
 ON SPSolution (SailLine_FK, PointIdx);
@@ -946,53 +946,106 @@ CREATE TABLE IF NOT EXISTS "sequence_vessel_assignment" (
 	PRIMARY KEY("id" AUTOINCREMENT),
 	FOREIGN KEY("vessel_id") REFERENCES "project_fleet"("id") ON DELETE CASCADE
 );
-CREATE TABLE IF NOT EXISTS SHOT_TABLE (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    -- H26 main fields
-    sail_line INTEGER,
-    shot_station INTEGER,
-    shot_index INTEGER,
-    shot_status INTEGER,
-
-    -- Raw navigation code (LLLLLXSSSS)
-    nav_line_code TEXT,
-
-    -- Decoded navigation components
-    nav_line INTEGER,
-    attempt TEXT,
-    seq INTEGER,
-
-    -- Post point + extracted fire code
-    post_point_code TEXT,
-    fire_code TEXT,
-
-    gun_depth REAL,
-    water_depth REAL,
-
-    shot_x REAL,
-    shot_y REAL,
-
-    shot_day INTEGER,
-    shot_hour INTEGER,
-    shot_minute INTEGER,
-    shot_second INTEGER,
-    shot_microsecond INTEGER,
-    shot_year INTEGER,
-
-    vessel TEXT,
-    array_id TEXT,
-    source_id INTEGER,
-
-    nav_station INTEGER,
-    shot_group_id INTEGER,
-    elevation REAL
-);
+-- Create main shot table table
+CREATE TABLE SHOT_TABLE (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sail_line INTEGER,
+                        shot_station INTEGER,
+                        shot_index INTEGER,
+                        shot_status INTEGER,
+                        nav_line_code TEXT,
+                        nav_line INTEGER,
+                        attempt TEXT,
+                        seq INTEGER,
+                        post_point_code TEXT,
+                        fire_code TEXT,
+                        gun_depth REAL,
+                        water_depth REAL,
+                        shot_x REAL,
+                        shot_y REAL,
+                        shot_day INTEGER,
+                        shot_hour INTEGER,
+                        shot_minute INTEGER,
+                        shot_second INTEGER,
+                        shot_microsecond INTEGER,
+                        shot_year INTEGER,
+                        vessel TEXT,
+                        array_id TEXT,
+                        source_id INTEGER,
+                        nav_station INTEGER,
+                        shot_group_id INTEGER,
+                        elevation REAL,
+                        File_FK INTEGER,
+                        Seq_FK INTEGER,
+                        FOREIGN KEY (File_FK) REFERENCES STFiles(id) ON DELETE SET NULL,
+                        FOREIGN KEY (Seq_FK) REFERENCES sequence_vessel_assignment(ID) ON DELETE SET NULL
+                    );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_shot_unique
 ON SHOT_TABLE (
     nav_line_code,
     nav_station,
     post_point_code
 );
+CREATE UNIQUE INDEX IF NOT EXISTS ux_shot_unique ON SHOT_TABLE(nav_line_code, nav_station, post_point_code);
+CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq ON SHOT_TABLE(nav_line, attempt, seq);
+CREATE INDEX IF NOT EXISTS idx_shot_compare ON SHOT_TABLE(nav_line_code, seq, nav_station, shot_index);
+CREATE INDEX IF NOT EXISTS idx_shot_file_fk ON SHOT_TABLE(File_FK);
+CREATE INDEX IF NOT EXISTS idx_shot_seq_fk ON SHOT_TABLE(Seq_FK);
+CREATE INDEX IF NOT EXISTS idx_shot_line_station ON SHOT_TABLE(nav_line_code, nav_station);
+
+CREATE INDEX IF NOT EXISTS idx_shot_navlinecode_station ON SHOT_TABLE(nav_line_code, nav_station);
+CREATE INDEX IF NOT EXISTS idx_shot_navline_seq_station ON SHOT_TABLE(nav_line, seq, nav_station);
+
+-- Create tables for shot table lines and files
+CREATE TABLE IF NOT EXISTS STFiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_name TEXT NOT NULL,
+                    file_size INTEGER NOT NULL DEFAULT 0,
+                    file_mtime TEXT,
+                    file_hash TEXT,
+                    previous_stfile_id INTEGER,
+                    previous_file_size INTEGER NOT NULL DEFAULT 0,
+                    start_byte INTEGER NOT NULL DEFAULT 0,
+                    end_byte INTEGER NOT NULL DEFAULT 0,
+                    last_read_byte INTEGER NOT NULL DEFAULT 0,
+                    import_mode TEXT NOT NULL DEFAULT 'full',
+                    row_count INTEGER NOT NULL DEFAULT 0,
+                    inserted_count INTEGER NOT NULL DEFAULT 0,
+                    duplicate_count INTEGER NOT NULL DEFAULT 0,
+                    changed_lines_count INTEGER NOT NULL DEFAULT 0,
+                    deleted_lines_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (previous_stfile_id) REFERENCES STFiles(id) ON DELETE SET NULL
+                );
+CREATE TABLE IF NOT EXISTS STFileLines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stfile_id INTEGER NOT NULL,
+                    nav_line_code TEXT NOT NULL,
+                    byte_start INTEGER NOT NULL,
+                    byte_end INTEGER NOT NULL,
+                    first_nav_station INTEGER,
+                    last_nav_station INTEGER,
+                    row_count INTEGER NOT NULL DEFAULT 0,
+                    checksum TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (stfile_id) REFERENCES STFiles(id) ON DELETE CASCADE
+                );
+CREATE TABLE IF NOT EXISTS STDeletedLines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nav_line_code TEXT NOT NULL UNIQUE,
+                    deleted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    deleted_by TEXT,
+                    restore_mode TEXT DEFAULT 'manual'
+                );
+-- Create indexes for STFiles & STFileLines
+CREATE INDEX IF NOT EXISTS idx_stfiles_name_created ON STFiles(file_name, id DESC);
+CREATE INDEX IF NOT EXISTS idx_stfilelines_stfile ON STFileLines(stfile_id);
+CREATE INDEX IF NOT EXISTS idx_stfilelines_line ON STFileLines(nav_line_code);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_stfilelines_stfile_line ON STFileLines(stfile_id, nav_line_code);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_stdeletedlines_line ON STDeletedLines(nav_line_code);
+CREATE INDEX IF NOT EXISTS idx_stdeletedlines_deleted_at ON STDeletedLines(deleted_at);
+
 
 DROP VIEW IF EXISTS PreplotSummaryAllFiles;
 CREATE VIEW IF NOT EXISTS PreplotSummaryAllFiles AS
@@ -1595,340 +1648,7 @@ GROUP BY
 ORDER BY
     pf.vessel_name,
     sva.purpose_id;
-DROP VIEW IF EXISTS V_SHOT_LineSummary;
 
-CREATE VIEW IF NOT EXISTS V_SHOT_LineSummary AS
-WITH
-pg AS (
-    SELECT
-        UPPER(COALESCE(production_code,''))      AS prod_codes,
-        UPPER(COALESCE(non_production_code,''))  AS nonprod_codes,
-        UPPER(COALESCE(kill_code,''))            AS kill_codes
-    FROM project_geometry
-    LIMIT 1
-),
-
--- ===============================
--- SHOT base
--- ===============================
-shot_base AS (
-    SELECT
-        s.nav_line_code,
-        s.nav_line,
-        s.attempt,
-        s.seq,
-
-        s.shot_station,
-        s.shot_index,
-        s.shot_status,
-
-        s.post_point_code,
-        s.fire_code,
-
-        s.gun_depth,
-        s.water_depth,
-
-        s.shot_x,
-        s.shot_y,
-
-        s.shot_day,
-        s.shot_hour,
-        s.shot_minute,
-        s.shot_second,
-        s.shot_microsecond,
-        s.shot_year,
-
-        s.array_id,
-        s.source_id,
-        s.nav_station,
-        s.shot_group_id,
-        s.elevation,
-
-        CASE WHEN INSTR(pg.prod_codes,    UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_prod,
-        CASE WHEN INSTR(pg.nonprod_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_nonprod,
-        CASE WHEN INSTR(pg.kill_codes,    UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_kill
-    FROM SHOT_TABLE s
-    CROSS JOIN pg
-    WHERE s.nav_line_code IS NOT NULL
-      AND TRIM(s.nav_line_code) <> ''
-),
-
--- ===============================
--- SHOT aggregation
--- ===============================
-shot_agg AS (
-    SELECT
-        nav_line_code,
-
-        MAX(nav_line) AS nav_line,
-        MAX(attempt)  AS attempt,
-        MAX(seq)      AS seq,
-
-        COUNT(*) AS ShotCount,
-
-        SUM(is_prod)    AS ProdShots,
-        SUM(is_nonprod) AS NonProdShots,
-        SUM(is_kill)    AS KillShots,
-
-        MIN(nav_station) AS FSP,
-        MAX(nav_station) AS LSP,
-        MIN(CASE WHEN is_prod=1 THEN nav_station END) AS FGSP,
-        MAX(CASE WHEN is_prod=1 THEN nav_station END) AS LGSP,
-
-        -- SHOT sums / checksums
-        SUM(shot_station)     AS Sum_shot_station,
-        SUM(shot_index)       AS Sum_shot_index,
-        SUM(shot_status)      AS Sum_shot_status,
-
-        SUM(attempt)          AS Sum_attempt,
-        SUM(seq)              AS Sum_seq,
-
-        SUM(unicode(post_point_code)) AS Sum_post_point_code,
-        SUM(unicode(fire_code))       AS Sum_fire_code,
-
-        SUM(gun_depth)        AS Sum_gun_depth,
-        SUM(water_depth)      AS Sum_water_depth,
-
-        SUM(shot_x)           AS Sum_shot_x,
-        SUM(shot_y)           AS Sum_shot_y,
-
-        SUM(shot_day)         AS Sum_shot_day,
-        SUM(shot_hour)        AS Sum_shot_hour,
-        SUM(shot_minute)      AS Sum_shot_minute,
-        SUM(shot_second)      AS Sum_shot_second,
-        SUM(shot_microsecond) AS Sum_shot_microsecond,
-        SUM(shot_year)        AS Sum_shot_year,
-
-        SUM(unicode(array_id)) AS Sum_array_id,
-
-        SUM(source_id)     AS Sum_source_id,
-        SUM(nav_station)   AS Sum_nav_station,
-        SUM(shot_group_id) AS Sum_shot_group_id,
-        SUM(elevation)     AS Sum_elevation
-
-    FROM shot_base
-    GROUP BY nav_line_code
-),
-
--- ===============================
--- SPSolution aggregation
--- ===============================
-sps_agg AS (
-    SELECT
-        SailLine,
-        Line,
-        Attempt,
-        Seq,
-
-        SUM(Line)    AS sps_Sum_Line,
-        SUM(Attempt) AS sps_Sum_Attempt,
-        SUM(Seq)     AS sps_Sum_Seq,
-        SUM(Point)   AS sps_Sum_Point,
-
-        SUM(unicode(PointCode)) AS sps_Sum_PointCode,
-        SUM(unicode(FireCode))  AS sps_Sum_FireCode,
-        SUM(unicode(ArrayCode)) AS sps_Sum_ArrayCode,
-
-        SUM(Static)     AS sps_Sum_Static,
-        SUM(PointDepth) AS sps_Sum_PointDepth,
-        SUM(Datum)      AS sps_Sum_Datum,
-        SUM(Uphole)     AS sps_Sum_Uphole,
-        SUM(WaterDepth) AS sps_Sum_WaterDepth,
-
-        SUM(Easting)   AS sps_Sum_Easting,
-        SUM(Northing)  AS sps_Sum_Northing,
-        SUM(Elevation) AS sps_Sum_Elevation,
-
-        SUM(JDay)        AS sps_Sum_JDay,
-        SUM(Hour)        AS sps_Sum_Hour,
-        SUM(Minute)      AS sps_Sum_Minute,
-        SUM(Second)      AS sps_Sum_Second,
-        SUM(Microsecond) AS sps_Sum_Microsecond
-
-    FROM SPSolution
-    GROUP BY SailLine, Line, Attempt, Seq
-)
-
--- ===============================
--- FINAL SELECT
--- ===============================
-SELECT
-    a.nav_line_code,
-    a.nav_line,
-    a.attempt,
-    a.seq,
-
-    sva.purpose,
-    sva.vessel_id,
-    pf.vessel_name,
-
-    CASE WHEN EXISTS (
-        SELECT 1
-        FROM SLSolution sl
-        WHERE sl.SailLine = a.nav_line_code
-    ) THEN 1 ELSE 0 END AS IsInSLSolution,
-
-    a.ShotCount,
-    a.ProdShots,
-    a.NonProdShots,
-    a.KillShots,
-
-    a.FSP,
-    a.LSP,
-    a.FGSP,
-    a.LGSP,
-
-    -- SHOT sums
-    a.Sum_shot_station,
-    a.Sum_shot_index,
-    a.Sum_shot_status,
-    a.Sum_attempt,
-    a.Sum_seq,
-    a.Sum_post_point_code,
-    a.Sum_fire_code,
-    a.Sum_gun_depth,
-    a.Sum_water_depth,
-    a.Sum_shot_x,
-    a.Sum_shot_y,
-    a.Sum_shot_day,
-    a.Sum_shot_hour,
-    a.Sum_shot_minute,
-    a.Sum_shot_second,
-    a.Sum_shot_microsecond,
-    a.Sum_shot_year,
-    a.Sum_array_id,
-    a.Sum_source_id,
-    a.Sum_nav_station,
-    a.Sum_shot_group_id,
-    a.Sum_elevation,
-
-    -- SPS sums
-    s.SailLine AS sps_SailLine,
-    s.sps_Sum_Line,
-    s.sps_Sum_Attempt,
-    s.sps_Sum_Seq,
-    s.sps_Sum_Point,
-    s.sps_Sum_PointCode,
-    s.sps_Sum_FireCode,
-    s.sps_Sum_ArrayCode,
-    s.sps_Sum_Static,
-    s.sps_Sum_PointDepth,
-    s.sps_Sum_Datum,
-    s.sps_Sum_Uphole,
-    s.sps_Sum_WaterDepth,
-    s.sps_Sum_Easting,
-    s.sps_Sum_Northing,
-    s.sps_Sum_Elevation,
-    s.sps_Sum_JDay,
-    s.sps_Sum_Hour,
-    s.sps_Sum_Minute,
-    s.sps_Sum_Second,
-    s.sps_Sum_Microsecond,
-
-    -- ---------------------------------
-    -- Comparisons (1=match, 0=mismatch)
-    -- ArrayCode removed from flags
-    -- ---------------------------------
-    CASE WHEN COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999)        THEN 1 ELSE 0 END AS cmp_Line,
-    CASE WHEN COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999)     THEN 1 ELSE 0 END AS cmp_Attempt,
-    CASE WHEN COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999)         THEN 1 ELSE 0 END AS cmp_Seq,
-
-    CASE WHEN COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999)       THEN 1 ELSE 0 END AS cmp_Point,
-
-    CASE WHEN COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999)   THEN 1 ELSE 0 END AS cmp_PointCode,
-    CASE WHEN COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999)    THEN 1 ELSE 0 END AS cmp_FireCode,
-
-    CASE WHEN COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999)  THEN 1 ELSE 0 END AS cmp_WaterDepth,
-    CASE WHEN COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999)     THEN 1 ELSE 0 END AS cmp_Easting,
-    CASE WHEN COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999)    THEN 1 ELSE 0 END AS cmp_Northing,
-    CASE WHEN COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999)   THEN 1 ELSE 0 END AS cmp_Elevation,
-
-    CASE WHEN COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999)        THEN 1 ELSE 0 END AS cmp_JDay,
-    CASE WHEN COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999)        THEN 1 ELSE 0 END AS cmp_Hour,
-    CASE WHEN COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999)      THEN 1 ELSE 0 END AS cmp_Minute,
-    CASE WHEN COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999)      THEN 1 ELSE 0 END AS cmp_Second,
-    CASE WHEN COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999) THEN 1 ELSE 0 END AS cmp_Microsecond,
-
-    -- diffs (SHOT - SPS), ArrayCode removed
-    (COALESCE(a.Sum_attempt,0)          - COALESCE(s.sps_Sum_Attempt,0))      AS diff_Attempt,
-    (COALESCE(a.Sum_seq,0)              - COALESCE(s.sps_Sum_Seq,0))          AS diff_Seq,
-    (COALESCE(a.Sum_nav_station,0)      - COALESCE(s.sps_Sum_Point,0))        AS diff_Point,
-    (COALESCE(a.Sum_post_point_code,0)  - COALESCE(s.sps_Sum_PointCode,0))    AS diff_PointCode,
-    (COALESCE(a.Sum_fire_code,0)        - COALESCE(s.sps_Sum_FireCode,0))     AS diff_FireCode,
-    (COALESCE(a.Sum_water_depth,0)      - COALESCE(s.sps_Sum_WaterDepth,0))   AS diff_WaterDepth,
-    (COALESCE(a.Sum_shot_x,0)           - COALESCE(s.sps_Sum_Easting,0))      AS diff_Easting,
-    (COALESCE(a.Sum_shot_y,0)           - COALESCE(s.sps_Sum_Northing,0))     AS diff_Northing,
-    (COALESCE(a.Sum_elevation,0)        - COALESCE(s.sps_Sum_Elevation,0))    AS diff_Elevation,
-    (COALESCE(a.Sum_shot_day,0)         - COALESCE(s.sps_Sum_JDay,0))         AS diff_JDay,
-    (COALESCE(a.Sum_shot_hour,0)        - COALESCE(s.sps_Sum_Hour,0))         AS diff_Hour,
-    (COALESCE(a.Sum_shot_minute,0)      - COALESCE(s.sps_Sum_Minute,0))       AS diff_Minute,
-    (COALESCE(a.Sum_shot_second,0)      - COALESCE(s.sps_Sum_Second,0))       AS diff_Second,
-    (COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0))  AS diff_Microsecond,
-
-    -- Sum of absolute diffs (QC severity). 0 = perfect match.
-    ABS(COALESCE(a.Sum_attempt,0)          - COALESCE(s.sps_Sum_Attempt,0)) +
-    ABS(COALESCE(a.Sum_seq,0)              - COALESCE(s.sps_Sum_Seq,0)) +
-    ABS(COALESCE(a.Sum_nav_station,0)      - COALESCE(s.sps_Sum_Point,0)) +
-    ABS(COALESCE(a.Sum_post_point_code,0)  - COALESCE(s.sps_Sum_PointCode,0)) +
-    ABS(COALESCE(a.Sum_fire_code,0)        - COALESCE(s.sps_Sum_FireCode,0)) +
-    ABS(COALESCE(a.Sum_water_depth,0)      - COALESCE(s.sps_Sum_WaterDepth,0)) +
-    ABS(COALESCE(a.Sum_shot_x,0)           - COALESCE(s.sps_Sum_Easting,0)) +
-    ABS(COALESCE(a.Sum_shot_y,0)           - COALESCE(s.sps_Sum_Northing,0)) +
-    ABS(COALESCE(a.Sum_elevation,0)        - COALESCE(s.sps_Sum_Elevation,0)) +
-    ABS(COALESCE(a.Sum_shot_day,0)         - COALESCE(s.sps_Sum_JDay,0)) +
-    ABS(COALESCE(a.Sum_shot_hour,0)        - COALESCE(s.sps_Sum_Hour,0)) +
-    ABS(COALESCE(a.Sum_shot_minute,0)      - COALESCE(s.sps_Sum_Minute,0)) +
-    ABS(COALESCE(a.Sum_shot_second,0)      - COALESCE(s.sps_Sum_Second,0)) +
-    ABS(COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0))
-    AS SumDiff,
-
-    -- overall QC flag
-    CASE WHEN
-        (COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999)) AND
-        (COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999)) AND
-        (COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999)) AND
-        (COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999)) AND
-        (COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999)) AND
-        (COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999)) AND
-        (COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999)) AND
-        (COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999)) AND
-        (COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999)) AND
-        (COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999)) AND
-        (COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999)) AND
-        (COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999)) AND
-        (COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999)) AND
-        (COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999)) AND
-        (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
-    THEN 1 ELSE 0 END AS QC_AllMatch,
-
-    -- any match flag
-    CASE WHEN
-         (COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999))
-      OR (COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999))
-      OR (COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999))
-      OR (COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999))
-      OR (COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999))
-      OR (COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999))
-      OR (COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999))
-      OR (COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999))
-      OR (COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999))
-      OR (COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999))
-      OR (COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999))
-      OR (COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999))
-      OR (COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999))
-      OR (COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999))
-      OR (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
-    THEN 1 ELSE 0 END AS QC_AnyMatch
-
-FROM shot_agg a
-LEFT JOIN sps_agg s
-    ON s.Line    = a.nav_line
-   AND s.Attempt = a.attempt
-   AND s.Seq     = a.seq
-LEFT JOIN sequence_vessel_assignment sva
-    ON a.seq BETWEEN sva.seq_first AND sva.seq_last
-LEFT JOIN project_fleet pf
-    ON pf.id = sva.vessel_id;
 
 CREATE TABLE IF NOT EXISTS REC_DB
 (

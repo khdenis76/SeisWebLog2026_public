@@ -12,5 +12,3 @@ call myenv\Scripts\activate
 ECHO "CURRENT DIR: %CURRENT_DIR%"
 cd %CURRENT_DIR%
 python -m dataviewer.app
-
-pause

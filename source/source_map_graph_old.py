@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import re
-import threading
-import traceback
 from collections import defaultdict
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -44,36 +41,11 @@ class SourceMapGraphics:
     def __init__(self, db_path: Path | str):
         self.db_path = Path(db_path)
 
-    def _connect(self):
-
-        print("\n" + "=" * 80)
-        print("[DB OPEN]")
-        print("DB:", self.db_path)
-        print("THREAD:", threading.get_ident())
-        traceback.print_stack(limit=12)
-
-        conn = sqlite3.connect(
-            str(self.db_path),
-            timeout=120,
-            isolation_level=None,
-            check_same_thread=False,
-        )
+    def _connect(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON;")
-        conn.execute("PRAGMA journal_mode = WAL;")
-        conn.execute("PRAGMA synchronous = NORMAL;")
-        conn.execute("PRAGMA busy_timeout = 120000;")
         return conn
-
-    @contextmanager
-    def get_conn(self):
-        conn = self._connect()
-        try:
-            yield conn
-        finally:
-            print("[DB CLOSE]", self.db_path)
-            conn.close()
-
     def add_project_shapes_layers(
             self,
             p,
@@ -109,7 +81,7 @@ class SourceMapGraphics:
             return mapping.get(s, "solid")
 
         # 1) Read styles from DB
-        with self.get_conn() as con:
+        with self._connect() as con:
             rows = con.execute(f"""
                 SELECT
                     FullName,
@@ -270,7 +242,7 @@ class SourceMapGraphics:
             return m if m in allowed else "circle"
 
         # ---- load layers + points ----
-        with self.get_conn() as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
 
@@ -683,7 +655,7 @@ class SourceMapGraphics:
                   AND TRIM(COALESCE(ROV1,'')) <> ''
             """
 
-            with self.get_conn() as conn:
+            with self._connect() as conn:
                 preplot_rows = conn.execute(sql_preplot).fetchall()
                 sol_rows = conn.execute(sql_solution).fetchall()
                 dsr_dep_rows = conn.execute(sql_dsr_deploy).fetchall()
@@ -1014,7 +986,7 @@ class SourceMapGraphics:
             FROM V_SLSolution_VesselPurposeSummary
             """
 
-            with self.get_conn() as conn:
+            with self._connect() as conn:
                 df = pd.read_sql(sql, conn)
             # -----------------------------
             # Clean NULL values (IMPORTANT)
@@ -1359,7 +1331,6 @@ class SourceMapGraphics:
                 cur = conn.cursor()
                 rows = cur.execute(sql).fetchall()
             finally:
-                print("[DB CLOSE]", self.db_path)
                 conn.close()
 
             keys = ["prod", "nonprod", "kill", "other", "total"]
@@ -1626,7 +1597,7 @@ class SourceMapGraphics:
         """
 
         try:
-            with self.get_conn() as conn:
+            with self._connect() as conn:
                 preplot_df = pd.read_sql_query(sql_preplot, conn, params=(line,))
                 solution_df = pd.read_sql_query(sql_solution, conn, params=(line,))
 

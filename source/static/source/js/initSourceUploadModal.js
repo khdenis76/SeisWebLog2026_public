@@ -1,4 +1,4 @@
-import { getCSRFToken } from "../../baseproject/js/csrf.js"; // adjust path if needed
+import { getCSRFToken } from "../../baseproject/js/csrf.js";
 
 function setRequired(el, on) {
   if (!el) return;
@@ -26,25 +26,62 @@ function clearUploadMsg() {
   box.textContent = "";
 }
 
+function setBusy(form, submitBtn, busy) {
+  if (submitBtn) submitBtn.disabled = !!busy;
+
+  form.querySelectorAll("input, select, button, textarea").forEach((el) => {
+    if (el.type === "file") return;
+    if (el.id === "source-file-type") return;
+    el.disabled = !!busy;
+  });
+
+  const modalEl = document.getElementById("sourceUploadModal");
+  if (modalEl) {
+    modalEl.dataset.uploadBusy = busy ? "1" : "0";
+
+    const closeBtns = modalEl.querySelectorAll(
+      '[data-bs-dismiss="modal"], .btn-close'
+    );
+    closeBtns.forEach((btn) => {
+      btn.disabled = !!busy;
+    });
+  }
+}
+
 export function initSourceUploadSubmit() {
   const form = document.getElementById("source-upload-form");
   const submitBtn = document.getElementById("source-upload-submit");
-  const modalEl = document.getElementById("sourceUploadModal");
+  const fileTypeSelect = document.getElementById("source-file-type");
 
-  if (!form || !submitBtn) return;
+  if (!form || !submitBtn || !fileTypeSelect) return;
 
-  // avoid duplicate binding if initSourceUploadModal() is called many times
   if (form.dataset.uploadBound === "1") return;
   form.dataset.uploadBound = "1";
 
   form.addEventListener("submit", async function (e) {
     e.preventDefault();
-
     clearUploadMsg();
 
-    const fd = new FormData(form);
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
 
-    submitBtn.disabled = true;
+    const fd = new FormData(form);
+    const type = (fileTypeSelect.value || "").trim().toUpperCase();
+
+    if (type === "SHOT") {
+      fd.delete("source_vessel_id");
+      fd.delete("detect_vessel_by_seq");
+      fd.delete("seq_number");
+      fd.delete("sps_revision_id");
+      fd.delete("tier");
+      fd.delete("year");
+      fd.delete("auto_year_by_jday");
+    }
+
+    setBusy(form, submitBtn, true);
+
     const oldHTML = submitBtn.innerHTML;
     submitBtn.innerHTML =
       '<span class="spinner-border spinner-border-sm me-2"></span>Uploading...';
@@ -58,22 +95,25 @@ export function initSourceUploadSubmit() {
         },
       });
 
-      const data = await resp.json();
-
-      if (!resp.ok || !data.ok) {
-        throw new Error(data.error || "Upload failed.");
+      let data = null;
+      try {
+        data = await resp.json();
+      } catch {
+        data = null;
       }
 
-      // preferred generic response
+      if (!resp.ok || !data?.ok) {
+        throw new Error(data?.error || `Upload failed (HTTP ${resp.status})`);
+      }
+
       if (data.target_tbody && data.tbody_html) {
         const tbody = document.getElementById(data.target_tbody);
         if (tbody) {
           tbody.innerHTML = data.tbody_html;
         }
       } else {
-        // backward compatibility with your current backend
         if (data.file_type === "SHOT" && data.shot_summary) {
-          const tbody = document.getElementById("shot-table-tbody");
+          const tbody = document.getElementById("shot-summary-tbody");
           if (tbody) tbody.innerHTML = data.shot_summary;
         }
 
@@ -83,31 +123,32 @@ export function initSourceUploadSubmit() {
         }
       }
 
+      if (data.file_type === "SHOT" && typeof data.st_file_name !== "undefined") {
+        const fileNameEl = document.getElementById("shot-table-file-name");
+        if (fileNameEl) {
+          fileNameEl.textContent = `Last uploaded ST: ${data.st_file_name || "—"}`;
+        }
+      }
+
       showUploadMsg(
-        `${data.file_type} uploaded successfully. Rows inserted: ${data.rows_inserted ?? 0}`,
+        `${data.file_type || type} uploaded successfully. Rows inserted: ${data.rows_inserted ?? 0}`,
         "success"
       );
 
-      // reset only file input, keep selections if you want to upload more
       const fileInput = document.getElementById("source-files");
       if (fileInput) fileInput.value = "";
 
-      if (modalEl && window.bootstrap) {
-        const modal = bootstrap.Modal.getInstance(modalEl);
-        if (modal) {
-          setTimeout(() => modal.hide(), 400);
-        }
-      }
     } catch (err) {
       showUploadMsg(err.message || "Upload failed.", "danger");
     } finally {
-      submitBtn.disabled = false;
+      setBusy(form, submitBtn, false);
       submitBtn.innerHTML = oldHTML;
     }
   });
 }
 
 export function initSourceUploadModal() {
+  const modalEl = document.getElementById("sourceUploadModal");
   const fileType = document.getElementById("source-file-type");
   const spsBlock = document.getElementById("sps-options");
   const shotBlock = document.getElementById("shot-options");
@@ -118,7 +159,7 @@ export function initSourceUploadModal() {
   const spsYear = document.getElementById("sps-year");
 
   const detectBySeq = document.getElementById("detect-vessel-by-seq");
-  const spsSeq = document.getElementById("sps-seq-number"); // optional
+  const spsSeq = document.getElementById("sps-seq-number");
   const autoYear = document.getElementById("auto-year-by-jday");
 
   if (!fileType) return;
@@ -126,8 +167,8 @@ export function initSourceUploadModal() {
   function selectDefaultSpsRevision() {
     if (!spsRev) return;
     const opt =
-      spsRev.querySelector('option[data-default="1"]') ||
-      spsRev.querySelector("option[selected]");
+      spsRev.querySelector("option[selected]") ||
+      Array.from(spsRev.options).find(opt => opt.value);
     if (opt) spsRev.value = opt.value;
   }
 
@@ -146,18 +187,22 @@ export function initSourceUploadModal() {
 
   function updateDetectUI() {
     const on = !!(detectBySeq && detectBySeq.checked);
+    const isSps = (fileType && (fileType.value || "").toUpperCase() === "SPS");
 
     if (spsVessel) {
       spsVessel.disabled = on;
-      setRequired(spsVessel, !on);
-      if (on) spsVessel.value = "";
+      setRequired(spsVessel, isSps && !on);
+      if (on) {
+        spsVessel.value = "";
+      }
     }
 
-    // seq field currently not used manually
     if (spsSeq) {
-      spsSeq.disabled = true;
+      spsSeq.disabled = !(isSps && on);
       setRequired(spsSeq, false);
-      spsSeq.value = "";
+      if (!on) {
+        spsSeq.value = "";
+      }
     }
   }
 
@@ -171,7 +216,6 @@ export function initSourceUploadModal() {
 
   function updateUI() {
     const v = (fileType.value || "").toUpperCase();
-
     clearUploadMsg();
 
     if (v === "SPS") {
@@ -209,7 +253,17 @@ export function initSourceUploadModal() {
     updateAutoYearUI();
   }
 
-  // avoid duplicate UI binding if init runs multiple times
+  if (modalEl && modalEl.dataset.hideGuardBound !== "1") {
+    modalEl.addEventListener("hide.bs.modal", function (e) {
+      if (modalEl.dataset.uploadBusy === "1") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    });
+
+    modalEl.dataset.hideGuardBound = "1";
+  }
+
   if (fileType.dataset.uiBound !== "1") {
     fileType.addEventListener("change", updateUI);
     detectBySeq && detectBySeq.addEventListener("change", updateDetectUI);

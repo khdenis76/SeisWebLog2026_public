@@ -41,6 +41,19 @@
       <i class="fas fa-circle-info me-1"></i> Line Info
     </button>
   </li>
+   <li class="nav-item" role="presentation">
+    <button
+      class="nav-link"
+      id="st-compare-tab"
+      data-bs-toggle="tab"
+      data-bs-target="#st-compare-pane"
+      type="button"
+      role="tab"
+      aria-controls="st-compare-pane"
+      aria-selected="false">
+      <i class="fas fa-code-compare me-1"></i> ST Compare
+    </button>
+  </li>
 
 </ul>
 
@@ -80,6 +93,55 @@
     aria-labelledby="line-info-tab">
 
     <div id="line-info-content" class="w-100" style="min-height:65vh;"></div>
+
+  </div>
+  <!-- Shot Table Comparison -->
+  <div
+    class="tab-pane fade"
+    id="st-compare-pane"
+    role="tabpanel"
+    aria-labelledby="st-compare-tab">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+
+  <!-- SailLine label -->
+  <div class="fw-semibold">
+    SailLine:
+    <span id="selected-sail-line" class="text-primary">
+      —
+    </span>
+  </div>
+
+  <!-- Spacer -->
+  <div class="ms-auto d-flex align-items-center gap-2">
+
+    <!-- Toggle -->
+    <div class="btn-group btn-group-sm" role="group">
+      <input type="radio"
+             class="btn-check"
+             name="compareMode"
+             id="compareAll"
+             autocomplete="off"
+             checked>
+
+      <label class="btn btn-outline-primary" for="compareAll">
+        All
+      </label>
+
+      <input type="radio"
+             class="btn-check"
+             name="compareMode"
+             id="compareMismatch"
+             autocomplete="off">
+
+      <label class="btn btn-outline-danger" for="compareMismatch">
+        Mismatch only
+      </label>
+    </div>
+
+  </div>
+</div>
+
+{% include "source/partials/sps_shot_compare_table.html" %}
 
   </div>
 

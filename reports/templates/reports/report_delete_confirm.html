@@ -1,15 +1,14 @@
 {% extends "reports/base_report.html" %}
-{% block title %}Delete Report{% endblock %}
 {% block content %}
-<div class="report-shell">
-    <div class="card">
-        <h1>Delete Report</h1>
-        <p>Are you sure you want to delete <strong>{{ report.title }}</strong>?</p>
-        <form method="post">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-danger">Delete</button>
-            <a href="{% url 'reports:detail' report.pk %}" class="btn btn-secondary">Cancel</a>
-        </form>
+<section class="swl-card">
+  <h2>Delete Report</h2>
+  <p>Are you sure you want to delete <strong>{{ report.title }}</strong>?</p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="swl-toolbar">
+      <button type="submit" class="swl-btn swl-btn-danger">Delete</button>
+      <a class="swl-btn" href="{% url 'reports:detail' report.pk %}">Cancel</a>
     </div>
-</div>
+  </form>
+</section>
 {% endblock %}

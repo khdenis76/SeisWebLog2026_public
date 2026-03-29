@@ -1,3 +1,4 @@
+import bisect
 import csv
 import datetime
 import io
@@ -5,7 +6,9 @@ import re
 import sqlite3
 import threading
 import time
+import os
 import traceback
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 from core.models import SPSRevision
@@ -17,25 +20,92 @@ from datetime import datetime, timezone
 class SourceData:
     def __init__(self, db_path: Path | str):
         self.db_path = Path(db_path)
+        self.seq_ranges = []  # [(seq_first, seq_last, id, vessel_id)]
+        self.seq_starts = []  # [seq_first,...]
 
     def _connect(self):
+        print("\n" + "=" * 80)
+        print("[DB OPEN]")
+        print("DB:", self.db_path)
+        print("THREAD:", threading.get_ident())
+        traceback.print_stack(limit=12)
+
         conn = sqlite3.connect(
-            self.db_path,
-            timeout=20,
+            str(self.db_path),
+            timeout=120,
             isolation_level=None,
-            check_same_thread=False
+            check_same_thread=False,
         )
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        conn.execute("PRAGMA busy_timeout=5000;")
-
-        # debug only
-        # print(f"[DB_CONNECT] db={self.db_path}", flush=True)
-        # traceback.print_stack(limit=6)
-
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA busy_timeout = 120000;")
         return conn
 
+    @contextmanager
+    def get_conn(self):
+        conn = self._connect()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            print("[DB CLOSE]", self.db_path)
+            conn.close()
+
+    def load_sequence_mapping(self, conn=None):
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, seq_first, seq_last, vessel_id
+                FROM sequence_vessel_assignment
+                WHERE is_active = 1
+                ORDER BY seq_first
+            """)
+            rows = cur.fetchall()
+
+            self.seq_ranges = [
+                (r["seq_first"], r["seq_last"], r["id"], r["vessel_id"])
+                for r in rows
+            ]
+            self.seq_starts = [r["seq_first"] for r in rows]
+            return self.seq_ranges
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def get_seq_info(self, seq):
+
+        idx = bisect.bisect_right(self.seq_starts, seq) - 1
+        if idx >= 0:
+            seq_first, seq_last, rec_id, vessel_id = self.seq_ranges[idx]
+            if seq_first <= seq <= seq_last:
+                return {
+                    "id": rec_id,
+                    "vessel_id": vessel_id,
+                }
+
+        return {
+            "id": None,
+            "vessel_id": None,
+        }
+
+    def get_seq_fk(self, seq):
+        return self.get_seq_info(seq)["id"]
+
+    def get_vessel_id(self, seq):
+        return self.get_seq_info(seq)["vessel_id"]
     def drop_shot_table_indexes(self, conn=None) -> int:
         """
         Drops all user-created indexes for SHOT_TABLE.
@@ -78,6 +148,7 @@ class SourceData:
 
         finally:
             if own_conn:
+                print("[DB CLOSE]", self.db_path)
                 conn.close()
 
     @staticmethod
@@ -119,7 +190,7 @@ class SourceData:
         except ValueError:
             return None
 
-    def insert_file_record(self, file_name: str, file_type: str | None = None, conn=None) -> int:
+    def ensure_stfiles_schema(self, conn=None):
         own_conn = conn is None
         if own_conn:
             conn = self._connect()
@@ -127,31 +198,891 @@ class SourceData:
         try:
             cur = conn.cursor()
 
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS STFiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_name TEXT NOT NULL,
+                    file_size INTEGER NOT NULL DEFAULT 0,
+                    file_mtime TEXT,
+                    file_hash TEXT,
+                    previous_stfile_id INTEGER,
+                    previous_file_size INTEGER NOT NULL DEFAULT 0,
+                    start_byte INTEGER NOT NULL DEFAULT 0,
+                    end_byte INTEGER NOT NULL DEFAULT 0,
+                    last_read_byte INTEGER NOT NULL DEFAULT 0,
+                    import_mode TEXT NOT NULL DEFAULT 'full',
+                    row_count INTEGER NOT NULL DEFAULT 0,
+                    inserted_count INTEGER NOT NULL DEFAULT 0,
+                    duplicate_count INTEGER NOT NULL DEFAULT 0,
+                    changed_lines_count INTEGER NOT NULL DEFAULT 0,
+                    deleted_lines_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (previous_stfile_id) REFERENCES STFiles(id) ON DELETE SET NULL
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS STFileLines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stfile_id INTEGER NOT NULL,
+                    nav_line_code TEXT NOT NULL,
+                    byte_start INTEGER NOT NULL,
+                    byte_end INTEGER NOT NULL,
+                    first_nav_station INTEGER,
+                    last_nav_station INTEGER,
+                    row_count INTEGER NOT NULL DEFAULT 0,
+                    checksum TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (stfile_id) REFERENCES STFiles(id) ON DELETE CASCADE
+                )
+            """)
+
+            # NEW: manual deleted lines registry
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS STDeletedLines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nav_line_code TEXT NOT NULL UNIQUE,
+                    deleted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    deleted_by TEXT,
+                    restore_mode TEXT DEFAULT 'manual'
+                )
+            """)
+
+            cur.execute("""CREATE INDEX IF NOT EXISTS idx_stfiles_name_created ON STFiles(file_name, id DESC)""")
+            cur.execute("""CREATE INDEX IF NOT EXISTS idx_stfilelines_stfile ON STFileLines(stfile_id)""")
+            cur.execute("""CREATE INDEX IF NOT EXISTS idx_stfilelines_line ON STFileLines(nav_line_code)""")
             cur.execute(
-                "SELECT id FROM Files WHERE FileName = ?",
-                (file_name,)
+                """CREATE UNIQUE INDEX IF NOT EXISTS ux_stfilelines_stfile_line ON STFileLines(stfile_id, nav_line_code)""")
+
+            cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_stdeletedlines_line ON STDeletedLines(nav_line_code)""")
+            cur.execute("""CREATE INDEX IF NOT EXISTS idx_stdeletedlines_deleted_at ON STDeletedLines(deleted_at)""")
+
+            if own_conn:
+                conn.commit()
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def get_latest_stfile(self, file_name, conn=None, full_scan_only: bool = False):
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            self.ensure_stfiles_schema(conn=conn)
+            cur = conn.cursor()
+            sql = "SELECT * FROM STFiles WHERE file_name = ?"
+            params = [os.path.basename(str(file_name))]
+            if full_scan_only:
+                sql += " AND import_mode = 'full'"
+            sql += " ORDER BY id DESC LIMIT 1"
+            row = cur.execute(sql, params).fetchone()
+            return dict(row) if row else None
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def insert_stfile_record(self, uploaded_file, conn=None, previous=None, start_byte: int = 0, import_mode: str = "full") -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            self.ensure_stfiles_schema(conn=conn)
+            cur = conn.cursor()
+            filename = os.path.basename(getattr(uploaded_file, "name", str(uploaded_file)))
+            file_size = int(getattr(uploaded_file, "size", 0) or 0)
+            prev_id = int(previous["id"]) if previous and previous.get("id") is not None else None
+            prev_size = int(previous.get("file_size") or 0) if previous else 0
+            cur.execute(
+                """
+                INSERT INTO STFiles (
+                    file_name, file_size, previous_stfile_id, previous_file_size,
+                    start_byte, end_byte, last_read_byte, import_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (filename, file_size, prev_id, prev_size, int(start_byte or 0), int(start_byte or 0), int(start_byte or 0), import_mode),
             )
-            row = cur.fetchone()
+            if own_conn:
+                conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
 
-            if row:
-                return int(row["id"] if hasattr(row, "keys") else row[0])
+    def finalize_stfile_record(
+            self,
+            stfile_id: int,
+            *,
+            end_byte: int,
+            row_count: int,
+            inserted_count: int,
+            duplicate_count: int,
+            changed_lines_count: int,
+            deleted_lines_count: int = 0,
+            conn=None,
+    ):
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE STFiles
+                SET end_byte = ?,
+                    last_read_byte = ?,
+                    row_count = ?,
+                    inserted_count = ?,
+                    duplicate_count = ?,
+                    changed_lines_count = ?,
+                    deleted_lines_count = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    int(end_byte or 0),
+                    int(end_byte or 0),
+                    int(row_count or 0),
+                    int(inserted_count or 0),
+                    int(duplicate_count or 0),
+                    int(changed_lines_count or 0),
+                    int(deleted_lines_count or 0),
+                    int(stfile_id),
+                ),
+            )
+            if own_conn:
+                conn.commit()
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
 
-            if file_type is not None:
+    def get_stfile_lines_map(self, stfile_id: int, conn=None) -> dict:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            cur = conn.cursor()
+            rows = cur.execute(
+                """
+                SELECT nav_line_code, byte_start, byte_end, first_nav_station, last_nav_station, row_count, checksum
+                FROM STFileLines
+                WHERE stfile_id = ?
+                """,
+                (int(stfile_id),),
+            ).fetchall()
+            return {
+                str(r["nav_line_code"]): dict(r)
+                for r in rows
+                if r["nav_line_code"] is not None and str(r["nav_line_code"]).strip() != ""
+            }
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def save_stfile_line_ranges(self, stfile_id: int, line_ranges: dict, conn=None):
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM STFileLines WHERE stfile_id = ?", (int(stfile_id),))
+            if line_ranges:
+                rows = []
+                for nav_line_code, info in sorted(line_ranges.items()):
+                    rows.append((
+                        int(stfile_id),
+                        str(nav_line_code),
+                        int(info.get("byte_start") or 0),
+                        int(info.get("byte_end") or 0),
+                        info.get("first_nav_station"),
+                        info.get("last_nav_station"),
+                        int(info.get("row_count") or 0),
+                        info.get("checksum"),
+                    ))
+                cur.executemany(
+                    """
+                    INSERT INTO STFileLines (
+                        stfile_id, nav_line_code, byte_start, byte_end,
+                        first_nav_station, last_nav_station, row_count, checksum
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+            if own_conn:
+                conn.commit()
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def delete_shot_lines(self, nav_line_codes, conn=None) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            if nav_line_codes is None:
+                return 0
+            nav_line_codes = [str(x).strip() for x in nav_line_codes if x is not None and str(x).strip()]
+            if not nav_line_codes:
+                return 0
+            cur = conn.cursor()
+            placeholders = ",".join("?" for _ in nav_line_codes)
+            cur.execute(f"DELETE FROM SHOT_TABLE WHERE nav_line_code IN ({placeholders})", nav_line_codes)
+            deleted = int(cur.rowcount or 0)
+            try:
+                cur.execute(f"DELETE FROM SHOT_LineSummary WHERE nav_line_code IN ({placeholders})", nav_line_codes)
+            except Exception:
+                pass
+            if own_conn:
+                conn.commit()
+            return deleted
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def _parse_shot_csv_row(self, row, seq_cache=None):
+        if not row:
+            return None
+
+        first = (row[0] or "").strip()
+        if not first:
+            return None
+
+        # header rows: H00, H26 ...
+        if first[:1] in ("H", "h"):
+            return None
+
+        # raw H26 shot row must have at least 22 columns
+        if len(row) < 22:
+            return None
+
+        to_int = self.to_int
+        to_float = self.to_float
+        decode_nav = self.decode_nav_line
+
+        # row[0] looks like: "S       99999"
+        parts = first.split()
+        sail_line = (
+            to_int(parts[1])
+            if (len(parts) == 2 and parts[0].upper() == "S")
+            else to_int(first)
+        )
+
+        shot_station = to_int(row[1])
+        shot_index = to_int(row[2])
+        shot_status = to_int(row[3])
+
+        post_point_code = (row[4] or "").strip().upper()
+        if not post_point_code:
+            post_point_code = ""
+
+        fire_code = post_point_code[:1] if post_point_code else ""
+
+        gun_depth = to_float(row[5])
+        water_depth = to_float(row[6])
+
+        shot_x = to_float(row[7])
+        shot_y = to_float(row[8])
+
+        shot_day = to_int(row[9])
+        shot_hour = to_int(row[10])
+        shot_minute = to_int(row[11])
+        shot_second = to_int(row[12])
+        shot_microsecond = to_int(row[13])
+        shot_year = to_int(row[14])
+
+        vessel = (row[15] or "").strip() or None
+        array_id = (row[16] or "").strip() or None
+        source_id = to_int(row[17])
+
+        nav_line_code = (row[18] or "").strip() or ""
+        nav_line, attempt, seq = decode_nav(nav_line_code)
+        attempt = "" if attempt is None else str(attempt)
+
+        nav_station = to_int(row[19])
+        if nav_station is None:
+            nav_station = 0
+
+        shot_group_id = to_int(row[20])
+        elevation = to_float(row[21])
+
+        seq_fk = None
+        if seq_cache is not None:
+            seq_fk = seq_cache.get(seq)
+        else:
+            seq_info = self.get_seq_info(seq)
+            seq_fk = seq_info.get("id")
+
+        return {
+            "sail_line": sail_line,
+            "shot_station": shot_station,
+            "shot_index": shot_index,
+            "shot_status": shot_status,
+            "nav_line_code": nav_line_code,
+            "nav_line": nav_line,
+            "attempt": attempt,
+            "seq": seq,
+            "post_point_code": post_point_code,
+            "fire_code": fire_code,
+            "gun_depth": gun_depth,
+            "water_depth": water_depth,
+            "shot_x": shot_x,
+            "shot_y": shot_y,
+            "shot_day": shot_day,
+            "shot_hour": shot_hour,
+            "shot_minute": shot_minute,
+            "shot_second": shot_second,
+            "shot_microsecond": shot_microsecond,
+            "shot_year": shot_year,
+            "vessel": vessel,
+            "array_id": array_id,
+            "source_id": source_id,
+            "nav_station": nav_station,
+            "shot_group_id": shot_group_id,
+            "elevation": elevation,
+            "Seq_FK": seq_fk,
+        }
+
+    def load_shot_table_h26_incremental(
+            self,
+            uploaded_file,
+            *,
+            conn=None,
+            chunk_size: int = 100000,
+            use_tail_import: bool = True,
+            track_line_bytes: bool = True,
+            delete_missing_lines: bool = False,
+            restore_deleted_lines: bool = False,
+            debug: bool = True,
+    ) -> dict:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        def log(msg):
+            if debug:
+                now = datetime.now().strftime("%H:%M:%S")
+                print(f"[SHOT_IMPORT {now}] {msg}", flush=True)
+
+        try:
+            cur = conn.cursor()
+            conn.execute("PRAGMA busy_timeout = 120000;")
+
+            if not getattr(self, "seq_ranges", None):
+                self.load_sequence_mapping(conn=conn)
+
+            seq_cache = {}
+            for seq_first, seq_last, seq_id, vessel_id in getattr(self, "seq_ranges", []):
+                for s in range(int(seq_first), int(seq_last) + 1):
+                    seq_cache[s] = seq_id
+
+            filename = os.path.basename(getattr(uploaded_file, "name", str(uploaded_file)))
+            current_size = int(getattr(uploaded_file, "size", 0) or 0)
+
+            # Default search by exact filename
+            previous = self.get_latest_stfile(filename, conn=conn)
+
+            # If tail mode selected, ignore filename and continue from latest imported ST file
+            if use_tail_import:
+                previous_any = self.get_latest_stfile_any(conn=conn)
+                if previous_any:
+                    previous = previous_any
+
+            start_byte = 0
+            import_mode = "full"
+
+            if use_tail_import and previous:
+                prev_size = int(previous.get("file_size") or 0)
+                prev_last = int(previous.get("last_read_byte") or prev_size)
+
+                log(
+                    f"tail candidate: "
+                    f"prev_id={previous.get('id')} "
+                    f"prev_name={previous.get('file_name')} "
+                    f"prev_size={prev_size} "
+                    f"prev_last={prev_last} "
+                    f"new_name={filename} "
+                    f"new_size={current_size}"
+                )
+
+                # append-only continuation
+                if current_size > prev_last > 0:
+                    start_byte = prev_last
+                    import_mode = "tail"
+
+                # same size => nothing new
+                elif current_size == prev_last and prev_last > 0:
+                    log(
+                        f"file={filename} size={current_size} prev_last={prev_last} "
+                        f"mode=noop (same content length, tail import selected)"
+                    )
+                    return {
+                        "stfile_id": int(previous.get("id") or 0),
+                        "file_name": filename,
+                        "file_size": current_size,
+                        "start_byte": int(prev_last),
+                        "end_byte": int(prev_last),
+                        "import_mode": "noop",
+                        "total_rows": 0,
+                        "valid_rows": 0,
+                        "inserted": 0,
+                        "duplicates": 0,
+                        "skipped_deleted": 0,
+                        "restored_deleted": 0,
+                        "changed_lines": [],
+                        "deleted_lines": [],
+                        "tracked_lines": 0,
+                    }
+
+                # smaller file => unsafe for tail, fallback to full scan
+                elif current_size < prev_last:
+                    log(
+                        f"file={filename} size={current_size} prev_last={prev_last} "
+                        f"mode=full (new file smaller than previous tail position)"
+                    )
+                    start_byte = 0
+                    import_mode = "full"
+
+            if own_conn:
+                conn.execute("BEGIN IMMEDIATE;")
+
+            stfile_id = self.insert_stfile_record(
+                uploaded_file,
+                conn=conn,
+                previous=previous,
+                start_byte=start_byte,
+                import_mode=import_mode,
+            )
+
+            insert_sql = """
+            INSERT OR IGNORE INTO SHOT_TABLE (
+                sail_line,
+                shot_station,
+                shot_index,
+                shot_status,
+                nav_line_code,
+                nav_line,
+                attempt,
+                seq,
+                post_point_code,
+                fire_code,
+                gun_depth,
+                water_depth,
+                shot_x,
+                shot_y,
+                shot_day,
+                shot_hour,
+                shot_minute,
+                shot_second,
+                shot_microsecond,
+                shot_year,
+                vessel,
+                array_id,
+                source_id,
+                nav_station,
+                shot_group_id,
+                elevation,
+                File_FK,
+                Seq_FK
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """
+
+            file_obj = getattr(uploaded_file, "file", uploaded_file)
+            try:
+                file_obj.seek(0)
+            except Exception:
+                pass
+
+            batch = []
+            total_rows = 0
+            valid_rows = 0
+            inserted = 0
+            duplicates = 0
+            skipped_deleted = 0
+            restored_deleted = 0
+
+            changed_lines = set()
+            line_ranges = {}
+            scan_line_set = set()
+
+            deleted_lines_registry = self.list_deleted_shot_lines(conn=conn)
+            restored_now = set()
+
+            if start_byte > 0:
                 try:
+                    file_obj.seek(start_byte)
+                    file_obj.readline()  # skip partial line
+                    start_byte = int(file_obj.tell())
+
                     cur.execute(
-                        "INSERT INTO Files (FileName) VALUES (?)",
-                        (file_name)
+                        """
+                        UPDATE STFiles
+                           SET start_byte = ?, end_byte = ?, last_read_byte = ?
+                         WHERE id = ?
+                        """,
+                        (start_byte, start_byte, start_byte, int(stfile_id)),
                     )
                 except Exception:
+                    file_obj.seek(0)
+                    start_byte = 0
+                    import_mode = "full"
+
                     cur.execute(
-                        "INSERT INTO Files (FileName) VALUES (?)",
-                        (file_name,)
+                        """
+                        UPDATE STFiles
+                           SET import_mode = 'full',
+                               start_byte = 0,
+                               end_byte = 0,
+                               last_read_byte = 0
+                         WHERE id = ?
+                        """,
+                        (int(stfile_id),),
                     )
-            else:
+
+            log(
+                f"file={filename} size={current_size} start_byte={start_byte} "
+                f"mode={import_mode} restore_deleted_lines={restore_deleted_lines}"
+            )
+
+            while True:
+                pos_before = file_obj.tell()
+                raw_line = file_obj.readline()
+                if not raw_line:
+                    break
+
+                pos_after = file_obj.tell()
+                total_rows += 1
+
+                if isinstance(raw_line, str):
+                    line_text = raw_line
+                else:
+                    line_text = raw_line.decode("utf-8", errors="ignore")
+
+                line_text = line_text.rstrip("\r\n")
+                if not line_text.strip():
+                    continue
+
+                try:
+                    row = next(csv.reader([line_text], delimiter=",", skipinitialspace=True))
+                except Exception:
+                    continue
+
+                parsed = self._parse_shot_csv_row(row, seq_cache=seq_cache)
+                if not parsed:
+                    continue
+
+                nav_line_code = parsed["nav_line_code"]
+
+                # manually deleted lines
+                if nav_line_code and nav_line_code in deleted_lines_registry:
+                    if not restore_deleted_lines:
+                        skipped_deleted += 1
+                        continue
+                    restored_now.add(nav_line_code)
+
+                valid_rows += 1
+
+                if debug and valid_rows <= 5:
+                    log(
+                        f"PARSED ROW #{valid_rows}: "
+                        f"sail_line={parsed.get('sail_line')}, "
+                        f"shot_station={parsed.get('shot_station')}, "
+                        f"shot_index={parsed.get('shot_index')}, "
+                        f"shot_status={parsed.get('shot_status')}, "
+                        f"post_point_code={parsed.get('post_point_code')}, "
+                        f"fire_code={parsed.get('fire_code')}, "
+                        f"nav_line_code={parsed.get('nav_line_code')}, "
+                        f"nav_line={parsed.get('nav_line')}, "
+                        f"attempt={parsed.get('attempt')}, "
+                        f"seq={parsed.get('seq')}, "
+                        f"source_id={parsed.get('source_id')}, "
+                        f"nav_station={parsed.get('nav_station')}, "
+                        f"Seq_FK={parsed.get('Seq_FK')}"
+                    )
+
+                if nav_line_code:
+                    changed_lines.add(nav_line_code)
+                    scan_line_set.add(nav_line_code)
+
+                    # Full scan => build complete line map
+                    if track_line_bytes and import_mode == "full":
+                        info = line_ranges.get(nav_line_code)
+                        if info is None:
+                            line_ranges[nav_line_code] = {
+                                "byte_start": int(pos_before),
+                                "byte_end": int(pos_after),
+                                "first_nav_station": parsed["nav_station"],
+                                "last_nav_station": parsed["nav_station"],
+                                "row_count": 1,
+                                "checksum": f"{int(pos_before)}:{int(pos_after)}:1",
+                            }
+                        else:
+                            info["byte_start"] = min(int(info["byte_start"]), int(pos_before))
+                            info["byte_end"] = max(int(info["byte_end"]), int(pos_after))
+
+                            ns = parsed["nav_station"]
+                            if ns is not None:
+                                if info["first_nav_station"] is None or ns < info["first_nav_station"]:
+                                    info["first_nav_station"] = ns
+                                if info["last_nav_station"] is None or ns > info["last_nav_station"]:
+                                    info["last_nav_station"] = ns
+
+                            info["row_count"] = int(info.get("row_count") or 0) + 1
+                            info["checksum"] = (
+                                f"{int(info['byte_start'])}:"
+                                f"{int(info['byte_end'])}:"
+                                f"{int(info['row_count'])}"
+                            )
+
+                    # Tail scan => track only lines found in tail
+                    elif track_line_bytes and import_mode == "tail":
+                        info = line_ranges.get(nav_line_code)
+                        if info is None:
+                            line_ranges[nav_line_code] = {
+                                "byte_start": int(pos_before),
+                                "byte_end": int(pos_after),
+                                "first_nav_station": parsed["nav_station"],
+                                "last_nav_station": parsed["nav_station"],
+                                "row_count": 1,
+                                "checksum": f"{int(pos_before)}:{int(pos_after)}:1",
+                            }
+                        else:
+                            info["byte_start"] = min(int(info["byte_start"]), int(pos_before))
+                            info["byte_end"] = max(int(info["byte_end"]), int(pos_after))
+
+                            ns = parsed["nav_station"]
+                            if ns is not None:
+                                if info["first_nav_station"] is None or ns < info["first_nav_station"]:
+                                    info["first_nav_station"] = ns
+                                if info["last_nav_station"] is None or ns > info["last_nav_station"]:
+                                    info["last_nav_station"] = ns
+
+                            info["row_count"] = int(info.get("row_count") or 0) + 1
+                            info["checksum"] = (
+                                f"{int(info['byte_start'])}:"
+                                f"{int(info['byte_end'])}:"
+                                f"{int(info['row_count'])}"
+                            )
+
+                batch.append((
+                    parsed["sail_line"],
+                    parsed["shot_station"],
+                    parsed["shot_index"],
+                    parsed["shot_status"],
+                    parsed["nav_line_code"],
+                    parsed["nav_line"],
+                    parsed["attempt"],
+                    parsed["seq"],
+                    parsed["post_point_code"],
+                    parsed["fire_code"],
+                    parsed["gun_depth"],
+                    parsed["water_depth"],
+                    parsed["shot_x"],
+                    parsed["shot_y"],
+                    parsed["shot_day"],
+                    parsed["shot_hour"],
+                    parsed["shot_minute"],
+                    parsed["shot_second"],
+                    parsed["shot_microsecond"],
+                    parsed["shot_year"],
+                    parsed["vessel"],
+                    parsed["array_id"],
+                    parsed["source_id"],
+                    parsed["nav_station"],
+                    parsed["shot_group_id"],
+                    parsed["elevation"],
+                    int(stfile_id),
+                    parsed["Seq_FK"],
+                ))
+
+                if len(batch) >= chunk_size:
+                    before_changes = conn.total_changes
+                    cur.executemany(insert_sql, batch)
+                    batch_inserted = conn.total_changes - before_changes
+                    inserted += int(batch_inserted)
+                    duplicates += max(0, len(batch) - int(batch_inserted))
+
+                    if debug:
+                        log(
+                            f"flush batch size={len(batch)} "
+                            f"inserted={batch_inserted} "
+                            f"duplicates={max(0, len(batch) - int(batch_inserted))}"
+                        )
+
+                    batch.clear()
+
+            if batch:
+                before_changes = conn.total_changes
+                cur.executemany(insert_sql, batch)
+                batch_inserted = conn.total_changes - before_changes
+                inserted += int(batch_inserted)
+                duplicates += max(0, len(batch) - int(batch_inserted))
+
+                if debug:
+                    log(
+                        f"final flush size={len(batch)} "
+                        f"inserted={batch_inserted} "
+                        f"duplicates={max(0, len(batch) - int(batch_inserted))}"
+                    )
+
+                batch.clear()
+
+            deleted_lines = []
+            if delete_missing_lines and import_mode == "full" and previous and track_line_bytes:
+                old_map = self.get_stfile_lines_map(int(previous["id"]), conn=conn)
+                old_lines = set(old_map.keys())
+                missing_lines = sorted(old_lines - scan_line_set)
+
+                if missing_lines:
+                    self.delete_shot_lines(missing_lines, conn=conn)
+                    changed_lines.update(missing_lines)
+                    deleted_lines = missing_lines
+
+            if track_line_bytes and import_mode == "full":
+                self.save_stfile_line_ranges(stfile_id, line_ranges, conn=conn)
+
+            elif track_line_bytes and import_mode == "tail" and line_ranges:
+                # merge/update only lines found in tail into current import map
+                existing_map = self.get_stfile_lines_map(int(previous["id"]), conn=conn) if previous else {}
+                merged_map = dict(existing_map)
+
+                for nav_line_code, info in line_ranges.items():
+                    old = merged_map.get(nav_line_code)
+                    if old is None:
+                        merged_map[nav_line_code] = {
+                            "byte_start": int(info.get("byte_start") or 0),
+                            "byte_end": int(info.get("byte_end") or 0),
+                            "first_nav_station": info.get("first_nav_station"),
+                            "last_nav_station": info.get("last_nav_station"),
+                            "row_count": int(info.get("row_count") or 0),
+                            "checksum": info.get("checksum"),
+                        }
+                    else:
+                        old_start = int(old.get("byte_start") or 0)
+                        old_end = int(old.get("byte_end") or 0)
+                        new_start = int(info.get("byte_start") or 0)
+                        new_end = int(info.get("byte_end") or 0)
+
+                        merged_map[nav_line_code] = {
+                            "byte_start": min(old_start, new_start) if old_start and new_start else max(old_start,
+                                                                                                        new_start),
+                            "byte_end": max(old_end, new_end),
+                            "first_nav_station": (
+                                min(
+                                    x for x in [old.get("first_nav_station"), info.get("first_nav_station")]
+                                    if x is not None
+                                )
+                                if (old.get("first_nav_station") is not None or info.get(
+                                    "first_nav_station") is not None)
+                                else None
+                            ),
+                            "last_nav_station": (
+                                max(
+                                    x for x in [old.get("last_nav_station"), info.get("last_nav_station")]
+                                    if x is not None
+                                )
+                                if (old.get("last_nav_station") is not None or info.get("last_nav_station") is not None)
+                                else None
+                            ),
+                            "row_count": int(old.get("row_count") or 0) + int(info.get("row_count") or 0),
+                            "checksum": (
+                                f"{min(old_start, new_start) if old_start and new_start else max(old_start, new_start)}:"
+                                f"{max(old_end, new_end)}:"
+                                f"{int(old.get('row_count') or 0) + int(info.get('row_count') or 0)}"
+                            ),
+                        }
+
+                self.save_stfile_line_ranges(stfile_id, merged_map, conn=conn)
+
+            if restore_deleted_lines and restored_now:
+                self.unmark_shot_lines_deleted(sorted(restored_now), conn=conn)
+                restored_deleted = len(restored_now)
+
+            if changed_lines:
+                self.refresh_shot_linesummary_lines(sorted(changed_lines), conn=conn)
+
+            end_byte = int(file_obj.tell())
+
+            self.finalize_stfile_record(
+                stfile_id,
+                end_byte=end_byte,
+                row_count=valid_rows,
+                inserted_count=inserted,
+                duplicate_count=duplicates,
+                changed_lines_count=len(changed_lines),
+                deleted_lines_count=len(deleted_lines),
+                conn=conn,
+            )
+
+            if own_conn:
+                conn.commit()
+
+            return {
+                "stfile_id": int(stfile_id),
+                "file_name": filename,
+                "file_size": current_size,
+                "start_byte": int(start_byte),
+                "end_byte": int(end_byte),
+                "import_mode": import_mode,
+                "total_rows": int(total_rows),
+                "valid_rows": int(valid_rows),
+                "inserted": int(inserted),
+                "duplicates": int(duplicates),
+                "skipped_deleted": int(skipped_deleted),
+                "restored_deleted": int(restored_deleted),
+                "changed_lines": sorted(changed_lines),
+                "deleted_lines": deleted_lines,
+                "tracked_lines": len(line_ranges) if track_line_bytes else 0,
+            }
+
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def insert_file_record(self, file_name: str, file_type: str | None = None, conn=None,
+                           force_new: bool = False) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+
+            filename = getattr(file_name, "name", None)
+            if filename is None:
+                filename = str(file_name)
+            filename = os.path.basename(filename)
+
+            if not force_new:
                 cur.execute(
-                    "INSERT INTO Files (FileName) VALUES (?)",
-                    (file_name,)
+                    "SELECT id FROM Files WHERE FileName = ? ORDER BY id DESC LIMIT 1",
+                    (filename,)
                 )
+                row = cur.fetchone()
+                if row:
+                    return int(row["id"] if hasattr(row, "keys") else row[0])
+
+            cur.execute(
+                "INSERT INTO Files (FileName) VALUES (?)",
+                (filename,)
+            )
 
             if own_conn:
                 conn.commit()
@@ -172,11 +1103,8 @@ class SourceData:
 
         finally:
             if own_conn:
+                print("[DB CLOSE]", self.db_path)
                 conn.close()
-
-
-
-
 
     def load_shot_table_h26_stream(self, file_obj, file_fk: int, chunk_size: int = 20000) -> int:
 
@@ -345,6 +1273,7 @@ class SourceData:
                     text_stream.detach()
             except Exception:
                 pass
+            print("[DB CLOSE]", self.db_path)
             conn.close()
 
     def create_shot_table(self, conn=None):
@@ -417,59 +1346,8 @@ class SourceData:
 
         finally:
             if own_conn:
+                print("[DB CLOSE]", self.db_path)
                 conn.close()
-
-    def create_shot_table_indexes(self, conn=None) -> int:
-        own_conn = conn is None
-        if own_conn:
-            conn = self._connect()
-
-        try:
-            cur = conn.cursor()
-
-            cur.execute("""
-                DELETE FROM SHOT_TABLE
-                WHERE id NOT IN (
-                    SELECT MAX(id)
-                    FROM SHOT_TABLE
-                    GROUP BY
-                        nav_line_code,
-                        nav_station,
-                        post_point_code
-                );
-            """)
-
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq
-                ON SHOT_TABLE(nav_line, attempt, seq);
-            """)
-
-            cur.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS ux_shot_unique
-                ON SHOT_TABLE(
-                    nav_line_code,
-                    nav_station,
-                    post_point_code
-                );
-            """)
-
-            if own_conn:
-                conn.commit()
-
-            return 2
-
-        except Exception:
-            if own_conn:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            raise
-
-        finally:
-            if own_conn:
-                conn.close()
-
     def list_shot_table_summary(self) -> list[dict]:
         """
         Returns rows from V_SHOT_TABLE_SUMMARY as list[dict].
@@ -503,6 +1381,7 @@ class SourceData:
             return [dict(r) for r in rows]
 
         finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
 
     def list_sps_files_summary(
@@ -721,6 +1600,7 @@ class SourceData:
             return [dict(r) for r in rows]
 
         finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
     #=============================================================================================
     #             LOAD SOURCE SPS
@@ -809,9 +1689,9 @@ class SourceData:
             """
             INSERT INTO SLSolution
             (PPLine_FK, File_FK, SailLine, Line, Seq, Attempt, Tier, TierLine, Vessel_FK, purpose_id)
-            VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (int(file_fk), sail_line, int(line), int(seq), attempt, int(tier), int(tierline), vessel_fk, purpose_id),
+            (None, int(file_fk), sail_line, int(line), int(seq), attempt, int(tier), int(tierline), vessel_fk, purpose_id),
         )
         return int(cur.lastrowid)
 
@@ -923,7 +1803,9 @@ class SourceData:
         seq = self._to_int(sail_line[s_first:s_last], default=default)
 
         point = self._to_int(s[sps_revision.point_start:sps_revision.point_end], default=default)
+        static = self._to_int(s[sps_revision.static_start:sps_revision.static_end], default=default)
         point_depth = self._to_float(s[sps_revision.point_depth_start:sps_revision.point_depth_end], default=default)
+        datum = self._to_int(s[sps_revision.datum_start:sps_revision.datum_end], default=default)
         water_depth = self._to_float(s[sps_revision.water_depth_start:sps_revision.water_depth_end], default=default)
         easting = self._to_float(s[sps_revision.easting_start:sps_revision.easting_end], default=default)
         northing = self._to_float(s[sps_revision.northing_start:sps_revision.northing_end], default=default)
@@ -959,7 +1841,8 @@ class SourceData:
             point_code=point_code,
             fire_code=fire_code,
             array_code=array_code,
-
+            static=static,
+            datum=datum,
             point_depth=point_depth or 0.0,
             water_depth=water_depth or 0.0,
 
@@ -1021,6 +1904,335 @@ class SourceData:
 
         raise sqlite3.OperationalError("database is locked while creating unique index")
 
+    def load_shot_table_h26_stream_new_only(
+            self,
+            file_obj,
+            file_fk: int | None = None,
+            chunk_size: int = 50000,
+            conn=None,
+            debug: bool = False,
+            seek_start: int = 0,
+            stfile_id: int | None = None,
+            track_line_bytes: bool = False,
+    ) -> dict:
+
+        effective_file_fk = stfile_id if stfile_id is not None else file_fk
+        if not effective_file_fk:
+            raise ValueError("file_fk or stfile_id is required")
+
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        text_stream = None
+
+        def log(msg):
+            if debug:
+                now = datetime.now().strftime("%H:%M:%S")
+                print(f"[SHOT_IMPORT {now}] {msg}", flush=True)
+
+        def _safe_tell(fobj):
+            try:
+                return fobj.tell()
+            except Exception:
+                return None
+
+        def _safe_seek(fobj, pos, whence=0):
+            try:
+                fobj.seek(pos, whence)
+                return True
+            except Exception:
+                return False
+
+        try:
+            cur = conn.cursor()
+            conn.execute("PRAGMA busy_timeout = 60000;")
+            self._ensure_shot_unique_index(conn)
+            self._set_fast_import_pragmas(conn, aggressive=False)
+
+            if own_conn:
+                cur.execute("BEGIN IMMEDIATE;")
+                log("BEGIN IMMEDIATE")
+
+            insert_sql = """
+            INSERT OR IGNORE INTO SHOT_TABLE (
+                sail_line,
+                shot_station,
+                shot_index,
+                shot_status,
+                nav_line_code,
+                nav_line,
+                attempt,
+                seq,
+                post_point_code,
+                fire_code,
+                gun_depth,
+                water_depth,
+                shot_x,
+                shot_y,
+                shot_day,
+                shot_hour,
+                shot_minute,
+                shot_second,
+                shot_microsecond,
+                shot_year,
+                vessel,
+                array_id,
+                source_id,
+                nav_station,
+                shot_group_id,
+                elevation,
+                File_FK,
+                Seq_FK
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """
+
+            probe = file_obj.read(0)
+            is_binary = isinstance(probe, (bytes, bytearray))
+
+            if is_binary:
+                raw_file = file_obj
+
+                if seek_start and seek_start > 0:
+                    if _safe_seek(raw_file, seek_start, 0):
+                        log(f"seek to byte offset {seek_start}")
+                        try:
+                            raw_file.readline()
+                            log("skipped partial line after seek")
+                        except Exception:
+                            pass
+                    else:
+                        log("seek failed, fallback to file start")
+                        seek_start = 0
+                        _safe_seek(raw_file, 0, 0)
+                else:
+                    _safe_seek(raw_file, 0, 0)
+
+                text_stream = io.TextIOWrapper(
+                    raw_file,
+                    encoding="utf-8",
+                    errors="ignore",
+                    newline=""
+                )
+            else:
+                text_stream = file_obj
+
+                if seek_start and seek_start > 0:
+                    if _safe_seek(text_stream, seek_start, 0):
+                        log(f"seek to offset {seek_start}")
+                        try:
+                            text_stream.readline()
+                            log("skipped partial line after seek")
+                        except Exception:
+                            pass
+                    else:
+                        log("seek failed, fallback to file start")
+                        seek_start = 0
+                        _safe_seek(text_stream, 0, 0)
+                else:
+                    _safe_seek(text_stream, 0, 0)
+
+            reader = csv.reader(text_stream, delimiter=",", skipinitialspace=True)
+
+            batch = []
+            inserted = 0
+            duplicates = 0
+            changed_lines = set()
+            total_rows = 0
+            valid_rows = 0
+            line_ranges = {}
+
+            decode_nav = self.decode_nav_line
+            to_int = self.to_int
+            to_float = self.to_float
+            get_seq_info = self.get_seq_info
+
+            last_seq = object()
+            last_seq_fk = None
+
+            log(f"start reading file_fk={effective_file_fk}, seek_start={seek_start}")
+
+            for row in reader:
+                row_end_pos = _safe_tell(file_obj if is_binary else text_stream)
+                total_rows += 1
+
+                if not row:
+                    continue
+
+                first = (row[0] or "").strip()
+                if not first:
+                    continue
+
+                if first[:1] in ("H", "h"):
+                    continue
+
+                if len(row) < 22:
+                    continue
+
+                parts = first.split()
+                sail_line = (
+                    to_int(parts[1])
+                    if (len(parts) == 2 and parts[0].upper() == "S")
+                    else to_int(first)
+                )
+
+                shot_station = to_int(row[1])
+                shot_index = to_int(row[2])
+                shot_status = to_int(row[3])
+
+                post_point_code = (row[4] or "").strip().upper()
+                if not post_point_code:
+                    post_point_code = ""
+
+                fire_code = post_point_code[:1] if post_point_code else ""
+
+                gun_depth = to_float(row[5])
+                water_depth = to_float(row[6])
+
+                shot_x = to_float(row[7])
+                shot_y = to_float(row[8])
+
+                shot_day = to_int(row[9])
+                shot_hour = to_int(row[10])
+                shot_minute = to_int(row[11])
+                shot_second = to_int(row[12])
+                shot_microsecond = to_int(row[13])
+                shot_year = to_int(row[14])
+
+                vessel = (row[15] or "").strip() or None
+                array_id = (row[16] or "").strip() or None
+                source_id = to_int(row[17])
+
+                nav_line_code = (row[18] or "").strip() or ""
+                nav_line, attempt, seq = decode_nav(nav_line_code)
+                attempt = "" if attempt is None else str(attempt)
+
+                nav_station = to_int(row[19])
+                if nav_station is None:
+                    nav_station = 0
+
+                shot_group_id = to_int(row[20])
+                elevation = to_float(row[21])
+
+                if seq != last_seq:
+                    seq_info = get_seq_info(seq)
+                    last_seq_fk = seq_info.get("id")
+                    last_seq = seq
+
+                valid_rows += 1
+
+                if debug and valid_rows <= 5:
+                    log(
+                        f"PARSED ROW #{valid_rows}: "
+                        f"sail_line={sail_line}, "
+                        f"post_point_code={post_point_code}, "
+                        f"fire_code={fire_code}, "
+                        f"nav_line_code={nav_line_code}, "
+                        f"nav_line={nav_line}, "
+                        f"attempt={attempt}, "
+                        f"seq={seq}, "
+                        f"nav_station={nav_station}, "
+                        f"seq_fk={last_seq_fk}"
+                    )
+
+                batch.append((
+                    sail_line,
+                    shot_station,
+                    shot_index,
+                    shot_status,
+                    nav_line_code,
+                    nav_line,
+                    attempt,
+                    seq,
+                    post_point_code,
+                    fire_code,
+                    gun_depth,
+                    water_depth,
+                    shot_x,
+                    shot_y,
+                    shot_day,
+                    shot_hour,
+                    shot_minute,
+                    shot_second,
+                    shot_microsecond,
+                    shot_year,
+                    vessel,
+                    array_id,
+                    source_id,
+                    nav_station,
+                    shot_group_id,
+                    elevation,
+                    int(effective_file_fk),
+                    last_seq_fk
+                ))
+
+                if nav_line_code:
+                    changed_lines.add(nav_line_code)
+
+                if track_line_bytes and nav_line_code:
+                    info = line_ranges.get(nav_line_code)
+                    if info is None:
+                        line_ranges[nav_line_code] = {
+                            "byte_start": None,
+                            "byte_end": row_end_pos,
+                            "row_count": 1,
+                            "first_nav_station": nav_station,
+                            "last_nav_station": nav_station,
+                        }
+                    else:
+                        info["byte_end"] = row_end_pos
+                        info["row_count"] += 1
+                        info["last_nav_station"] = nav_station
+
+                if len(batch) >= chunk_size:
+                    before = conn.total_changes
+                    cur.executemany(insert_sql, batch)
+                    delta = conn.total_changes - before
+                    inserted += delta
+                    duplicates += (len(batch) - delta)
+                    batch.clear()
+
+            if batch:
+                before = conn.total_changes
+                cur.executemany(insert_sql, batch)
+                delta = conn.total_changes - before
+                inserted += delta
+                duplicates += (len(batch) - delta)
+                batch.clear()
+
+            end_pos = _safe_tell(file_obj if is_binary else text_stream)
+
+            if own_conn:
+                conn.commit()
+
+            return {
+                "inserted": int(inserted),
+                "duplicates": int(duplicates),
+                "changed_lines": sorted(changed_lines),
+                "total_rows": int(total_rows),
+                "valid_rows": int(valid_rows),
+                "seek_start": int(seek_start),
+                "end_pos": end_pos,
+                "line_ranges": line_ranges,
+            }
+
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
+        finally:
+            try:
+                if text_stream is not None and hasattr(text_stream, "detach"):
+                    text_stream.detach()
+            except Exception:
+                pass
+
+            if own_conn:
+                conn.close()
 
     def load_shot_table_h26_stream_fast(self, file_obj, file_fk: int, chunk_size: int = 50000) -> int:
         """
@@ -1223,6 +2435,7 @@ class SourceData:
                     text_stream.detach()
             except Exception:
                 pass
+            print("[DB CLOSE]", self.db_path)
             conn.close()
         """
         H26 loader with UPSERT (insert or update) using SQLite ON CONFLICT.
@@ -1385,39 +2598,91 @@ class SourceData:
                     text_stream.detach()
             except Exception:
                 pass
+            print("[DB CLOSE]", self.db_path)
+            conn.close()
+
+    def import_shot_files_locked(self, files):
+        conn = self._connect()
+        if not getattr(self, "seq_ranges", None):
+            self.load_sequence_mapping()
+        try:
+            cur = conn.cursor()
+
+            cur.execute("PRAGMA journal_mode=DELETE;")
+            cur.execute("PRAGMA synchronous=OFF;")
+            cur.execute("PRAGMA foreign_keys=OFF;")
+            cur.execute("PRAGMA temp_store=MEMORY;")
+            cur.execute("PRAGMA cache_size=-300000;")
+            cur.execute("PRAGMA busy_timeout=120000;")
+            cur.execute("PRAGMA locking_mode=EXCLUSIVE;")
+
+            cur.execute("BEGIN EXCLUSIVE;")
+
+            cur.execute("DELETE FROM SHOT_TABLE")
+            total = 0
+            for f in files:
+                file_fk = self.insert_file_record(f, conn=conn)
+                inserted = self.load_shot_table_h26_replace_all_fast(
+                    f.file,
+                    file_fk=file_fk,
+                    chunk_size=200000,
+                    conn=conn,
+                )
+                total += inserted
+
+            conn.commit()
+            return total
+
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            print("[DB CLOSE]", self.db_path)
+            conn.close()
+    def test_db_lock(self):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("PRAGMA journal_mode=DELETE;")
+            cur.execute("BEGIN EXCLUSIVE;")
+            conn.rollback()
+            print("DB is FREE")
+        except Exception as e:
+            print(f"DB is LOCKED:{e}")
+        finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
 
     def load_shot_table_h26_replace_all_fast(
             self,
             file_obj,
-            chunk_size: int = 10000,
+            file_fk: int,
+            chunk_size: int = 50000,
             lock_timeout_s: int = 120,
             conn=None,
     ) -> int:
         """
-        Full replace SHOT_TABLE from one H26 CSV file.
+        Fast full replace SHOT_TABLE from one H26 CSV file.
 
-        New SHOT_TABLE schema has NO File_FK.
-        Strategy:
-        - DELETE all rows from SHOT_TABLE
-        - INSERT in batches
-        - COMMIT every chunk
-
-        Returns inserted row count.
+        Optimizations:
+        - one exclusive transaction
+        - one final commit only
+        - File_FK from input
+        - Seq_FK recalculated only when seq changes
         """
         print("\n[SHOT_IMPORT] started", flush=True)
         t0 = time.time()
 
         own_conn = conn is None
-        print(f"[SHOT_IMPORT] own_conn={own_conn}", flush=True)
-        print(f"[SHOT_IMPORT] chunk_size={chunk_size}", flush=True)
-
         if own_conn:
             conn = self._connect()
 
         text_stream = None
 
-        def _execute_retry(cursor, sql, params=None, timeout_s=120, sleep_s=1.0):
+        def _execute_retry(cursor, sql, params=None, timeout_s=120, sleep_s=0.5):
             t1 = time.time()
             while True:
                 try:
@@ -1432,10 +2697,9 @@ class SourceData:
                         raise sqlite3.OperationalError(
                             f"database is locked (waited {waited:.0f}s) during execute."
                         )
-                    print(f"[SHOT_IMPORT] waiting during execute... waited={waited:.1f}s", flush=True)
                     time.sleep(sleep_s)
 
-        def _executemany_retry(cursor, sql, rows, timeout_s=120, sleep_s=1.0):
+        def _executemany_retry(cursor, sql, rows, timeout_s=120, sleep_s=0.5):
             t1 = time.time()
             while True:
                 try:
@@ -1448,25 +2712,20 @@ class SourceData:
                         raise sqlite3.OperationalError(
                             f"database is locked (waited {waited:.0f}s) during batch insert."
                         )
-                    print(
-                        f"[SHOT_IMPORT] waiting during batch insert... "
-                        f"rows={len(rows)} waited={waited:.1f}s",
-                        flush=True
-                    )
                     time.sleep(sleep_s)
 
         try:
-            # make sure schema is correct
             self.ensure_shot_table_schema(conn=conn)
             cur = conn.cursor()
 
+            # best for full bulk reload
             try:
-                cur.execute("PRAGMA journal_mode=WAL;")
+                cur.execute("PRAGMA journal_mode=DELETE;")
             except Exception:
                 pass
 
             try:
-                cur.execute("PRAGMA synchronous=NORMAL;")
+                cur.execute("PRAGMA synchronous=OFF;")
             except Exception:
                 pass
 
@@ -1481,7 +2740,12 @@ class SourceData:
                 pass
 
             try:
-                cur.execute("PRAGMA cache_size=-200000;")
+                cur.execute("PRAGMA cache_size=-300000;")
+            except Exception:
+                pass
+
+            try:
+                cur.execute("PRAGMA locking_mode=EXCLUSIVE;")
             except Exception:
                 pass
 
@@ -1490,21 +2754,7 @@ class SourceData:
             except Exception:
                 pass
 
-            try:
-                dbs = cur.execute("PRAGMA database_list;").fetchall()
-                for db_row in dbs:
-                    if isinstance(db_row, sqlite3.Row):
-                        print(f"[SHOT_IMPORT] db_file({db_row['name']})={db_row['file']}", flush=True)
-                    else:
-                        _, name, path = db_row
-                        print(f"[SHOT_IMPORT] db_file({name})={path}", flush=True)
-            except Exception:
-                pass
 
-            print("[SHOT_IMPORT] deleting existing SHOT_TABLE rows...", flush=True)
-            _execute_retry(cur, "DELETE FROM SHOT_TABLE", timeout_s=lock_timeout_s)
-            conn.commit()
-            print("[SHOT_IMPORT] delete committed", flush=True)
 
             insert_sql = """
             INSERT INTO SHOT_TABLE (
@@ -1533,8 +2783,10 @@ class SourceData:
                 source_id,
                 nav_station,
                 shot_group_id,
-                elevation
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                elevation,
+                File_FK,
+                Seq_FK
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """
 
             probe = file_obj.read(0)
@@ -1548,6 +2800,11 @@ class SourceData:
             else:
                 text_stream = file_obj
 
+            try:
+                file_obj.seek(0)
+            except Exception:
+                pass
+
             reader = csv.reader(text_stream, delimiter=",", skipinitialspace=True)
 
             processed = 0
@@ -1559,9 +2816,17 @@ class SourceData:
             to_int = self.to_int
             to_float = self.to_float
             batch_append = batch.append
+            get_seq_info = self.get_seq_info
 
             last_print = time.time()
-            print("[SHOT_IMPORT] entering CSV loop...", flush=True)
+            last_seq = object()
+            last_seq_fk = None
+
+            print("[SHOT_IMPORT] begin exclusive transaction...", flush=True)
+            _execute_retry(cur, "BEGIN EXCLUSIVE", timeout_s=lock_timeout_s)
+
+            print("[SHOT_IMPORT] deleting old rows...", flush=True)
+            _execute_retry(cur, "DELETE FROM SHOT_TABLE", timeout_s=lock_timeout_s)
 
             for row in reader:
                 if not row:
@@ -1571,7 +2836,6 @@ class SourceData:
                 if not first:
                     continue
 
-                # skip header / H-lines
                 if first[:1] in ("H", "h"):
                     continue
 
@@ -1613,10 +2877,7 @@ class SourceData:
                 array_id = (row[16] or "").strip() or None
                 source_id = to_int(row[17])
 
-                nav_line_code = (row[18] or "").strip()
-                if not nav_line_code:
-                    nav_line_code = ""
-
+                nav_line_code = (row[18] or "").strip() or ""
                 nav_line, attempt, seq = decode_nav(nav_line_code)
                 attempt = "" if attempt is None else str(attempt)
 
@@ -1626,6 +2887,11 @@ class SourceData:
 
                 shot_group_id = to_int(row[20])
                 elevation = to_float(row[21])
+
+                if seq != last_seq:
+                    seq_fk, _vessel_id = get_seq_info(seq)
+                    last_seq_fk = seq_fk
+                    last_seq = seq
 
                 batch_append((
                     sail_line,
@@ -1653,24 +2919,16 @@ class SourceData:
                     source_id,
                     nav_station,
                     shot_group_id,
-                    elevation
+                    elevation,
+                    file_fk,
+                    last_seq_fk
                 ))
                 attempted += 1
 
                 if len(batch) >= chunk_size:
-                    print(
-                        f"[SHOT_IMPORT] inserting batch size={len(batch)} attempted={attempted:,}",
-                        flush=True
-                    )
-
-                    before = conn.total_changes
                     _executemany_retry(cur, insert_sql, batch, timeout_s=lock_timeout_s)
-                    inserted_now = conn.total_changes - before
-                    processed += inserted_now
+                    processed += len(batch)
                     batch.clear()
-
-                    print("[SHOT_IMPORT] committing batch...", flush=True)
-                    conn.commit()
 
                     now = time.time()
                     if now - last_print >= 2.0:
@@ -1684,19 +2942,11 @@ class SourceData:
                         last_print = now
 
             if batch:
-                print(
-                    f"[SHOT_IMPORT] inserting final batch size={len(batch)} attempted={attempted:,}",
-                    flush=True
-                )
-
-                before = conn.total_changes
                 _executemany_retry(cur, insert_sql, batch, timeout_s=lock_timeout_s)
-                inserted_now = conn.total_changes - before
-                processed += inserted_now
+                processed += len(batch)
                 batch.clear()
 
-                print("[SHOT_IMPORT] committing final batch...", flush=True)
-                conn.commit()
+            conn.commit()
 
             total_time = time.time() - t0
             print(
@@ -1707,12 +2957,11 @@ class SourceData:
             )
             return processed
 
-        except Exception as e:
+        except Exception:
             try:
                 conn.rollback()
             except Exception:
                 pass
-            print("[SHOT_IMPORT] ERROR:", e, flush=True)
             raise
 
         finally:
@@ -1728,7 +2977,9 @@ class SourceData:
                 pass
 
             if own_conn:
+                print("[DB CLOSE]", self.db_path)
                 conn.close()
+
     def load_source_sps_uploaded_file_fast(
             self,
             uploaded_file,  # Django UploadedFile
@@ -1766,8 +3017,8 @@ class SourceData:
                 "SailLine_FK", "PPLine_FK", "Vessel_FK", "File_FK",
                 "SailLine", "Line", "Attempt", "Seq", "Tier",
                 "TierLinePoint", "LinePoint", "PointIdx", "Point",
-                "PointCode", "FireCode", "ArrayCode",
-                "PointDepth", "WaterDepth", "Easting", "Northing", "Elevation",
+                "PointCode", "Static","FireCode", "ArrayCode",
+                "PointDepth", "Datum","WaterDepth", "Easting", "Northing", "Elevation",
                 "JDay", "Hour", "Minute", "Second", "Microsecond",
                 "Month", "Week", "Day", "Year", "YearDay",
                 "TimeStamp",
@@ -1887,7 +3138,7 @@ class SourceData:
 
                 # fill FK/meta into point object
                 p.sail_line_fk = sl_id
-                p.ppline_fk = 0
+                p.ppline_fk = None
                 p.vessel_fk = point_vessel_fk
                 p.file_fk = int(file_fk)
 
@@ -1924,6 +3175,7 @@ class SourceData:
                     stream.detach()
             except Exception:
                 pass
+            print("[DB CLOSE]", self.db_path)
             conn.close()
 
     def update_line_maxspi_maxseq(self, line: int, file_fk: int | None = None) -> dict:
@@ -2055,6 +3307,7 @@ class SourceData:
             conn.rollback()
             raise
         finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
 
     def update_seq_maxspi(self, seq: int, production_code: str) -> dict:
@@ -2142,6 +3395,7 @@ class SourceData:
             conn.rollback()
             raise
         finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
 
     def update_slsolution_from_spsolution_timebased(self, file_fk: int) -> str:
@@ -2507,6 +3761,7 @@ class SourceData:
             conn.rollback()
             raise
         finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
     def update_slsolution_from_preplot_timebased(self, file_fk: int) -> str:
         file_fk = int(file_fk)
@@ -2577,6 +3832,7 @@ class SourceData:
             conn.rollback()
             raise
         finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
 
     def delete_sps_by_ids(self, ids):
@@ -2697,7 +3953,7 @@ class SourceData:
 
     def get_shot_line_summary(self) -> dict:
         """
-        Read V_SHOT_LineSummary and return:
+        Read SHOT_LineSummary table and return:
           - rows: list[dict]
           - totals: dict (sum of numeric columns across all rows)
           - total_count: int
@@ -2709,17 +3965,15 @@ class SourceData:
 
             rows = cur.execute("""
                 SELECT *
-                FROM V_SHOT_LineSummary
+                FROM SHOT_LineSummary
                 ORDER BY nav_line, attempt, seq
             """).fetchall()
 
             rows = [dict(r) for r in rows]
             total_count = len(rows)
 
-            # totals for numeric columns (ignore text)
             totals = {}
             if rows:
-                # pick numeric keys from first row
                 for k, v in rows[0].items():
                     if isinstance(v, (int, float)) and k not in ("nav_line", "attempt", "seq"):
                         totals[k] = 0
@@ -2733,12 +3987,10 @@ class SourceData:
             return {"rows": rows, "totals": totals, "total_count": total_count}
 
         finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
 
     def check_db_lock(self):
-        import sqlite3
-        import time
-
         conn = sqlite3.connect(self.db_path, timeout=1)
         cur = conn.cursor()
 
@@ -2749,42 +4001,18 @@ class SourceData:
         except sqlite3.OperationalError as e:
             print("DB LOCKED:", e)
 
+        print("[DB CLOSE]", self.db_path)
         conn.close()
 
     def ensure_shot_table_schema(self, conn=None):
-        """
-        Ensure SHOT_TABLE exists with the expected schema.
-        If schema differs, the table will be dropped and recreated.
-        """
-
         expected_cols = [
-            "id",
-            "sail_line",
-            "shot_station",
-            "shot_index",
-            "shot_status",
-            "nav_line_code",
-            "nav_line",
-            "attempt",
-            "seq",
-            "post_point_code",
-            "fire_code",
-            "gun_depth",
-            "water_depth",
-            "shot_x",
-            "shot_y",
-            "shot_day",
-            "shot_hour",
-            "shot_minute",
-            "shot_second",
-            "shot_microsecond",
-            "shot_year",
-            "vessel",
-            "array_id",
-            "source_id",
-            "nav_station",
-            "shot_group_id",
-            "elevation",
+            "id", "sail_line", "shot_station", "shot_index", "shot_status",
+            "nav_line_code", "nav_line", "attempt", "seq",
+            "post_point_code", "fire_code", "gun_depth", "water_depth",
+            "shot_x", "shot_y", "shot_day", "shot_hour", "shot_minute",
+            "shot_second", "shot_microsecond", "shot_year", "vessel",
+            "array_id", "source_id", "nav_station", "shot_group_id",
+            "elevation", "File_FK", "Seq_FK",
         ]
 
         own_conn = conn is None
@@ -2792,98 +4020,77 @@ class SourceData:
             conn = self._connect()
 
         try:
+            self.ensure_stfiles_schema(conn=conn)
             cur = conn.cursor()
-
-            # check if table exists
             row = cur.execute("""
-                SELECT name
-                FROM sqlite_master
-                WHERE type='table'
-                  AND name='SHOT_TABLE'
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='SHOT_TABLE'
             """).fetchone()
-
             recreate = False
-
             if row:
-                # read existing columns
                 cols = cur.execute("PRAGMA table_info(SHOT_TABLE)").fetchall()
-                existing_cols = [c[1] for c in cols]
-
-                if existing_cols != expected_cols:
-                    print("[SHOT_TABLE] schema mismatch, recreating table")
-                    recreate = True
+                existing_cols = [c["name"] for c in cols]
+                recreate = existing_cols != expected_cols
             else:
                 recreate = True
 
             if recreate:
                 cur.execute("DROP TABLE IF EXISTS SHOT_TABLE")
-
                 cur.execute("""
-                CREATE TABLE SHOT_TABLE (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                    sail_line INTEGER,
-                    shot_station INTEGER,
-                    shot_index INTEGER,
-                    shot_status INTEGER,
-
-                    nav_line_code TEXT,
-
-                    nav_line INTEGER,
-                    attempt TEXT,
-                    seq INTEGER,
-
-                    post_point_code TEXT,
-                    fire_code TEXT,
-
-                    gun_depth REAL,
-                    water_depth REAL,
-
-                    shot_x REAL,
-                    shot_y REAL,
-
-                    shot_day INTEGER,
-                    shot_hour INTEGER,
-                    shot_minute INTEGER,
-                    shot_second INTEGER,
-                    shot_microsecond INTEGER,
-                    shot_year INTEGER,
-
-                    vessel TEXT,
-                    array_id TEXT,
-                    source_id INTEGER,
-
-                    nav_station INTEGER,
-                    shot_group_id INTEGER,
-                    elevation REAL
-                )
+                    CREATE TABLE SHOT_TABLE (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sail_line INTEGER,
+                        shot_station INTEGER,
+                        shot_index INTEGER,
+                        shot_status INTEGER,
+                        nav_line_code TEXT,
+                        nav_line INTEGER,
+                        attempt TEXT,
+                        seq INTEGER,
+                        post_point_code TEXT,
+                        fire_code TEXT,
+                        gun_depth REAL,
+                        water_depth REAL,
+                        shot_x REAL,
+                        shot_y REAL,
+                        shot_day INTEGER,
+                        shot_hour INTEGER,
+                        shot_minute INTEGER,
+                        shot_second INTEGER,
+                        shot_microsecond INTEGER,
+                        shot_year INTEGER,
+                        vessel TEXT,
+                        array_id TEXT,
+                        source_id INTEGER,
+                        nav_station INTEGER,
+                        shot_group_id INTEGER,
+                        elevation REAL,
+                        File_FK INTEGER,
+                        Seq_FK INTEGER,
+                        FOREIGN KEY (File_FK) REFERENCES STFiles(id) ON DELETE SET NULL,
+                        FOREIGN KEY (Seq_FK) REFERENCES sequence_vessel_assignment(ID) ON DELETE SET NULL
+                    )
                 """)
 
-                print("[SHOT_TABLE] created")
-
-            conn.commit()
+            if own_conn:
+                conn.commit()
 
         finally:
             if own_conn:
+                print("[DB CLOSE]", self.db_path)
                 conn.close()
 
-    def create_v_shot_linesummary_view(self, conn=None) -> None:
+    def create_shot_line_summary_table(self, conn=None):
         """
-        Rebuild V_SHOT_LineSummary view.
+        Drop and rebuild full SHOT_LineSummary table.
 
-        Adds:
-            - sequence_vessel_assignment.purpose
-            - sequence_vessel_assignment.vessel_id
-            - project_fleet.vessel_name
-
-        Join logic:
-            a.seq BETWEEN sva.seq_first AND sva.seq_last
-
-        Notes:
-            - If sequence_vessel_assignment has overlapping seq ranges,
-              the view can return duplicate rows for the same shot line.
-            - In SQLite, unicode(text) uses only the first character.
-              Kept as-is because it matches your existing logic.
+        Returns
+        -------
+        dict
+            {
+                "success": True,
+                "rows": <row_count>
+            }
         """
         own_conn = conn is None
         if own_conn:
@@ -2891,357 +4098,323 @@ class SourceData:
 
         try:
             cur = conn.cursor()
+            cur.execute("BEGIN;")
 
-            cur.executescript("""
-            DROP VIEW IF EXISTS V_SHOT_LineSummary;
+            cur.execute("DROP TABLE IF EXISTS SHOT_LineSummary;")
 
-            CREATE VIEW V_SHOT_LineSummary AS
-            WITH
-            pg AS (
+            cur.execute("""
+                CREATE TABLE SHOT_LineSummary AS
+                WITH
+                pg AS (
+                    SELECT
+                        UPPER(COALESCE(production_code,''))      AS prod_codes,
+                        UPPER(COALESCE(non_production_code,''))  AS nonprod_codes,
+                        UPPER(COALESCE(kill_code,''))            AS kill_codes
+                    FROM project_geometry
+                    LIMIT 1
+                ),
+                shot_base AS (
+                    SELECT
+                        s.nav_line_code, s.nav_line, s.attempt, s.seq,
+                        s.shot_station, s.shot_index, s.shot_status,
+                        s.post_point_code, s.fire_code,
+                        s.gun_depth, s.water_depth, s.shot_x, s.shot_y,
+                        s.shot_day, s.shot_hour, s.shot_minute, s.shot_second, s.shot_microsecond, s.shot_year,
+                        s.array_id, s.source_id, s.nav_station, s.shot_group_id, s.elevation,
+                        CASE WHEN INSTR(pg.prod_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_prod,
+                        CASE WHEN INSTR(pg.nonprod_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_nonprod,
+                        CASE WHEN INSTR(pg.kill_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_kill
+                    FROM SHOT_TABLE s
+                    CROSS JOIN pg
+                    WHERE s.nav_line_code IS NOT NULL
+                      AND TRIM(s.nav_line_code) <> ''
+                ),
+                shot_agg AS (
+                    SELECT
+                        nav_line_code,
+                        MAX(nav_line) AS nav_line,
+                        MAX(attempt) AS attempt,
+                        MAX(seq) AS seq,
+                        COUNT(*) AS ShotCount,
+                        SUM(is_prod) AS ProdShots,
+                        SUM(is_nonprod) AS NonProdShots,
+                        SUM(is_kill) AS KillShots,
+                        MIN(nav_station) AS FSP,
+                        MAX(nav_station) AS LSP,
+                        MIN(CASE WHEN is_prod=1 THEN nav_station END) AS FGSP,
+                        MAX(CASE WHEN is_prod=1 THEN nav_station END) AS LGSP,
+                        SUM(shot_station) AS Sum_shot_station,
+                        SUM(shot_index) AS Sum_shot_index,
+                        SUM(shot_status) AS Sum_shot_status,
+                        SUM(seq) AS Sum_seq,
+                        SUM(unicode(post_point_code)) AS Sum_post_point_code,
+                        SUM(unicode(fire_code)) AS Sum_fire_code,
+                        SUM(gun_depth) AS Sum_gun_depth,
+                        SUM(water_depth) AS Sum_water_depth,
+                        SUM(shot_x) AS Sum_shot_x,
+                        SUM(shot_y) AS Sum_shot_y,
+                        SUM(shot_day) AS Sum_shot_day,
+                        SUM(shot_hour) AS Sum_shot_hour,
+                        SUM(shot_minute) AS Sum_shot_minute,
+                        SUM(shot_second) AS Sum_shot_second,
+                        SUM(shot_microsecond) AS Sum_shot_microsecond,
+                        SUM(shot_year) AS Sum_shot_year,
+                        SUM(unicode(array_id)) AS Sum_array_id,
+                        SUM(source_id) AS Sum_source_id,
+                        SUM(nav_station) AS Sum_nav_station,
+                        SUM(shot_group_id) AS Sum_shot_group_id,
+                        SUM(elevation) AS Sum_elevation
+                    FROM shot_base
+                    GROUP BY nav_line_code
+                ),
+                sps_agg AS (
+                    SELECT
+                        SailLine, Line, Attempt, Seq,
+                        SUM(Line) AS sps_Sum_Line,
+                        SUM(Seq) AS sps_Sum_Seq,
+                        SUM(Point) AS sps_Sum_Point,
+                        SUM(unicode(PointCode)) AS sps_Sum_PointCode,
+                        SUM(unicode(FireCode)) AS sps_Sum_FireCode,
+                        SUM(ArrayCode) AS sps_Sum_ArrayCode,
+                        SUM(Static) AS sps_Sum_Static,
+                        SUM(PointDepth) AS sps_Sum_PointDepth,
+                        SUM(Datum) AS sps_Sum_Datum,
+                        SUM(Uphole) AS sps_Sum_Uphole,
+                        SUM(WaterDepth) AS sps_Sum_WaterDepth,
+                        SUM(Easting) AS sps_Sum_Easting,
+                        SUM(Northing) AS sps_Sum_Northing,
+                        SUM(Elevation) AS sps_Sum_Elevation,
+                        SUM(JDay) AS sps_Sum_JDay,
+                        SUM(Hour) AS sps_Sum_Hour,
+                        SUM(Minute) AS sps_Sum_Minute,
+                        SUM(Second) AS sps_Sum_Second,
+                        SUM(Microsecond) AS sps_Sum_Microsecond
+                    FROM SPSolution
+                    GROUP BY SailLine, Line, Attempt, Seq
+                )
                 SELECT
-                    UPPER(COALESCE(production_code,''))      AS prod_codes,
-                    UPPER(COALESCE(non_production_code,''))  AS nonprod_codes,
-                    UPPER(COALESCE(kill_code,''))            AS kill_codes
-                FROM project_geometry
-                LIMIT 1
-            ),
+                    a.nav_line_code,
+                    a.nav_line,
+                    a.attempt,
+                    a.seq,
 
-            -- ===============================
-            -- SHOT base
-            -- ===============================
-            shot_base AS (
-                SELECT
-                    s.nav_line_code,
-                    s.nav_line,
-                    s.attempt,
-                    s.seq,
+                    sva.purpose_id,
+                    sva.purpose,
+                    sva.vessel_id,
+                    pf.vessel_name,
 
-                    s.shot_station,
-                    s.shot_index,
-                    s.shot_status,
+                    CASE
+                        WHEN EXISTS (
+                            SELECT 1
+                            FROM SLSolution sl
+                            WHERE sl.SailLine = a.nav_line_code
+                        ) THEN 1 ELSE 0
+                    END AS IsInSLSolution,
 
-                    s.post_point_code,
-                    s.fire_code,
+                    a.ShotCount,
+                    a.ProdShots,
+                    a.NonProdShots,
+                    a.KillShots,
+                    a.FSP,
+                    a.LSP,
+                    a.FGSP,
+                    a.LGSP,
 
-                    s.gun_depth,
-                    s.water_depth,
+                    a.Sum_shot_station,
+                    a.Sum_shot_index,
+                    a.Sum_shot_status,
+                    a.Sum_seq,
+                    a.Sum_post_point_code,
+                    a.Sum_fire_code,
+                    a.Sum_gun_depth,
+                    a.Sum_water_depth,
+                    a.Sum_shot_x,
+                    a.Sum_shot_y,
+                    a.Sum_shot_day,
+                    a.Sum_shot_hour,
+                    a.Sum_shot_minute,
+                    a.Sum_shot_second,
+                    a.Sum_shot_microsecond,
+                    a.Sum_shot_year,
+                    a.Sum_array_id,
+                    a.Sum_source_id,
+                    a.Sum_nav_station,
+                    a.Sum_shot_group_id,
+                    a.Sum_elevation,
 
-                    s.shot_x,
-                    s.shot_y,
+                    s.SailLine AS sps_SailLine,
+                    s.Line AS sps_Line,
+                    s.Attempt AS sps_Attempt,
+                    s.Seq AS sps_Seq,
+                    s.sps_Sum_Line,
+                    s.sps_Sum_Seq,
+                    s.sps_Sum_Point,
+                    s.sps_Sum_PointCode,
+                    s.sps_Sum_FireCode,
+                    s.sps_Sum_ArrayCode,
+                    s.sps_Sum_Static,
+                    s.sps_Sum_PointDepth,
+                    s.sps_Sum_Datum,
+                    s.sps_Sum_Uphole,
+                    s.sps_Sum_WaterDepth,
+                    s.sps_Sum_Easting,
+                    s.sps_Sum_Northing,
+                    s.sps_Sum_Elevation,
+                    s.sps_Sum_JDay,
+                    s.sps_Sum_Hour,
+                    s.sps_Sum_Minute,
+                    s.sps_Sum_Second,
+                    s.sps_Sum_Microsecond,
 
-                    s.shot_day,
-                    s.shot_hour,
-                    s.shot_minute,
-                    s.shot_second,
-                    s.shot_microsecond,
-                    s.shot_year,
+                    CASE WHEN COALESCE(a.nav_line,0) = COALESCE(s.sps_Sum_Line, -999999999) THEN 1 ELSE 0 END AS cmp_Line,
+                    CASE WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 1 ELSE 0 END AS cmp_Attempt,
+                    CASE WHEN COALESCE(a.Sum_seq,0) = COALESCE(s.sps_Sum_Seq, -999999999) THEN 1 ELSE 0 END AS cmp_Seq,
+                    CASE WHEN COALESCE(a.Sum_nav_station,0) = COALESCE(s.sps_Sum_Point, -999999999) THEN 1 ELSE 0 END AS cmp_Point,
+                    CASE WHEN COALESCE(a.Sum_post_point_code,0) = COALESCE(s.sps_Sum_PointCode, -999999999) THEN 1 ELSE 0 END AS cmp_PointCode,
+                    CASE WHEN COALESCE(a.Sum_fire_code,0) = COALESCE(s.sps_Sum_FireCode, -999999999) THEN 1 ELSE 0 END AS cmp_FireCode,
+                    CASE WHEN COALESCE(a.Sum_water_depth,0) = COALESCE(s.sps_Sum_WaterDepth, -999999999) THEN 1 ELSE 0 END AS cmp_WaterDepth,
+                    CASE WHEN COALESCE(a.Sum_shot_x,0) = COALESCE(s.sps_Sum_Easting, -999999999) THEN 1 ELSE 0 END AS cmp_Easting,
+                    CASE WHEN COALESCE(a.Sum_shot_y,0) = COALESCE(s.sps_Sum_Northing, -999999999) THEN 1 ELSE 0 END AS cmp_Northing,
+                    CASE WHEN COALESCE(a.Sum_elevation,0) = COALESCE(s.sps_Sum_Elevation, -999999999) THEN 1 ELSE 0 END AS cmp_Elevation,
+                    CASE WHEN COALESCE(a.Sum_shot_day,0) = COALESCE(s.sps_Sum_JDay, -999999999) THEN 1 ELSE 0 END AS cmp_JDay,
+                    CASE WHEN COALESCE(a.Sum_shot_hour,0) = COALESCE(s.sps_Sum_Hour, -999999999) THEN 1 ELSE 0 END AS cmp_Hour,
+                    CASE WHEN COALESCE(a.Sum_shot_minute,0) = COALESCE(s.sps_Sum_Minute, -999999999) THEN 1 ELSE 0 END AS cmp_Minute,
+                    CASE WHEN COALESCE(a.Sum_shot_second,0) = COALESCE(s.sps_Sum_Second, -999999999) THEN 1 ELSE 0 END AS cmp_Second,
+                    CASE WHEN COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999) THEN 1 ELSE 0 END AS cmp_Microsecond,
 
-                    s.array_id,
-                    s.source_id,
-                    s.nav_station,
-                    s.shot_group_id,
-                    s.elevation,
+                    CASE WHEN s.Line IS NULL THEN 1
+                         WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 0
+                         ELSE 1 END AS diff_Attempt,
 
-                    CASE WHEN INSTR(pg.prod_codes,    UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_prod,
-                    CASE WHEN INSTR(pg.nonprod_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_nonprod,
-                    CASE WHEN INSTR(pg.kill_codes,    UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_kill
-                FROM SHOT_TABLE s
-                CROSS JOIN pg
-                WHERE s.nav_line_code IS NOT NULL
-                  AND TRIM(s.nav_line_code) <> ''
-            ),
+                    (COALESCE(a.Sum_seq,0) - COALESCE(s.sps_Sum_Seq,0)) AS diff_Seq,
+                    (COALESCE(a.Sum_nav_station,0) - COALESCE(s.sps_Sum_Point,0)) AS diff_Point,
+                    (COALESCE(a.Sum_post_point_code,0) - COALESCE(s.sps_Sum_PointCode,0)) AS diff_PointCode,
+                    (COALESCE(a.Sum_fire_code,0) - COALESCE(s.sps_Sum_FireCode,0)) AS diff_FireCode,
+                    (COALESCE(a.Sum_water_depth,0) - COALESCE(s.sps_Sum_WaterDepth,0)) AS diff_WaterDepth,
+                    (COALESCE(a.Sum_shot_x,0) - COALESCE(s.sps_Sum_Easting,0)) AS diff_Easting,
+                    (COALESCE(a.Sum_shot_y,0) - COALESCE(s.sps_Sum_Northing,0)) AS diff_Northing,
+                    (COALESCE(a.Sum_elevation,0) - COALESCE(s.sps_Sum_Elevation,0)) AS diff_Elevation,
+                    (COALESCE(a.Sum_shot_day,0) - COALESCE(s.sps_Sum_JDay,0)) AS diff_JDay,
+                    (COALESCE(a.Sum_shot_hour,0) - COALESCE(s.sps_Sum_Hour,0)) AS diff_Hour,
+                    (COALESCE(a.Sum_shot_minute,0) - COALESCE(s.sps_Sum_Minute,0)) AS diff_Minute,
+                    (COALESCE(a.Sum_shot_second,0) - COALESCE(s.sps_Sum_Second,0)) AS diff_Second,
+                    (COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0)) AS diff_Microsecond,
 
-            -- ===============================
-            -- SHOT aggregation
-            -- ===============================
-            shot_agg AS (
-                SELECT
-                    nav_line_code,
+                    CASE WHEN s.Line IS NULL THEN 1
+                         WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 0
+                         ELSE 1 END
+                    + ABS(COALESCE(a.Sum_seq,0) - COALESCE(s.sps_Sum_Seq,0))
+                    + ABS(COALESCE(a.Sum_nav_station,0) - COALESCE(s.sps_Sum_Point,0))
+                    + ABS(COALESCE(a.Sum_post_point_code,0) - COALESCE(s.sps_Sum_PointCode,0))
+                    + ABS(COALESCE(a.Sum_fire_code,0) - COALESCE(s.sps_Sum_FireCode,0))
+                    + ABS(COALESCE(a.Sum_water_depth,0) - COALESCE(s.sps_Sum_WaterDepth,0))
+                    + ABS(COALESCE(a.Sum_shot_x,0) - COALESCE(s.sps_Sum_Easting,0))
+                    + ABS(COALESCE(a.Sum_shot_y,0) - COALESCE(s.sps_Sum_Northing,0))
+                    + ABS(COALESCE(a.Sum_elevation,0) - COALESCE(s.sps_Sum_Elevation,0))
+                    + ABS(COALESCE(a.Sum_shot_day,0) - COALESCE(s.sps_Sum_JDay,0))
+                    + ABS(COALESCE(a.Sum_shot_hour,0) - COALESCE(s.sps_Sum_Hour,0))
+                    + ABS(COALESCE(a.Sum_shot_minute,0) - COALESCE(s.sps_Sum_Minute,0))
+                    + ABS(COALESCE(a.Sum_shot_second,0) - COALESCE(s.sps_Sum_Second,0))
+                    + ABS(COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0)) AS SumDiff,
 
-                    MAX(nav_line) AS nav_line,
-                    MAX(attempt)  AS attempt,
-                    MAX(seq)      AS seq,
+                    CASE WHEN
+                        (COALESCE(a.nav_line,0) = COALESCE(s.sps_Sum_Line, -999999999)) AND
+                        (COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '')) AND
+                        (COALESCE(a.Sum_seq,0) = COALESCE(s.sps_Sum_Seq, -999999999)) AND
+                        (COALESCE(a.Sum_nav_station,0) = COALESCE(s.sps_Sum_Point, -999999999)) AND
+                        (COALESCE(a.Sum_post_point_code,0) = COALESCE(s.sps_Sum_PointCode, -999999999)) AND
+                        (COALESCE(a.Sum_fire_code,0) = COALESCE(s.sps_Sum_FireCode, -999999999)) AND
+                        (COALESCE(a.Sum_water_depth,0) = COALESCE(s.sps_Sum_WaterDepth, -999999999)) AND
+                        (COALESCE(a.Sum_shot_x,0) = COALESCE(s.sps_Sum_Easting, -999999999)) AND
+                        (COALESCE(a.Sum_shot_y,0) = COALESCE(s.sps_Sum_Northing, -999999999)) AND
+                        (COALESCE(a.Sum_elevation,0) = COALESCE(s.sps_Sum_Elevation, -999999999)) AND
+                        (COALESCE(a.Sum_shot_day,0) = COALESCE(s.sps_Sum_JDay, -999999999)) AND
+                        (COALESCE(a.Sum_shot_hour,0) = COALESCE(s.sps_Sum_Hour, -999999999)) AND
+                        (COALESCE(a.Sum_shot_minute,0) = COALESCE(s.sps_Sum_Minute, -999999999)) AND
+                        (COALESCE(a.Sum_shot_second,0) = COALESCE(s.sps_Sum_Second, -999999999)) AND
+                        (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
+                    THEN 1 ELSE 0 END AS QC_AllMatch,
 
-                    COUNT(*) AS ShotCount,
+                    CASE WHEN
+                        (COALESCE(a.nav_line,0) = COALESCE(s.sps_Sum_Line, -999999999)) OR
+                        (COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '')) OR
+                        (COALESCE(a.Sum_seq,0) = COALESCE(s.sps_Sum_Seq, -999999999)) OR
+                        (COALESCE(a.Sum_nav_station,0) = COALESCE(s.sps_Sum_Point, -999999999)) OR
+                        (COALESCE(a.Sum_post_point_code,0) = COALESCE(s.sps_Sum_PointCode, -999999999)) OR
+                        (COALESCE(a.Sum_fire_code,0) = COALESCE(s.sps_Sum_FireCode, -999999999)) OR
+                        (COALESCE(a.Sum_water_depth,0) = COALESCE(s.sps_Sum_WaterDepth, -999999999)) OR
+                        (COALESCE(a.Sum_shot_x,0) = COALESCE(s.sps_Sum_Easting, -999999999)) OR
+                        (COALESCE(a.Sum_shot_y,0) = COALESCE(s.sps_Sum_Northing, -999999999)) OR
+                        (COALESCE(a.Sum_elevation,0) = COALESCE(s.sps_Sum_Elevation, -999999999)) OR
+                        (COALESCE(a.Sum_shot_day,0) = COALESCE(s.sps_Sum_JDay, -999999999)) OR
+                        (COALESCE(a.Sum_shot_hour,0) = COALESCE(s.sps_Sum_Hour, -999999999)) OR
+                        (COALESCE(a.Sum_shot_minute,0) = COALESCE(s.sps_Sum_Minute, -999999999)) OR
+                        (COALESCE(a.Sum_shot_second,0) = COALESCE(s.sps_Sum_Second, -999999999)) OR
+                        (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
+                    THEN 1 ELSE 0 END AS QC_AnyMatch
 
-                    SUM(is_prod)    AS ProdShots,
-                    SUM(is_nonprod) AS NonProdShots,
-                    SUM(is_kill)    AS KillShots,
-
-                    MIN(nav_station) AS FSP,
-                    MAX(nav_station) AS LSP,
-                    MIN(CASE WHEN is_prod=1 THEN nav_station END) AS FGSP,
-                    MAX(CASE WHEN is_prod=1 THEN nav_station END) AS LGSP,
-
-                    -- SHOT sums / checksums
-                    SUM(shot_station)     AS Sum_shot_station,
-                    SUM(shot_index)       AS Sum_shot_index,
-                    SUM(shot_status)      AS Sum_shot_status,
-
-                    SUM(attempt)          AS Sum_attempt,
-                    SUM(seq)              AS Sum_seq,
-
-                    SUM(unicode(post_point_code)) AS Sum_post_point_code,
-                    SUM(unicode(fire_code))       AS Sum_fire_code,
-
-                    SUM(gun_depth)        AS Sum_gun_depth,
-                    SUM(water_depth)      AS Sum_water_depth,
-
-                    SUM(shot_x)           AS Sum_shot_x,
-                    SUM(shot_y)           AS Sum_shot_y,
-
-                    SUM(shot_day)         AS Sum_shot_day,
-                    SUM(shot_hour)        AS Sum_shot_hour,
-                    SUM(shot_minute)      AS Sum_shot_minute,
-                    SUM(shot_second)      AS Sum_shot_second,
-                    SUM(shot_microsecond) AS Sum_shot_microsecond,
-                    SUM(shot_year)        AS Sum_shot_year,
-
-                    SUM(unicode(array_id)) AS Sum_array_id,
-
-                    SUM(source_id)     AS Sum_source_id,
-                    SUM(nav_station)   AS Sum_nav_station,
-                    SUM(shot_group_id) AS Sum_shot_group_id,
-                    SUM(elevation)     AS Sum_elevation
-
-                FROM shot_base
-                GROUP BY nav_line_code
-            ),
-
-            -- ===============================
-            -- SPSolution aggregation
-            -- ===============================
-            sps_agg AS (
-                SELECT
-                    SailLine,
-                    Line,
-                    Attempt,
-                    Seq,
-
-                    SUM(Line)    AS sps_Sum_Line,
-                    SUM(Attempt) AS sps_Sum_Attempt,
-                    SUM(Seq)     AS sps_Sum_Seq,
-                    SUM(Point)   AS sps_Sum_Point,
-
-                    SUM(unicode(PointCode)) AS sps_Sum_PointCode,
-                    SUM(unicode(FireCode))  AS sps_Sum_FireCode,
-                    SUM(unicode(ArrayCode)) AS sps_Sum_ArrayCode,
-
-                    SUM(Static)     AS sps_Sum_Static,
-                    SUM(PointDepth) AS sps_Sum_PointDepth,
-                    SUM(Datum)      AS sps_Sum_Datum,
-                    SUM(Uphole)     AS sps_Sum_Uphole,
-                    SUM(WaterDepth) AS sps_Sum_WaterDepth,
-
-                    SUM(Easting)   AS sps_Sum_Easting,
-                    SUM(Northing)  AS sps_Sum_Northing,
-                    SUM(Elevation) AS sps_Sum_Elevation,
-
-                    SUM(JDay)        AS sps_Sum_JDay,
-                    SUM(Hour)        AS sps_Sum_Hour,
-                    SUM(Minute)      AS sps_Sum_Minute,
-                    SUM(Second)      AS sps_Sum_Second,
-                    SUM(Microsecond) AS sps_Sum_Microsecond
-
-                FROM SPSolution
-                GROUP BY SailLine, Line, Attempt, Seq
-            )
-
-            -- ===============================
-            -- FINAL SELECT
-            -- ===============================
-            SELECT
-                a.nav_line_code,
-                a.nav_line,
-                a.attempt,
-                a.seq,
-
-                sva.purpose,
-                sva.vessel_id,
-                pf.vessel_name,
-
-                CASE WHEN EXISTS (
-                    SELECT 1
-                    FROM SLSolution sl
-                    WHERE sl.SailLine = a.nav_line_code
-                ) THEN 1 ELSE 0 END AS IsInSLSolution,
-
-                a.ShotCount,
-                a.ProdShots,
-                a.NonProdShots,
-                a.KillShots,
-
-                a.FSP,
-                a.LSP,
-                a.FGSP,
-                a.LGSP,
-
-                -- SHOT sums
-                a.Sum_shot_station,
-                a.Sum_shot_index,
-                a.Sum_shot_status,
-                a.Sum_attempt,
-                a.Sum_seq,
-                a.Sum_post_point_code,
-                a.Sum_fire_code,
-                a.Sum_gun_depth,
-                a.Sum_water_depth,
-                a.Sum_shot_x,
-                a.Sum_shot_y,
-                a.Sum_shot_day,
-                a.Sum_shot_hour,
-                a.Sum_shot_minute,
-                a.Sum_shot_second,
-                a.Sum_shot_microsecond,
-                a.Sum_shot_year,
-                a.Sum_array_id,
-                a.Sum_source_id,
-                a.Sum_nav_station,
-                a.Sum_shot_group_id,
-                a.Sum_elevation,
-
-                -- SPS sums
-                s.SailLine AS sps_SailLine,
-                s.sps_Sum_Line,
-                s.sps_Sum_Attempt,
-                s.sps_Sum_Seq,
-                s.sps_Sum_Point,
-                s.sps_Sum_PointCode,
-                s.sps_Sum_FireCode,
-                s.sps_Sum_ArrayCode,
-                s.sps_Sum_Static,
-                s.sps_Sum_PointDepth,
-                s.sps_Sum_Datum,
-                s.sps_Sum_Uphole,
-                s.sps_Sum_WaterDepth,
-                s.sps_Sum_Easting,
-                s.sps_Sum_Northing,
-                s.sps_Sum_Elevation,
-                s.sps_Sum_JDay,
-                s.sps_Sum_Hour,
-                s.sps_Sum_Minute,
-                s.sps_Sum_Second,
-                s.sps_Sum_Microsecond,
-
-                -- ---------------------------------
-                -- Comparisons (1=match, 0=mismatch)
-                -- ---------------------------------
-                CASE WHEN COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999)        THEN 1 ELSE 0 END AS cmp_Line,
-                CASE WHEN COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999)     THEN 1 ELSE 0 END AS cmp_Attempt,
-                CASE WHEN COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999)         THEN 1 ELSE 0 END AS cmp_Seq,
-
-                CASE WHEN COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999)       THEN 1 ELSE 0 END AS cmp_Point,
-
-                CASE WHEN COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999)   THEN 1 ELSE 0 END AS cmp_PointCode,
-                CASE WHEN COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999)    THEN 1 ELSE 0 END AS cmp_FireCode,
-
-                CASE WHEN COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999)  THEN 1 ELSE 0 END AS cmp_WaterDepth,
-                CASE WHEN COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999)     THEN 1 ELSE 0 END AS cmp_Easting,
-                CASE WHEN COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999)    THEN 1 ELSE 0 END AS cmp_Northing,
-                CASE WHEN COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999)   THEN 1 ELSE 0 END AS cmp_Elevation,
-
-                CASE WHEN COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999)        THEN 1 ELSE 0 END AS cmp_JDay,
-                CASE WHEN COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999)        THEN 1 ELSE 0 END AS cmp_Hour,
-                CASE WHEN COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999)      THEN 1 ELSE 0 END AS cmp_Minute,
-                CASE WHEN COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999)      THEN 1 ELSE 0 END AS cmp_Second,
-                CASE WHEN COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999) THEN 1 ELSE 0 END AS cmp_Microsecond,
-
-                -- diffs (SHOT - SPS)
-                (COALESCE(a.Sum_attempt,0)          - COALESCE(s.sps_Sum_Attempt,0))      AS diff_Attempt,
-                (COALESCE(a.Sum_seq,0)              - COALESCE(s.sps_Sum_Seq,0))          AS diff_Seq,
-                (COALESCE(a.Sum_nav_station,0)      - COALESCE(s.sps_Sum_Point,0))        AS diff_Point,
-                (COALESCE(a.Sum_post_point_code,0)  - COALESCE(s.sps_Sum_PointCode,0))    AS diff_PointCode,
-                (COALESCE(a.Sum_fire_code,0)        - COALESCE(s.sps_Sum_FireCode,0))     AS diff_FireCode,
-                (COALESCE(a.Sum_water_depth,0)      - COALESCE(s.sps_Sum_WaterDepth,0))   AS diff_WaterDepth,
-                (COALESCE(a.Sum_shot_x,0)           - COALESCE(s.sps_Sum_Easting,0))      AS diff_Easting,
-                (COALESCE(a.Sum_shot_y,0)           - COALESCE(s.sps_Sum_Northing,0))     AS diff_Northing,
-                (COALESCE(a.Sum_elevation,0)        - COALESCE(s.sps_Sum_Elevation,0))    AS diff_Elevation,
-                (COALESCE(a.Sum_shot_day,0)         - COALESCE(s.sps_Sum_JDay,0))         AS diff_JDay,
-                (COALESCE(a.Sum_shot_hour,0)        - COALESCE(s.sps_Sum_Hour,0))         AS diff_Hour,
-                (COALESCE(a.Sum_shot_minute,0)      - COALESCE(s.sps_Sum_Minute,0))       AS diff_Minute,
-                (COALESCE(a.Sum_shot_second,0)      - COALESCE(s.sps_Sum_Second,0))       AS diff_Second,
-                (COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0))  AS diff_Microsecond,
-
-                -- Sum of absolute diffs
-                ABS(COALESCE(a.Sum_attempt,0)          - COALESCE(s.sps_Sum_Attempt,0)) +
-                ABS(COALESCE(a.Sum_seq,0)              - COALESCE(s.sps_Sum_Seq,0)) +
-                ABS(COALESCE(a.Sum_nav_station,0)      - COALESCE(s.sps_Sum_Point,0)) +
-                ABS(COALESCE(a.Sum_post_point_code,0)  - COALESCE(s.sps_Sum_PointCode,0)) +
-                ABS(COALESCE(a.Sum_fire_code,0)        - COALESCE(s.sps_Sum_FireCode,0)) +
-                ABS(COALESCE(a.Sum_water_depth,0)      - COALESCE(s.sps_Sum_WaterDepth,0)) +
-                ABS(COALESCE(a.Sum_shot_x,0)           - COALESCE(s.sps_Sum_Easting,0)) +
-                ABS(COALESCE(a.Sum_shot_y,0)           - COALESCE(s.sps_Sum_Northing,0)) +
-                ABS(COALESCE(a.Sum_elevation,0)        - COALESCE(s.sps_Sum_Elevation,0)) +
-                ABS(COALESCE(a.Sum_shot_day,0)         - COALESCE(s.sps_Sum_JDay,0)) +
-                ABS(COALESCE(a.Sum_shot_hour,0)        - COALESCE(s.sps_Sum_Hour,0)) +
-                ABS(COALESCE(a.Sum_shot_minute,0)      - COALESCE(s.sps_Sum_Minute,0)) +
-                ABS(COALESCE(a.Sum_shot_second,0)      - COALESCE(s.sps_Sum_Second,0)) +
-                ABS(COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0))
-                AS SumDiff,
-
-                CASE WHEN
-                    (COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999)) AND
-                    (COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999)) AND
-                    (COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999)) AND
-                    (COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999)) AND
-                    (COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999)) AND
-                    (COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999)) AND
-                    (COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999)) AND
-                    (COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999)) AND
-                    (COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999)) AND
-                    (COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999)) AND
-                    (COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999)) AND
-                    (COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999)) AND
-                    (COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999)) AND
-                    (COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999)) AND
-                    (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
-                THEN 1 ELSE 0 END AS QC_AllMatch,
-
-                CASE WHEN
-                     (COALESCE(a.nav_line,0)             = COALESCE(s.sps_Sum_Line, -999999999))
-                  OR (COALESCE(a.Sum_attempt,0)          = COALESCE(s.sps_Sum_Attempt, -999999999))
-                  OR (COALESCE(a.Sum_seq,0)              = COALESCE(s.sps_Sum_Seq, -999999999))
-                  OR (COALESCE(a.Sum_nav_station,0)      = COALESCE(s.sps_Sum_Point, -999999999))
-                  OR (COALESCE(a.Sum_post_point_code,0)  = COALESCE(s.sps_Sum_PointCode, -999999999))
-                  OR (COALESCE(a.Sum_fire_code,0)        = COALESCE(s.sps_Sum_FireCode, -999999999))
-                  OR (COALESCE(a.Sum_water_depth,0)      = COALESCE(s.sps_Sum_WaterDepth, -999999999))
-                  OR (COALESCE(a.Sum_shot_x,0)           = COALESCE(s.sps_Sum_Easting, -999999999))
-                  OR (COALESCE(a.Sum_shot_y,0)           = COALESCE(s.sps_Sum_Northing, -999999999))
-                  OR (COALESCE(a.Sum_elevation,0)        = COALESCE(s.sps_Sum_Elevation, -999999999))
-                  OR (COALESCE(a.Sum_shot_day,0)         = COALESCE(s.sps_Sum_JDay, -999999999))
-                  OR (COALESCE(a.Sum_shot_hour,0)        = COALESCE(s.sps_Sum_Hour, -999999999))
-                  OR (COALESCE(a.Sum_shot_minute,0)      = COALESCE(s.sps_Sum_Minute, -999999999))
-                  OR (COALESCE(a.Sum_shot_second,0)      = COALESCE(s.sps_Sum_Second, -999999999))
-                  OR (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
-                THEN 1 ELSE 0 END AS QC_AnyMatch
-
-            FROM shot_agg a
-            LEFT JOIN sps_agg s
-                ON s.Line    = a.nav_line
-               AND s.Attempt = a.attempt
-               AND s.Seq     = a.seq
-            LEFT JOIN sequence_vessel_assignment sva
-                ON a.seq BETWEEN sva.seq_first AND sva.seq_last
-            LEFT JOIN project_fleet pf
-                ON pf.id = sva.vessel_id;
+                FROM shot_agg a
+                LEFT JOIN sps_agg s
+                    ON s.Line = a.nav_line
+                   AND COALESCE(CAST(s.Attempt AS TEXT), '') = COALESCE(CAST(a.attempt AS TEXT), '')
+                   AND s.Seq = a.seq
+                LEFT JOIN sequence_vessel_assignment sva
+                    ON a.seq BETWEEN sva.seq_first AND sva.seq_last
+                   AND COALESCE(sva.is_active, 1) = 1
+                LEFT JOIN project_fleet pf
+                    ON pf.id = sva.vessel_id;
             """)
 
-            if own_conn:
-                conn.commit()
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_shot_linesummary_nav_line_code
+                ON SHOT_LineSummary(nav_line_code);
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_shot_linesummary_seq
+                ON SHOT_LineSummary(seq);
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_shot_linesummary_qc_allmatch
+                ON SHOT_LineSummary(QC_AllMatch);
+            """)
 
+            cur.execute("SELECT COUNT(*) AS cnt FROM SHOT_LineSummary;")
+            row = cur.fetchone()
+            row_count = int(row["cnt"] if hasattr(row, "keys") else row[0])
+
+            conn.commit()
+            return {"success": True, "rows": row_count}
+
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             if own_conn:
                 conn.close()
 
+    def ensure_shot_linesummary_table(self, conn=None) -> None:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            cur = conn.cursor()
+            row = cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SHOT_LineSummary'").fetchone()
+            if row is None:
+                self.create_shot_line_summary_table(conn=conn)
+            if own_conn:
+                conn.commit()
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+
     def list_v_shot_linesummary(self, filters: dict | None = None) -> list[dict]:
-        """
-        Read V_SHOT_LineSummary with optional backend filters.
-        """
         filters = filters or {}
 
         sql = """
             SELECT *
-            FROM V_SHOT_LineSummary
+            FROM SHOT_LineSummary
             WHERE 1=1
         """
         params = []
@@ -3306,4 +4479,1898 @@ class SourceData:
             rows = cur.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
         finally:
+            print("[DB CLOSE]", self.db_path)
             conn.close()
+
+    def get_sps_shot_compare_by_sailline(self, sailline: str, mismatches_only: bool = False):
+        sailline = str(sailline or "").strip()
+        if not sailline:
+            return []
+
+        sql = """
+        WITH
+        sps_src AS (
+            SELECT
+                SailLine,
+                Line,
+                Attempt,
+                Seq,
+                Point,
+                PointCode,
+                FireCode,
+                ArrayCode,
+                PointDepth,
+                WaterDepth,
+                Easting,
+                Northing,
+                Elevation,
+                Day,
+                Hour,
+                Minute,
+                Second,
+                Microsecond,
+                Year
+            FROM SPSolution
+            WHERE SailLine = ?
+        ),
+        shot_src AS (
+            SELECT
+                nav_line_code,
+                nav_line,
+                attempt,
+                seq,
+                nav_station,
+                post_point_code,
+                fire_code,
+                source_id,
+                gun_depth,
+                water_depth,
+                shot_x,
+                shot_y,
+                elevation,
+                shot_day,
+                shot_hour,
+                shot_minute,
+                shot_second,
+                shot_microsecond,
+                shot_year
+            FROM SHOT_TABLE
+            WHERE nav_line_code = ?
+        ),
+        cmp AS (
+            SELECT
+                sps.SailLine              AS sps_SailLine,
+                st.nav_line_code          AS shot_nav_line_code,
+
+                sps.Line                  AS sps_Line,
+                st.nav_line               AS shot_nav_line,
+                CASE
+                    WHEN sps.Line IS NULL AND st.nav_line IS NULL THEN 0
+                    WHEN sps.Line IS NULL OR st.nav_line IS NULL THEN 1
+                    WHEN sps.Line = st.nav_line THEN 0
+                    ELSE 1
+                END AS diff_Line,
+
+                CAST(sps.Attempt AS TEXT) AS sps_Attempt,
+                TRIM(st.attempt)          AS shot_attempt,
+                CASE
+                    WHEN sps.Attempt IS NULL AND st.attempt IS NULL THEN 0
+                    WHEN sps.Attempt IS NULL OR st.attempt IS NULL THEN 1
+                    WHEN CAST(sps.Attempt AS TEXT) = TRIM(st.attempt) THEN 0
+                    ELSE 1
+                END AS diff_Attempt,
+
+                sps.Seq                   AS sps_Seq,
+                st.seq                    AS shot_seq,
+                CASE
+                    WHEN sps.Seq IS NULL AND st.seq IS NULL THEN 0
+                    WHEN sps.Seq IS NULL OR st.seq IS NULL THEN 1
+                    WHEN sps.Seq = st.seq THEN 0
+                    ELSE 1
+                END AS diff_Seq,
+
+                sps.Point                 AS sps_Point,
+                st.nav_station            AS shot_nav_station,
+                CASE
+                    WHEN sps.Point IS NULL AND st.nav_station IS NULL THEN 0
+                    WHEN sps.Point IS NULL OR st.nav_station IS NULL THEN 1
+                    WHEN sps.Point = st.nav_station THEN 0
+                    ELSE 1
+                END AS diff_Point,
+
+                sps.PointCode             AS sps_PointCode,
+                st.post_point_code        AS shot_post_point_code,
+                CASE
+                    WHEN sps.PointCode IS NULL AND st.post_point_code IS NULL THEN 0
+                    WHEN sps.PointCode IS NULL OR st.post_point_code IS NULL THEN 1
+                    WHEN UPPER(TRIM(sps.PointCode)) = UPPER(TRIM(st.post_point_code)) THEN 0
+                    ELSE 1
+                END AS diff_PointCode,
+
+                sps.FireCode              AS sps_FireCode,
+                st.fire_code              AS shot_fire_code,
+                CASE
+                    WHEN sps.FireCode IS NULL AND st.fire_code IS NULL THEN 0
+                    WHEN sps.FireCode IS NULL OR st.fire_code IS NULL THEN 1
+                    WHEN UPPER(TRIM(sps.FireCode)) = UPPER(TRIM(st.fire_code)) THEN 0
+                    ELSE 1
+                END AS diff_FireCode,
+
+                sps.ArrayCode             AS sps_ArrayCode,
+                st.source_id              AS shot_source_id,
+                CASE
+                    WHEN sps.ArrayCode IS NULL AND st.source_id IS NULL THEN 0
+                    WHEN sps.ArrayCode IS NULL OR st.source_id IS NULL THEN 1
+                    WHEN sps.ArrayCode = st.source_id THEN 0
+                    ELSE 1
+                END AS diff_ArrayCode,
+
+                sps.PointDepth            AS sps_PointDepth,
+                st.gun_depth              AS shot_gun_depth,
+                ABS(COALESCE(sps.PointDepth, 0) - COALESCE(st.gun_depth, 0)) AS d_PointDepth,
+                CASE
+                    WHEN sps.PointDepth IS NULL AND st.gun_depth IS NULL THEN 0
+                    WHEN sps.PointDepth IS NULL OR st.gun_depth IS NULL THEN 1
+                    WHEN ABS(sps.PointDepth - st.gun_depth) < 0.001 THEN 0
+                    ELSE 1
+                END AS diff_PointDepth,
+
+                sps.WaterDepth            AS sps_WaterDepth,
+                st.water_depth            AS shot_water_depth,
+                ABS(COALESCE(sps.WaterDepth, 0) - COALESCE(st.water_depth, 0)) AS d_WaterDepth,
+                CASE
+                    WHEN sps.WaterDepth IS NULL AND st.water_depth IS NULL THEN 0
+                    WHEN sps.WaterDepth IS NULL OR st.water_depth IS NULL THEN 1
+                    WHEN ABS(sps.WaterDepth - st.water_depth) < 0.001 THEN 0
+                    ELSE 1
+                END AS diff_WaterDepth,
+
+                sps.Easting               AS sps_Easting,
+                st.shot_x                 AS shot_x,
+                ABS(COALESCE(sps.Easting, 0) - COALESCE(st.shot_x, 0)) AS d_Easting,
+                CASE
+                    WHEN sps.Easting IS NULL AND st.shot_x IS NULL THEN 0
+                    WHEN sps.Easting IS NULL OR st.shot_x IS NULL THEN 1
+                    WHEN ABS(sps.Easting - st.shot_x) < 0.01 THEN 0
+                    ELSE 1
+                END AS diff_Easting,
+
+                sps.Northing              AS sps_Northing,
+                st.shot_y                 AS shot_y,
+                ABS(COALESCE(sps.Northing, 0) - COALESCE(st.shot_y, 0)) AS d_Northing,
+                CASE
+                    WHEN sps.Northing IS NULL AND st.shot_y IS NULL THEN 0
+                    WHEN sps.Northing IS NULL OR st.shot_y IS NULL THEN 1
+                    WHEN ABS(sps.Northing - st.shot_y) < 0.01 THEN 0
+                    ELSE 1
+                END AS diff_Northing,
+
+                sps.Elevation             AS sps_Elevation,
+                st.elevation              AS shot_elevation,
+                ABS(COALESCE(sps.Elevation, 0) - COALESCE(st.elevation, 0)) AS d_Elevation,
+                CASE
+                    WHEN sps.Elevation IS NULL AND st.elevation IS NULL THEN 0
+                    WHEN sps.Elevation IS NULL OR st.elevation IS NULL THEN 1
+                    WHEN ABS(sps.Elevation - st.elevation) < 0.001 THEN 0
+                    ELSE 1
+                END AS diff_Elevation,
+
+                sps.Day                   AS sps_Day,
+                st.shot_day               AS shot_day,
+                CASE
+                    WHEN sps.Day IS NULL AND st.shot_day IS NULL THEN 0
+                    WHEN sps.Day IS NULL OR st.shot_day IS NULL THEN 1
+                    WHEN sps.Day = st.shot_day THEN 0
+                    ELSE 1
+                END AS diff_Day,
+
+                sps.Hour                  AS sps_Hour,
+                st.shot_hour              AS shot_hour,
+                CASE
+                    WHEN sps.Hour IS NULL AND st.shot_hour IS NULL THEN 0
+                    WHEN sps.Hour IS NULL OR st.shot_hour IS NULL THEN 1
+                    WHEN sps.Hour = st.shot_hour THEN 0
+                    ELSE 1
+                END AS diff_Hour,
+
+                sps.Minute                AS sps_Minute,
+                st.shot_minute            AS shot_minute,
+                CASE
+                    WHEN sps.Minute IS NULL AND st.shot_minute IS NULL THEN 0
+                    WHEN sps.Minute IS NULL OR st.shot_minute IS NULL THEN 1
+                    WHEN sps.Minute = st.shot_minute THEN 0
+                    ELSE 1
+                END AS diff_Minute,
+
+                sps.Second                AS sps_Second,
+                st.shot_second            AS shot_second,
+                CASE
+                    WHEN sps.Second IS NULL AND st.shot_second IS NULL THEN 0
+                    WHEN sps.Second IS NULL OR st.shot_second IS NULL THEN 1
+                    WHEN sps.Second = st.shot_second THEN 0
+                    ELSE 1
+                END AS diff_Second,
+
+                sps.Microsecond           AS sps_Microsecond,
+                st.shot_microsecond       AS shot_microsecond,
+                ABS(COALESCE(sps.Microsecond, 0) - COALESCE(st.shot_microsecond, 0)) AS d_Microsecond,
+                CASE
+                    WHEN sps.Microsecond IS NULL AND st.shot_microsecond IS NULL THEN 0
+                    WHEN sps.Microsecond IS NULL OR st.shot_microsecond IS NULL THEN 1
+                    WHEN sps.Microsecond = st.shot_microsecond THEN 0
+                    ELSE 1
+                END AS diff_Microsecond,
+
+                sps.Year                  AS sps_Year,
+                st.shot_year              AS shot_year,
+                CASE
+                    WHEN sps.Year IS NULL AND st.shot_year IS NULL THEN 0
+                    WHEN sps.Year IS NULL OR st.shot_year IS NULL THEN 1
+                    WHEN sps.Year = st.shot_year THEN 0
+                    ELSE 1
+                END AS diff_Year
+
+            FROM sps_src sps
+            LEFT JOIN shot_src st
+                ON sps.SailLine = st.nav_line_code
+               AND sps.Point    = st.nav_station
+        )
+        SELECT *
+        FROM cmp
+        """
+
+        params = [sailline, sailline]
+
+        if mismatches_only:
+            sql += """
+            WHERE
+                   diff_Line = 1
+                OR diff_Attempt = 1
+                OR diff_Seq = 1
+                OR diff_Point = 1
+                OR diff_PointCode = 1
+                OR diff_FireCode = 1
+                OR diff_ArrayCode = 1
+                OR diff_PointDepth = 1
+                OR diff_WaterDepth = 1
+                OR diff_Easting = 1
+                OR diff_Northing = 1
+                OR diff_Elevation = 1
+                OR diff_Day = 1
+                OR diff_Hour = 1
+                OR diff_Minute = 1
+                OR diff_Second = 1
+                OR diff_Microsecond = 1
+                OR diff_Year = 1
+            """
+
+        sql += " ORDER BY sps_Line, sps_Seq, sps_Point"
+
+        conn = self._connect()
+        cur = None
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute("PRAGMA optimize;")
+            except Exception:
+                pass
+
+            cur.execute(sql, params)
+            columns = [col[0] for col in cur.description]
+            rows = cur.fetchall()
+            return [dict(zip(columns, row)) for row in rows]
+
+        finally:
+            try:
+                if cur is not None:
+                    cur.close()
+            except Exception:
+                pass
+            print("[DB CLOSE]", self.db_path)
+            conn.close()
+
+    def create_shot_table_indexes(self, conn=None, drop_duplicates: bool = False) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+
+            if drop_duplicates:
+                cur.execute("""
+                    DELETE FROM SHOT_TABLE
+                    WHERE id NOT IN (
+                        SELECT MAX(id)
+                        FROM SHOT_TABLE
+                        GROUP BY nav_line_code, nav_station, post_point_code
+                    );
+                """)
+
+            sql_list = [
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_shot_unique
+                ON SHOT_TABLE(nav_line_code, nav_station, post_point_code)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_shot_line_attempt_seq
+                ON SHOT_TABLE(nav_line, attempt, seq)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_shot_compare
+                ON SHOT_TABLE(nav_line_code, seq, nav_station, shot_index)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_shot_file_fk
+                ON SHOT_TABLE(File_FK)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_shot_seq_fk
+                ON SHOT_TABLE(Seq_FK)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_shot_line_station
+                ON SHOT_TABLE(nav_line_code, nav_station)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_sps_compare
+                ON SPSolution(SailLine, Seq, Point, Attempt)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_shot_navlinecode_station
+                ON SHOT_TABLE(nav_line_code, nav_station)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_shot_navline_seq_station
+                ON SHOT_TABLE(nav_line, seq, nav_station)
+                """,
+            ]
+
+            for sql in sql_list:
+                cur.execute(sql)
+
+            if own_conn:
+                conn.commit()
+
+            return len(sql_list)
+
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def refresh_shot_linesummary_lines(self, changed_lines, conn=None) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+
+            if changed_lines is None:
+                return 0
+
+            if isinstance(changed_lines, str):
+                changed_lines = [changed_lines]
+
+            changed_lines = [
+                str(x).strip()
+                for x in changed_lines
+                if x is not None and str(x).strip() != ""
+            ]
+
+            seen = set()
+            changed_lines = [x for x in changed_lines if not (x in seen or seen.add(x))]
+
+            if not changed_lines:
+                return 0
+
+            cur.execute("""
+                SELECT name
+                FROM sqlite_master
+                WHERE type='table' AND name='SHOT_LineSummary'
+            """)
+            if cur.fetchone() is None:
+                raise RuntimeError("SHOT_LineSummary table does not exist. Run create_shot_linesummary_table() first.")
+
+            placeholders = ",".join("?" for _ in changed_lines)
+
+            cur.execute(
+                f"DELETE FROM SHOT_LineSummary WHERE nav_line_code IN ({placeholders})",
+                changed_lines
+            )
+
+            sql = f"""
+            INSERT INTO SHOT_LineSummary (
+                nav_line_code,
+                nav_line,
+                attempt,
+                seq,
+                purpose_id,
+                purpose,
+                vessel_id,
+                vessel_name,
+                IsInSLSolution,
+                ShotCount,
+                ProdShots,
+                NonProdShots,
+                KillShots,
+                FSP,
+                LSP,
+                FGSP,
+                LGSP,
+                Sum_shot_station,
+                Sum_shot_index,
+                Sum_shot_status,
+                Sum_seq,
+                Sum_post_point_code,
+                Sum_fire_code,
+                Sum_gun_depth,
+                Sum_water_depth,
+                Sum_shot_x,
+                Sum_shot_y,
+                Sum_shot_day,
+                Sum_shot_hour,
+                Sum_shot_minute,
+                Sum_shot_second,
+                Sum_shot_microsecond,
+                Sum_shot_year,
+                Sum_array_id,
+                Sum_source_id,
+                Sum_nav_station,
+                Sum_shot_group_id,
+                Sum_elevation,
+                sps_SailLine,
+                sps_Line,
+                sps_Attempt,
+                sps_Seq,
+                sps_Sum_Line,
+                sps_Sum_Seq,
+                sps_Sum_Point,
+                sps_Sum_PointCode,
+                sps_Sum_FireCode,
+                sps_Sum_ArrayCode,
+                sps_Sum_Static,
+                sps_Sum_PointDepth,
+                sps_Sum_Datum,
+                sps_Sum_Uphole,
+                sps_Sum_WaterDepth,
+                sps_Sum_Easting,
+                sps_Sum_Northing,
+                sps_Sum_Elevation,
+                sps_Sum_JDay,
+                sps_Sum_Hour,
+                sps_Sum_Minute,
+                sps_Sum_Second,
+                sps_Sum_Microsecond,
+                cmp_Line,
+                cmp_Attempt,
+                cmp_Seq,
+                cmp_Point,
+                cmp_PointCode,
+                cmp_FireCode,
+                cmp_WaterDepth,
+                cmp_Easting,
+                cmp_Northing,
+                cmp_Elevation,
+                cmp_JDay,
+                cmp_Hour,
+                cmp_Minute,
+                cmp_Second,
+                cmp_Microsecond,
+                diff_Attempt,
+                diff_Seq,
+                diff_Point,
+                diff_PointCode,
+                diff_FireCode,
+                diff_WaterDepth,
+                diff_Easting,
+                diff_Northing,
+                diff_Elevation,
+                diff_JDay,
+                diff_Hour,
+                diff_Minute,
+                diff_Second,
+                diff_Microsecond,
+                SumDiff,
+                QC_AllMatch,
+                QC_AnyMatch
+            )
+            WITH
+            pg AS (
+                SELECT
+                    UPPER(COALESCE(production_code,''))     AS prod_codes,
+                    UPPER(COALESCE(non_production_code,'')) AS nonprod_codes,
+                    UPPER(COALESCE(kill_code,''))           AS kill_codes
+                FROM project_geometry
+                LIMIT 1
+            ),
+            shot_base AS (
+                SELECT
+                    s.nav_line_code,
+                    s.nav_line,
+                    s.attempt,
+                    s.seq,
+                    s.shot_station,
+                    s.shot_index,
+                    s.shot_status,
+                    s.post_point_code,
+                    s.fire_code,
+                    s.gun_depth,
+                    s.water_depth,
+                    s.shot_x,
+                    s.shot_y,
+                    s.shot_day,
+                    s.shot_hour,
+                    s.shot_minute,
+                    s.shot_second,
+                    s.shot_microsecond,
+                    s.shot_year,
+                    s.array_id,
+                    s.source_id,
+                    s.nav_station,
+                    s.shot_group_id,
+                    s.elevation,
+                    CASE
+                        WHEN INSTR(pg.prod_codes, UPPER(COALESCE(s.fire_code, ''))) > 0 THEN 1
+                        ELSE 0
+                    END AS is_prod,
+                    CASE
+                        WHEN INSTR(pg.nonprod_codes, UPPER(COALESCE(s.fire_code, ''))) > 0 THEN 1
+                        ELSE 0
+                    END AS is_nonprod,
+                    CASE
+                        WHEN INSTR(pg.kill_codes, UPPER(COALESCE(s.fire_code, ''))) > 0 THEN 1
+                        ELSE 0
+                    END AS is_kill
+                FROM SHOT_TABLE s
+                CROSS JOIN pg
+                WHERE s.nav_line_code IN ({placeholders})
+                  AND s.nav_line_code IS NOT NULL
+                  AND TRIM(s.nav_line_code) <> ''
+            ),
+            shot_agg AS (
+                SELECT
+                    nav_line_code,
+                    MAX(nav_line) AS nav_line,
+                    MAX(attempt) AS attempt,
+                    MAX(seq) AS seq,
+                    COUNT(*) AS ShotCount,
+                    SUM(is_prod) AS ProdShots,
+                    SUM(is_nonprod) AS NonProdShots,
+                    SUM(is_kill) AS KillShots,
+                    MIN(nav_station) AS FSP,
+                    MAX(nav_station) AS LSP,
+                    MIN(CASE WHEN is_prod = 1 THEN nav_station END) AS FGSP,
+                    MAX(CASE WHEN is_prod = 1 THEN nav_station END) AS LGSP,
+                    SUM(shot_station) AS Sum_shot_station,
+                    SUM(shot_index) AS Sum_shot_index,
+                    SUM(shot_status) AS Sum_shot_status,
+                    SUM(seq) AS Sum_seq,
+                    SUM(unicode(post_point_code)) AS Sum_post_point_code,
+                    SUM(unicode(fire_code)) AS Sum_fire_code,
+                    SUM(gun_depth) AS Sum_gun_depth,
+                    SUM(water_depth) AS Sum_water_depth,
+                    SUM(shot_x) AS Sum_shot_x,
+                    SUM(shot_y) AS Sum_shot_y,
+                    SUM(shot_day) AS Sum_shot_day,
+                    SUM(shot_hour) AS Sum_shot_hour,
+                    SUM(shot_minute) AS Sum_shot_minute,
+                    SUM(shot_second) AS Sum_shot_second,
+                    SUM(shot_microsecond) AS Sum_shot_microsecond,
+                    SUM(shot_year) AS Sum_shot_year,
+                    SUM(unicode(array_id)) AS Sum_array_id,
+                    SUM(source_id) AS Sum_source_id,
+                    SUM(nav_station) AS Sum_nav_station,
+                    SUM(shot_group_id) AS Sum_shot_group_id,
+                    SUM(elevation) AS Sum_elevation
+                FROM shot_base
+                GROUP BY nav_line_code
+            ),
+            sps_agg AS (
+                SELECT
+                    SailLine,
+                    Line,
+                    Attempt,
+                    Seq,
+                    SUM(Line) AS sps_Sum_Line,
+                    SUM(Seq) AS sps_Sum_Seq,
+                    SUM(Point) AS sps_Sum_Point,
+                    SUM(unicode(PointCode)) AS sps_Sum_PointCode,
+                    SUM(unicode(FireCode)) AS sps_Sum_FireCode,
+                    SUM(unicode(ArrayCode)) AS sps_Sum_ArrayCode,
+                    SUM(Static) AS sps_Sum_Static,
+                    SUM(PointDepth) AS sps_Sum_PointDepth,
+                    SUM(Datum) AS sps_Sum_Datum,
+                    SUM(Uphole) AS sps_Sum_Uphole,
+                    SUM(WaterDepth) AS sps_Sum_WaterDepth,
+                    SUM(Easting) AS sps_Sum_Easting,
+                    SUM(Northing) AS sps_Sum_Northing,
+                    SUM(Elevation) AS sps_Sum_Elevation,
+                    SUM(JDay) AS sps_Sum_JDay,
+                    SUM(Hour) AS sps_Sum_Hour,
+                    SUM(Minute) AS sps_Sum_Minute,
+                    SUM(Second) AS sps_Sum_Second,
+                    SUM(Microsecond) AS sps_Sum_Microsecond
+                FROM SPSolution
+                GROUP BY SailLine, Line, Attempt, Seq
+            )
+            SELECT
+                a.nav_line_code,
+                a.nav_line,
+                a.attempt,
+                a.seq,
+                sva.purpose_id,
+                sva.purpose,
+                sva.vessel_id,
+                pf.vessel_name,
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM SLSolution sl
+                        WHERE sl.SailLine = a.nav_line_code
+                    ) THEN 1
+                    ELSE 0
+                END AS IsInSLSolution,
+                a.ShotCount,
+                a.ProdShots,
+                a.NonProdShots,
+                a.KillShots,
+                a.FSP,
+                a.LSP,
+                a.FGSP,
+                a.LGSP,
+                a.Sum_shot_station,
+                a.Sum_shot_index,
+                a.Sum_shot_status,
+                a.Sum_seq,
+                a.Sum_post_point_code,
+                a.Sum_fire_code,
+                a.Sum_gun_depth,
+                a.Sum_water_depth,
+                a.Sum_shot_x,
+                a.Sum_shot_y,
+                a.Sum_shot_day,
+                a.Sum_shot_hour,
+                a.Sum_shot_minute,
+                a.Sum_shot_second,
+                a.Sum_shot_microsecond,
+                a.Sum_shot_year,
+                a.Sum_array_id,
+                a.Sum_source_id,
+                a.Sum_nav_station,
+                a.Sum_shot_group_id,
+                a.Sum_elevation,
+                s.SailLine AS sps_SailLine,
+                s.Line AS sps_Line,
+                s.Attempt AS sps_Attempt,
+                s.Seq AS sps_Seq,
+                s.sps_Sum_Line,
+                s.sps_Sum_Seq,
+                s.sps_Sum_Point,
+                s.sps_Sum_PointCode,
+                s.sps_Sum_FireCode,
+                s.sps_Sum_ArrayCode,
+                s.sps_Sum_Static,
+                s.sps_Sum_PointDepth,
+                s.sps_Sum_Datum,
+                s.sps_Sum_Uphole,
+                s.sps_Sum_WaterDepth,
+                s.sps_Sum_Easting,
+                s.sps_Sum_Northing,
+                s.sps_Sum_Elevation,
+                s.sps_Sum_JDay,
+                s.sps_Sum_Hour,
+                s.sps_Sum_Minute,
+                s.sps_Sum_Second,
+                s.sps_Sum_Microsecond,
+                CASE
+                    WHEN COALESCE(a.nav_line, 0) = COALESCE(s.sps_Sum_Line, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Line,
+                CASE
+                    WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 1
+                    ELSE 0
+                END AS cmp_Attempt,
+                CASE
+                    WHEN COALESCE(a.Sum_seq, 0) = COALESCE(s.sps_Sum_Seq, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Seq,
+                CASE
+                    WHEN COALESCE(a.Sum_nav_station, 0) = COALESCE(s.sps_Sum_Point, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Point,
+                CASE
+                    WHEN COALESCE(a.Sum_post_point_code, 0) = COALESCE(s.sps_Sum_PointCode, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_PointCode,
+                CASE
+                    WHEN COALESCE(a.Sum_fire_code, 0) = COALESCE(s.sps_Sum_FireCode, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_FireCode,
+                CASE
+                    WHEN COALESCE(a.Sum_water_depth, 0) = COALESCE(s.sps_Sum_WaterDepth, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_WaterDepth,
+                CASE
+                    WHEN COALESCE(a.Sum_shot_x, 0) = COALESCE(s.sps_Sum_Easting, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Easting,
+                CASE
+                    WHEN COALESCE(a.Sum_shot_y, 0) = COALESCE(s.sps_Sum_Northing, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Northing,
+                CASE
+                    WHEN COALESCE(a.Sum_elevation, 0) = COALESCE(s.sps_Sum_Elevation, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Elevation,
+                CASE
+                    WHEN COALESCE(a.Sum_shot_day, 0) = COALESCE(s.sps_Sum_JDay, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_JDay,
+                CASE
+                    WHEN COALESCE(a.Sum_shot_hour, 0) = COALESCE(s.sps_Sum_Hour, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Hour,
+                CASE
+                    WHEN COALESCE(a.Sum_shot_minute, 0) = COALESCE(s.sps_Sum_Minute, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Minute,
+                CASE
+                    WHEN COALESCE(a.Sum_shot_second, 0) = COALESCE(s.sps_Sum_Second, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Second,
+                CASE
+                    WHEN COALESCE(a.Sum_shot_microsecond, 0) = COALESCE(s.sps_Sum_Microsecond, -999999999) THEN 1
+                    ELSE 0
+                END AS cmp_Microsecond,
+                CASE
+                    WHEN s.Line IS NULL THEN 1
+                    WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 0
+                    ELSE 1
+                END AS diff_Attempt,
+                (COALESCE(a.Sum_seq, 0) - COALESCE(s.sps_Sum_Seq, 0)) AS diff_Seq,
+                (COALESCE(a.Sum_nav_station, 0) - COALESCE(s.sps_Sum_Point, 0)) AS diff_Point,
+                (COALESCE(a.Sum_post_point_code, 0) - COALESCE(s.sps_Sum_PointCode, 0)) AS diff_PointCode,
+                (COALESCE(a.Sum_fire_code, 0) - COALESCE(s.sps_Sum_FireCode, 0)) AS diff_FireCode,
+                (COALESCE(a.Sum_water_depth, 0) - COALESCE(s.sps_Sum_WaterDepth, 0)) AS diff_WaterDepth,
+                (COALESCE(a.Sum_shot_x, 0) - COALESCE(s.sps_Sum_Easting, 0)) AS diff_Easting,
+                (COALESCE(a.Sum_shot_y, 0) - COALESCE(s.sps_Sum_Northing, 0)) AS diff_Northing,
+                (COALESCE(a.Sum_elevation, 0) - COALESCE(s.sps_Sum_Elevation, 0)) AS diff_Elevation,
+                (COALESCE(a.Sum_shot_day, 0) - COALESCE(s.sps_Sum_JDay, 0)) AS diff_JDay,
+                (COALESCE(a.Sum_shot_hour, 0) - COALESCE(s.sps_Sum_Hour, 0)) AS diff_Hour,
+                (COALESCE(a.Sum_shot_minute, 0) - COALESCE(s.sps_Sum_Minute, 0)) AS diff_Minute,
+                (COALESCE(a.Sum_shot_second, 0) - COALESCE(s.sps_Sum_Second, 0)) AS diff_Second,
+                (COALESCE(a.Sum_shot_microsecond, 0) - COALESCE(s.sps_Sum_Microsecond, 0)) AS diff_Microsecond,
+                CASE
+                    WHEN s.Line IS NULL THEN 1
+                    WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 0
+                    ELSE 1
+                END
+                + ABS(COALESCE(a.Sum_seq, 0) - COALESCE(s.sps_Sum_Seq, 0))
+                + ABS(COALESCE(a.Sum_nav_station, 0) - COALESCE(s.sps_Sum_Point, 0))
+                + ABS(COALESCE(a.Sum_post_point_code, 0) - COALESCE(s.sps_Sum_PointCode, 0))
+                + ABS(COALESCE(a.Sum_fire_code, 0) - COALESCE(s.sps_Sum_FireCode, 0))
+                + ABS(COALESCE(a.Sum_water_depth, 0) - COALESCE(s.sps_Sum_WaterDepth, 0))
+                + ABS(COALESCE(a.Sum_shot_x, 0) - COALESCE(s.sps_Sum_Easting, 0))
+                + ABS(COALESCE(a.Sum_shot_y, 0) - COALESCE(s.sps_Sum_Northing, 0))
+                + ABS(COALESCE(a.Sum_elevation, 0) - COALESCE(s.sps_Sum_Elevation, 0))
+                + ABS(COALESCE(a.Sum_shot_day, 0) - COALESCE(s.sps_Sum_JDay, 0))
+                + ABS(COALESCE(a.Sum_shot_hour, 0) - COALESCE(s.sps_Sum_Hour, 0))
+                + ABS(COALESCE(a.Sum_shot_minute, 0) - COALESCE(s.sps_Sum_Minute, 0))
+                + ABS(COALESCE(a.Sum_shot_second, 0) - COALESCE(s.sps_Sum_Second, 0))
+                + ABS(COALESCE(a.Sum_shot_microsecond, 0) - COALESCE(s.sps_Sum_Microsecond, 0)) AS SumDiff,
+                CASE
+                    WHEN
+                        (COALESCE(a.nav_line, 0) = COALESCE(s.sps_Sum_Line, -999999999))
+                        AND (COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), ''))
+                        AND (COALESCE(a.Sum_seq, 0) = COALESCE(s.sps_Sum_Seq, -999999999))
+                        AND (COALESCE(a.Sum_nav_station, 0) = COALESCE(s.sps_Sum_Point, -999999999))
+                        AND (COALESCE(a.Sum_post_point_code, 0) = COALESCE(s.sps_Sum_PointCode, -999999999))
+                        AND (COALESCE(a.Sum_fire_code, 0) = COALESCE(s.sps_Sum_FireCode, -999999999))
+                        AND (COALESCE(a.Sum_water_depth, 0) = COALESCE(s.sps_Sum_WaterDepth, -999999999))
+                        AND (COALESCE(a.Sum_shot_x, 0) = COALESCE(s.sps_Sum_Easting, -999999999))
+                        AND (COALESCE(a.Sum_shot_y, 0) = COALESCE(s.sps_Sum_Northing, -999999999))
+                        AND (COALESCE(a.Sum_elevation, 0) = COALESCE(s.sps_Sum_Elevation, -999999999))
+                        AND (COALESCE(a.Sum_shot_day, 0) = COALESCE(s.sps_Sum_JDay, -999999999))
+                        AND (COALESCE(a.Sum_shot_hour, 0) = COALESCE(s.sps_Sum_Hour, -999999999))
+                        AND (COALESCE(a.Sum_shot_minute, 0) = COALESCE(s.sps_Sum_Minute, -999999999))
+                        AND (COALESCE(a.Sum_shot_second, 0) = COALESCE(s.sps_Sum_Second, -999999999))
+                        AND (COALESCE(a.Sum_shot_microsecond, 0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
+                    THEN 1
+                    ELSE 0
+                END AS QC_AllMatch,
+                CASE
+                    WHEN
+                        (COALESCE(a.nav_line, 0) = COALESCE(s.sps_Sum_Line, -999999999))
+                        OR (COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), ''))
+                        OR (COALESCE(a.Sum_seq, 0) = COALESCE(s.sps_Sum_Seq, -999999999))
+                        OR (COALESCE(a.Sum_nav_station, 0) = COALESCE(s.sps_Sum_Point, -999999999))
+                        OR (COALESCE(a.Sum_post_point_code, 0) = COALESCE(s.sps_Sum_PointCode, -999999999))
+                        OR (COALESCE(a.Sum_fire_code, 0) = COALESCE(s.sps_Sum_FireCode, -999999999))
+                        OR (COALESCE(a.Sum_water_depth, 0) = COALESCE(s.sps_Sum_WaterDepth, -999999999))
+                        OR (COALESCE(a.Sum_shot_x, 0) = COALESCE(s.sps_Sum_Easting, -999999999))
+                        OR (COALESCE(a.Sum_shot_y, 0) = COALESCE(s.sps_Sum_Northing, -999999999))
+                        OR (COALESCE(a.Sum_elevation, 0) = COALESCE(s.sps_Sum_Elevation, -999999999))
+                        OR (COALESCE(a.Sum_shot_day, 0) = COALESCE(s.sps_Sum_JDay, -999999999))
+                        OR (COALESCE(a.Sum_shot_hour, 0) = COALESCE(s.sps_Sum_Hour, -999999999))
+                        OR (COALESCE(a.Sum_shot_minute, 0) = COALESCE(s.sps_Sum_Minute, -999999999))
+                        OR (COALESCE(a.Sum_shot_second, 0) = COALESCE(s.sps_Sum_Second, -999999999))
+                        OR (COALESCE(a.Sum_shot_microsecond, 0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
+                    THEN 1
+                    ELSE 0
+                END AS QC_AnyMatch
+            FROM shot_agg a
+            LEFT JOIN sps_agg s
+                ON s.Line = a.nav_line
+               AND COALESCE(CAST(s.Attempt AS TEXT), '') = COALESCE(CAST(a.attempt AS TEXT), '')
+               AND s.Seq = a.seq
+            LEFT JOIN sequence_vessel_assignment sva
+                ON a.seq BETWEEN sva.seq_first AND sva.seq_last
+               AND COALESCE(sva.is_active, 1) = 1
+            LEFT JOIN project_fleet pf
+                ON pf.id = sva.vessel_id
+            """
+            cur.execute(sql, changed_lines)
+
+            if own_conn:
+                conn.commit()
+
+            return len(changed_lines)
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def recalc_lines(self, nav_line_codes, conn=None):
+        """
+        Recalculate SHOT_LineSummary only for selected nav_line_code values.
+
+        Parameters
+        ----------
+        nav_line_codes : list[str] | tuple[str] | set[str]
+            Example: ["12345A0010", "12345A0011"]
+
+        Returns
+        -------
+        dict
+            {
+                "success": True,
+                "deleted": <count>,
+                "inserted": <count>,
+                "lines": <count>
+            }
+        """
+        if not nav_line_codes:
+            return {"success": True, "deleted": 0, "inserted": 0, "lines": 0}
+
+        clean_codes = []
+        seen = set()
+        for code in nav_line_codes:
+            if code is None:
+                continue
+            code = str(code).strip()
+            if not code:
+                continue
+            if code not in seen:
+                seen.add(code)
+                clean_codes.append(code)
+
+        if not clean_codes:
+            return {"success": True, "deleted": 0, "inserted": 0, "lines": 0}
+
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN;")
+
+            placeholders = ",".join("?" for _ in clean_codes)
+
+            # ensure table exists
+            cur.execute("""
+                SELECT name
+                FROM sqlite_master
+                WHERE type='table' AND name='SHOT_LineSummary'
+                LIMIT 1;
+            """)
+            exists = cur.fetchone()
+            if not exists:
+                conn.rollback()
+                return self.create_shot_line_summary_table(conn=conn)
+
+            cur.execute(
+                f"DELETE FROM SHOT_LineSummary WHERE nav_line_code IN ({placeholders});",
+                clean_codes
+            )
+            deleted_count = cur.rowcount if cur.rowcount is not None else 0
+
+            insert_sql = f"""
+                INSERT INTO SHOT_LineSummary
+                WITH
+                selected_lines AS (
+                    SELECT ? AS nav_line_code
+                    {" ".join(["UNION ALL SELECT ?" for _ in clean_codes[1:]])}
+                ),
+                pg AS (
+                    SELECT
+                        UPPER(COALESCE(production_code,''))      AS prod_codes,
+                        UPPER(COALESCE(non_production_code,''))  AS nonprod_codes,
+                        UPPER(COALESCE(kill_code,''))            AS kill_codes
+                    FROM project_geometry
+                    LIMIT 1
+                ),
+                shot_base AS (
+                    SELECT
+                        s.nav_line_code, s.nav_line, s.attempt, s.seq,
+                        s.shot_station, s.shot_index, s.shot_status,
+                        s.post_point_code, s.fire_code,
+                        s.gun_depth, s.water_depth, s.shot_x, s.shot_y,
+                        s.shot_day, s.shot_hour, s.shot_minute, s.shot_second, s.shot_microsecond, s.shot_year,
+                        s.array_id, s.source_id, s.nav_station, s.shot_group_id, s.elevation,
+                        CASE WHEN INSTR(pg.prod_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_prod,
+                        CASE WHEN INSTR(pg.nonprod_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_nonprod,
+                        CASE WHEN INSTR(pg.kill_codes, UPPER(COALESCE(s.fire_code,''))) > 0 THEN 1 ELSE 0 END AS is_kill
+                    FROM SHOT_TABLE s
+                    INNER JOIN selected_lines slx
+                        ON slx.nav_line_code = s.nav_line_code
+                    CROSS JOIN pg
+                    WHERE s.nav_line_code IS NOT NULL
+                      AND TRIM(s.nav_line_code) <> ''
+                ),
+                shot_agg AS (
+                    SELECT
+                        nav_line_code,
+                        MAX(nav_line) AS nav_line,
+                        MAX(attempt) AS attempt,
+                        MAX(seq) AS seq,
+                        COUNT(*) AS ShotCount,
+                        SUM(is_prod) AS ProdShots,
+                        SUM(is_nonprod) AS NonProdShots,
+                        SUM(is_kill) AS KillShots,
+                        MIN(nav_station) AS FSP,
+                        MAX(nav_station) AS LSP,
+                        MIN(CASE WHEN is_prod=1 THEN nav_station END) AS FGSP,
+                        MAX(CASE WHEN is_prod=1 THEN nav_station END) AS LGSP,
+                        SUM(shot_station) AS Sum_shot_station,
+                        SUM(shot_index) AS Sum_shot_index,
+                        SUM(shot_status) AS Sum_shot_status,
+                        SUM(seq) AS Sum_seq,
+                        SUM(unicode(post_point_code)) AS Sum_post_point_code,
+                        SUM(unicode(fire_code)) AS Sum_fire_code,
+                        SUM(gun_depth) AS Sum_gun_depth,
+                        SUM(water_depth) AS Sum_water_depth,
+                        SUM(shot_x) AS Sum_shot_x,
+                        SUM(shot_y) AS Sum_shot_y,
+                        SUM(shot_day) AS Sum_shot_day,
+                        SUM(shot_hour) AS Sum_shot_hour,
+                        SUM(shot_minute) AS Sum_shot_minute,
+                        SUM(shot_second) AS Sum_shot_second,
+                        SUM(shot_microsecond) AS Sum_shot_microsecond,
+                        SUM(shot_year) AS Sum_shot_year,
+                        SUM(unicode(array_id)) AS Sum_array_id,
+                        SUM(source_id) AS Sum_source_id,
+                        SUM(nav_station) AS Sum_nav_station,
+                        SUM(shot_group_id) AS Sum_shot_group_id,
+                        SUM(elevation) AS Sum_elevation
+                    FROM shot_base
+                    GROUP BY nav_line_code
+                ),
+                sps_agg AS (
+                    SELECT
+                        SailLine, Line, Attempt, Seq,
+                        SUM(Line) AS sps_Sum_Line,
+                        SUM(Seq) AS sps_Sum_Seq,
+                        SUM(Point) AS sps_Sum_Point,
+                        SUM(unicode(PointCode)) AS sps_Sum_PointCode,
+                        SUM(unicode(FireCode)) AS sps_Sum_FireCode,
+                        SUM(ArrayCode) AS sps_Sum_ArrayCode,
+                        SUM(Static) AS sps_Sum_Static,
+                        SUM(PointDepth) AS sps_Sum_PointDepth,
+                        SUM(Datum) AS sps_Sum_Datum,
+                        SUM(Uphole) AS sps_Sum_Uphole,
+                        SUM(WaterDepth) AS sps_Sum_WaterDepth,
+                        SUM(Easting) AS sps_Sum_Easting,
+                        SUM(Northing) AS sps_Sum_Northing,
+                        SUM(Elevation) AS sps_Sum_Elevation,
+                        SUM(JDay) AS sps_Sum_JDay,
+                        SUM(Hour) AS sps_Sum_Hour,
+                        SUM(Minute) AS sps_Sum_Minute,
+                        SUM(Second) AS sps_Sum_Second,
+                        SUM(Microsecond) AS sps_Sum_Microsecond
+                    FROM SPSolution
+                    GROUP BY SailLine, Line, Attempt, Seq
+                )
+                SELECT
+                    a.nav_line_code,
+                    a.nav_line,
+                    a.attempt,
+                    a.seq,
+
+                    sva.purpose_id,
+                    sva.purpose,
+                    sva.vessel_id,
+                    pf.vessel_name,
+
+                    CASE
+                        WHEN EXISTS (
+                            SELECT 1
+                            FROM SLSolution sl
+                            WHERE sl.SailLine = a.nav_line_code
+                        ) THEN 1 ELSE 0
+                    END AS IsInSLSolution,
+
+                    a.ShotCount,
+                    a.ProdShots,
+                    a.NonProdShots,
+                    a.KillShots,
+                    a.FSP,
+                    a.LSP,
+                    a.FGSP,
+                    a.LGSP,
+
+                    a.Sum_shot_station,
+                    a.Sum_shot_index,
+                    a.Sum_shot_status,
+                    a.Sum_seq,
+                    a.Sum_post_point_code,
+                    a.Sum_fire_code,
+                    a.Sum_gun_depth,
+                    a.Sum_water_depth,
+                    a.Sum_shot_x,
+                    a.Sum_shot_y,
+                    a.Sum_shot_day,
+                    a.Sum_shot_hour,
+                    a.Sum_shot_minute,
+                    a.Sum_shot_second,
+                    a.Sum_shot_microsecond,
+                    a.Sum_shot_year,
+                    a.Sum_array_id,
+                    a.Sum_source_id,
+                    a.Sum_nav_station,
+                    a.Sum_shot_group_id,
+                    a.Sum_elevation,
+
+                    s.SailLine AS sps_SailLine,
+                    s.Line AS sps_Line,
+                    s.Attempt AS sps_Attempt,
+                    s.Seq AS sps_Seq,
+                    s.sps_Sum_Line,
+                    s.sps_Sum_Seq,
+                    s.sps_Sum_Point,
+                    s.sps_Sum_PointCode,
+                    s.sps_Sum_FireCode,
+                    s.sps_Sum_ArrayCode,
+                    s.sps_Sum_Static,
+                    s.sps_Sum_PointDepth,
+                    s.sps_Sum_Datum,
+                    s.sps_Sum_Uphole,
+                    s.sps_Sum_WaterDepth,
+                    s.sps_Sum_Easting,
+                    s.sps_Sum_Northing,
+                    s.sps_Sum_Elevation,
+                    s.sps_Sum_JDay,
+                    s.sps_Sum_Hour,
+                    s.sps_Sum_Minute,
+                    s.sps_Sum_Second,
+                    s.sps_Sum_Microsecond,
+
+                    CASE WHEN COALESCE(a.nav_line,0) = COALESCE(s.sps_Sum_Line, -999999999) THEN 1 ELSE 0 END AS cmp_Line,
+                    CASE WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 1 ELSE 0 END AS cmp_Attempt,
+                    CASE WHEN COALESCE(a.Sum_seq,0) = COALESCE(s.sps_Sum_Seq, -999999999) THEN 1 ELSE 0 END AS cmp_Seq,
+                    CASE WHEN COALESCE(a.Sum_nav_station,0) = COALESCE(s.sps_Sum_Point, -999999999) THEN 1 ELSE 0 END AS cmp_Point,
+                    CASE WHEN COALESCE(a.Sum_post_point_code,0) = COALESCE(s.sps_Sum_PointCode, -999999999) THEN 1 ELSE 0 END AS cmp_PointCode,
+                    CASE WHEN COALESCE(a.Sum_fire_code,0) = COALESCE(s.sps_Sum_FireCode, -999999999) THEN 1 ELSE 0 END AS cmp_FireCode,
+                    CASE WHEN COALESCE(a.Sum_water_depth,0) = COALESCE(s.sps_Sum_WaterDepth, -999999999) THEN 1 ELSE 0 END AS cmp_WaterDepth,
+                    CASE WHEN COALESCE(a.Sum_shot_x,0) = COALESCE(s.sps_Sum_Easting, -999999999) THEN 1 ELSE 0 END AS cmp_Easting,
+                    CASE WHEN COALESCE(a.Sum_shot_y,0) = COALESCE(s.sps_Sum_Northing, -999999999) THEN 1 ELSE 0 END AS cmp_Northing,
+                    CASE WHEN COALESCE(a.Sum_elevation,0) = COALESCE(s.sps_Sum_Elevation, -999999999) THEN 1 ELSE 0 END AS cmp_Elevation,
+                    CASE WHEN COALESCE(a.Sum_shot_day,0) = COALESCE(s.sps_Sum_JDay, -999999999) THEN 1 ELSE 0 END AS cmp_JDay,
+                    CASE WHEN COALESCE(a.Sum_shot_hour,0) = COALESCE(s.sps_Sum_Hour, -999999999) THEN 1 ELSE 0 END AS cmp_Hour,
+                    CASE WHEN COALESCE(a.Sum_shot_minute,0) = COALESCE(s.sps_Sum_Minute, -999999999) THEN 1 ELSE 0 END AS cmp_Minute,
+                    CASE WHEN COALESCE(a.Sum_shot_second,0) = COALESCE(s.sps_Sum_Second, -999999999) THEN 1 ELSE 0 END AS cmp_Second,
+                    CASE WHEN COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999) THEN 1 ELSE 0 END AS cmp_Microsecond,
+
+                    CASE WHEN s.Line IS NULL THEN 1
+                         WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 0
+                         ELSE 1 END AS diff_Attempt,
+
+                    (COALESCE(a.Sum_seq,0) - COALESCE(s.sps_Sum_Seq,0)) AS diff_Seq,
+                    (COALESCE(a.Sum_nav_station,0) - COALESCE(s.sps_Sum_Point,0)) AS diff_Point,
+                    (COALESCE(a.Sum_post_point_code,0) - COALESCE(s.sps_Sum_PointCode,0)) AS diff_PointCode,
+                    (COALESCE(a.Sum_fire_code,0) - COALESCE(s.sps_Sum_FireCode,0)) AS diff_FireCode,
+                    (COALESCE(a.Sum_water_depth,0) - COALESCE(s.sps_Sum_WaterDepth,0)) AS diff_WaterDepth,
+                    (COALESCE(a.Sum_shot_x,0) - COALESCE(s.sps_Sum_Easting,0)) AS diff_Easting,
+                    (COALESCE(a.Sum_shot_y,0) - COALESCE(s.sps_Sum_Northing,0)) AS diff_Northing,
+                    (COALESCE(a.Sum_elevation,0) - COALESCE(s.sps_Sum_Elevation,0)) AS diff_Elevation,
+                    (COALESCE(a.Sum_shot_day,0) - COALESCE(s.sps_Sum_JDay,0)) AS diff_JDay,
+                    (COALESCE(a.Sum_shot_hour,0) - COALESCE(s.sps_Sum_Hour,0)) AS diff_Hour,
+                    (COALESCE(a.Sum_shot_minute,0) - COALESCE(s.sps_Sum_Minute,0)) AS diff_Minute,
+                    (COALESCE(a.Sum_shot_second,0) - COALESCE(s.sps_Sum_Second,0)) AS diff_Second,
+                    (COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0)) AS diff_Microsecond,
+
+                    CASE WHEN s.Line IS NULL THEN 1
+                         WHEN COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '') THEN 0
+                         ELSE 1 END
+                    + ABS(COALESCE(a.Sum_seq,0) - COALESCE(s.sps_Sum_Seq,0))
+                    + ABS(COALESCE(a.Sum_nav_station,0) - COALESCE(s.sps_Sum_Point,0))
+                    + ABS(COALESCE(a.Sum_post_point_code,0) - COALESCE(s.sps_Sum_PointCode,0))
+                    + ABS(COALESCE(a.Sum_fire_code,0) - COALESCE(s.sps_Sum_FireCode,0))
+                    + ABS(COALESCE(a.Sum_water_depth,0) - COALESCE(s.sps_Sum_WaterDepth,0))
+                    + ABS(COALESCE(a.Sum_shot_x,0) - COALESCE(s.sps_Sum_Easting,0))
+                    + ABS(COALESCE(a.Sum_shot_y,0) - COALESCE(s.sps_Sum_Northing,0))
+                    + ABS(COALESCE(a.Sum_elevation,0) - COALESCE(s.sps_Sum_Elevation,0))
+                    + ABS(COALESCE(a.Sum_shot_day,0) - COALESCE(s.sps_Sum_JDay,0))
+                    + ABS(COALESCE(a.Sum_shot_hour,0) - COALESCE(s.sps_Sum_Hour,0))
+                    + ABS(COALESCE(a.Sum_shot_minute,0) - COALESCE(s.sps_Sum_Minute,0))
+                    + ABS(COALESCE(a.Sum_shot_second,0) - COALESCE(s.sps_Sum_Second,0))
+                    + ABS(COALESCE(a.Sum_shot_microsecond,0) - COALESCE(s.sps_Sum_Microsecond,0)) AS SumDiff,
+
+                    CASE WHEN
+                        (COALESCE(a.nav_line,0) = COALESCE(s.sps_Sum_Line, -999999999)) AND
+                        (COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '')) AND
+                        (COALESCE(a.Sum_seq,0) = COALESCE(s.sps_Sum_Seq, -999999999)) AND
+                        (COALESCE(a.Sum_nav_station,0) = COALESCE(s.sps_Sum_Point, -999999999)) AND
+                        (COALESCE(a.Sum_post_point_code,0) = COALESCE(s.sps_Sum_PointCode, -999999999)) AND
+                        (COALESCE(a.Sum_fire_code,0) = COALESCE(s.sps_Sum_FireCode, -999999999)) AND
+                        (COALESCE(a.Sum_water_depth,0) = COALESCE(s.sps_Sum_WaterDepth, -999999999)) AND
+                        (COALESCE(a.Sum_shot_x,0) = COALESCE(s.sps_Sum_Easting, -999999999)) AND
+                        (COALESCE(a.Sum_shot_y,0) = COALESCE(s.sps_Sum_Northing, -999999999)) AND
+                        (COALESCE(a.Sum_elevation,0) = COALESCE(s.sps_Sum_Elevation, -999999999)) AND
+                        (COALESCE(a.Sum_shot_day,0) = COALESCE(s.sps_Sum_JDay, -999999999)) AND
+                        (COALESCE(a.Sum_shot_hour,0) = COALESCE(s.sps_Sum_Hour, -999999999)) AND
+                        (COALESCE(a.Sum_shot_minute,0) = COALESCE(s.sps_Sum_Minute, -999999999)) AND
+                        (COALESCE(a.Sum_shot_second,0) = COALESCE(s.sps_Sum_Second, -999999999)) AND
+                        (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
+                    THEN 1 ELSE 0 END AS QC_AllMatch,
+
+                    CASE WHEN
+                        (COALESCE(a.nav_line,0) = COALESCE(s.sps_Sum_Line, -999999999)) OR
+                        (COALESCE(CAST(a.attempt AS TEXT), '') = COALESCE(CAST(s.Attempt AS TEXT), '')) OR
+                        (COALESCE(a.Sum_seq,0) = COALESCE(s.sps_Sum_Seq, -999999999)) OR
+                        (COALESCE(a.Sum_nav_station,0) = COALESCE(s.sps_Sum_Point, -999999999)) OR
+                        (COALESCE(a.Sum_post_point_code,0) = COALESCE(s.sps_Sum_PointCode, -999999999)) OR
+                        (COALESCE(a.Sum_fire_code,0) = COALESCE(s.sps_Sum_FireCode, -999999999)) OR
+                        (COALESCE(a.Sum_water_depth,0) = COALESCE(s.sps_Sum_WaterDepth, -999999999)) OR
+                        (COALESCE(a.Sum_shot_x,0) = COALESCE(s.sps_Sum_Easting, -999999999)) OR
+                        (COALESCE(a.Sum_shot_y,0) = COALESCE(s.sps_Sum_Northing, -999999999)) OR
+                        (COALESCE(a.Sum_elevation,0) = COALESCE(s.sps_Sum_Elevation, -999999999)) OR
+                        (COALESCE(a.Sum_shot_day,0) = COALESCE(s.sps_Sum_JDay, -999999999)) OR
+                        (COALESCE(a.Sum_shot_hour,0) = COALESCE(s.sps_Sum_Hour, -999999999)) OR
+                        (COALESCE(a.Sum_shot_minute,0) = COALESCE(s.sps_Sum_Minute, -999999999)) OR
+                        (COALESCE(a.Sum_shot_second,0) = COALESCE(s.sps_Sum_Second, -999999999)) OR
+                        (COALESCE(a.Sum_shot_microsecond,0) = COALESCE(s.sps_Sum_Microsecond, -999999999))
+                    THEN 1 ELSE 0 END AS QC_AnyMatch
+
+                FROM shot_agg a
+                LEFT JOIN sps_agg s
+                    ON s.Line = a.nav_line
+                   AND COALESCE(CAST(s.Attempt AS TEXT), '') = COALESCE(CAST(a.attempt AS TEXT), '')
+                   AND s.Seq = a.seq
+                LEFT JOIN sequence_vessel_assignment sva
+                    ON a.seq BETWEEN sva.seq_first AND sva.seq_last
+                   AND COALESCE(sva.is_active, 1) = 1
+                LEFT JOIN project_fleet pf
+                    ON pf.id = sva.vessel_id;
+            """
+
+            cur.execute(insert_sql, clean_codes)
+            inserted_count = cur.rowcount if cur.rowcount is not None else 0
+
+            conn.commit()
+            return {
+                "success": True,
+                "deleted": int(deleted_count),
+                "inserted": int(inserted_count),
+                "lines": len(clean_codes),
+            }
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            if own_conn:
+                conn.close()
+
+    def get_shot_line_summary_filtered(
+            self,
+            *,
+            nav_line_code: str | None = None,
+            nav_line: int | None = None,
+            attempt: str | None = None,
+            seq_from: int | None = None,
+            seq_to: int | None = None,
+            purpose_id: int | None = None,
+            purpose: str | None = None,
+            vessel_id: int | None = None,
+            vessel_name: str | None = None,
+            is_in_sl: int | None = None,
+            qc_all_match: int | None = None,
+            qc_any_match: int | None = None,
+            diffsum: str | None = None,
+            limit: int | None = 5000,
+    ):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+
+            sql = """
+                SELECT *
+                FROM SHOT_LineSummary
+                WHERE 1=1
+            """
+            params = []
+
+            if nav_line_code:
+                sql += " AND nav_line_code LIKE ?"
+                params.append(f"%{nav_line_code.strip()}%")
+
+            if nav_line is not None:
+                sql += " AND nav_line = ?"
+                params.append(nav_line)
+
+            if attempt not in (None, ""):
+                sql += " AND attempt = ?"
+                params.append(attempt)
+
+            if seq_from is not None:
+                sql += " AND seq >= ?"
+                params.append(seq_from)
+
+            if seq_to is not None:
+                sql += " AND seq <= ?"
+                params.append(seq_to)
+
+            if purpose_id is not None:
+                sql += " AND purpose_id = ?"
+                params.append(purpose_id)
+
+            if purpose not in (None, ""):
+                sql += " AND purpose = ?"
+                params.append(purpose)
+
+            if vessel_id is not None:
+                sql += " AND vessel_id = ?"
+                params.append(vessel_id)
+
+            if vessel_name not in (None, ""):
+                sql += " AND vessel_name = ?"
+                params.append(vessel_name)
+
+            if is_in_sl is not None:
+                sql += " AND COALESCE(IsInSLSolution, 0) = ?"
+                params.append(is_in_sl)
+
+            if qc_all_match is not None:
+                sql += " AND COALESCE(QC_AllMatch, 0) = ?"
+                params.append(qc_all_match)
+
+            if qc_any_match is not None:
+                sql += " AND COALESCE(QC_AnyMatch, 0) = ?"
+                params.append(qc_any_match)
+
+            if diffsum not in (None, ""):
+                d = diffsum.strip().lower()
+                if d == "ok":
+                    sql += " AND COALESCE(SumDiff, 0) = 0"
+                elif d in ("error", "erorr", "mismatch"):
+                    sql += " AND COALESCE(SumDiff, 0) <> 0"
+
+            sql += " ORDER BY nav_line, attempt, seq"
+
+            if limit is not None and int(limit) > 0:
+                sql += " LIMIT ?"
+                params.append(int(limit))
+
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            return [dict(r) for r in rows]
+
+        finally:
+            conn.close()
+
+    def create_shot_line_summary_indexes(self):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_nav_line_code ON SHOT_LineSummary(nav_line_code)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_nav_line ON SHOT_LineSummary(nav_line)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_attempt ON SHOT_LineSummary(attempt)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_seq ON SHOT_LineSummary(seq)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_purpose_id ON SHOT_LineSummary(purpose_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_purpose ON SHOT_LineSummary(purpose)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_vessel_id ON SHOT_LineSummary(vessel_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_qc_allmatch ON SHOT_LineSummary(QC_AllMatch)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_qc_anymatch ON SHOT_LineSummary(QC_AnyMatch)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shot_ls_sumdiff ON SHOT_LineSummary(SumDiff)")
+
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_shot_summary_filter_options(self):
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT DISTINCT
+                    sva.vessel_id,
+                    COALESCE(pf.vessel_name, 'Unknown') AS vessel_name
+                FROM sequence_vessel_assignment sva
+                LEFT JOIN project_fleet pf
+                    ON pf.id = sva.vessel_id
+                WHERE COALESCE(sva.is_active, 1) = 1
+                  AND sva.vessel_id IS NOT NULL
+                ORDER BY vessel_name
+            """)
+            vessels = [dict(r) for r in cur.fetchall()]
+
+            cur.execute("""
+                SELECT DISTINCT
+                    sva.purpose_id,
+                    sva.purpose
+                FROM sequence_vessel_assignment sva
+                WHERE COALESCE(sva.is_active, 1) = 1
+                  AND sva.purpose_id IS NOT NULL
+                  AND TRIM(COALESCE(sva.purpose, '')) <> ''
+                ORDER BY sva.purpose_id, sva.purpose
+            """)
+            purposes = [dict(r) for r in cur.fetchall()]
+
+            cur.execute("""
+                SELECT DISTINCT
+                    attempt
+                FROM SHOT_LineSummary
+                WHERE TRIM(COALESCE(attempt, '')) <> ''
+                ORDER BY attempt
+            """)
+            attempts = [r["attempt"] for r in cur.fetchall()]
+
+            cur.execute("""
+                SELECT
+                    MIN(seq) AS min_seq,
+                    MAX(seq) AS max_seq
+                FROM SHOT_LineSummary
+            """)
+            seq_range = dict(cur.fetchone() or {})
+
+            return {
+                "vessels": vessels,
+                "purposes": purposes,
+                "attempts": attempts,
+                "seq_range": seq_range,
+            }
+
+        finally:
+            conn.close()
+
+    def list_deleted_shot_lines(self, conn=None) -> set[str]:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            self.ensure_stfiles_schema(conn=conn)
+            cur = conn.cursor()
+            rows = cur.execute("""
+                SELECT nav_line_code
+                FROM STDeletedLines
+                WHERE nav_line_code IS NOT NULL
+                  AND TRIM(nav_line_code) <> ''
+            """).fetchall()
+            return {str(r["nav_line_code"]).strip() for r in rows if r["nav_line_code"] is not None}
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def mark_shot_lines_deleted(self, nav_line_codes, deleted_by: str | None = None, conn=None) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            self.ensure_stfiles_schema(conn=conn)
+
+            if nav_line_codes is None:
+                return 0
+
+            clean = [str(x).strip() for x in nav_line_codes if x is not None and str(x).strip()]
+            clean = list(dict.fromkeys(clean))
+            if not clean:
+                return 0
+
+            cur = conn.cursor()
+            rows = [(code, (deleted_by or None), "manual") for code in clean]
+
+            cur.executemany("""
+                INSERT INTO STDeletedLines (nav_line_code, deleted_by, restore_mode)
+                VALUES (?, ?, ?)
+                ON CONFLICT(nav_line_code) DO UPDATE SET
+                    deleted_at = CURRENT_TIMESTAMP,
+                    deleted_by = excluded.deleted_by,
+                    restore_mode = excluded.restore_mode
+            """, rows)
+
+            if own_conn:
+                conn.commit()
+
+            return len(clean)
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def unmark_shot_lines_deleted(self, nav_line_codes, conn=None) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            self.ensure_stfiles_schema(conn=conn)
+
+            if nav_line_codes is None:
+                return 0
+
+            clean = [str(x).strip() for x in nav_line_codes if x is not None and str(x).strip()]
+            clean = list(dict.fromkeys(clean))
+            if not clean:
+                return 0
+
+            cur = conn.cursor()
+            placeholders = ",".join("?" for _ in clean)
+            cur.execute(
+                f"DELETE FROM STDeletedLines WHERE nav_line_code IN ({placeholders})",
+                clean
+            )
+            removed = int(cur.rowcount or 0)
+
+            if own_conn:
+                conn.commit()
+
+            return removed
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def delete_lines(self, nav_line_codes, deleted_by: str | None = None, conn=None) -> dict:
+        """
+        Manual delete:
+          - delete from SHOT_TABLE
+          - delete from SHOT_LineSummary
+          - mark nav_line_code in STDeletedLines
+        """
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            self.ensure_stfiles_schema(conn=conn)
+            self.ensure_shot_table_schema(conn=conn)
+            self.ensure_shot_linesummary_table(conn=conn)
+
+            clean = [str(x).strip() for x in nav_line_codes if x is not None and str(x).strip()]
+            clean = list(dict.fromkeys(clean))
+            if not clean:
+                return {
+                    "deleted_lines": 0,
+                    "deleted_shot_rows": 0,
+                    "deleted_summary_rows": 0,
+                    "marked_deleted_lines": 0,
+                    "lines": [],
+                }
+
+            cur = conn.cursor()
+            placeholders = ",".join("?" for _ in clean)
+
+            cur.execute(f"DELETE FROM SHOT_TABLE WHERE nav_line_code IN ({placeholders})", clean)
+            deleted_shot_rows = int(cur.rowcount or 0)
+
+            cur.execute(f"DELETE FROM SHOT_LineSummary WHERE nav_line_code IN ({placeholders})", clean)
+            deleted_summary_rows = int(cur.rowcount or 0)
+
+            marked_deleted_lines = self.mark_shot_lines_deleted(
+                clean,
+                deleted_by=deleted_by,
+                conn=conn,
+            )
+
+            if own_conn:
+                conn.commit()
+
+            return {
+                "deleted_lines": len(clean),
+                "deleted_shot_rows": deleted_shot_rows,
+                "deleted_summary_rows": deleted_summary_rows,
+                "marked_deleted_lines": marked_deleted_lines,
+                "lines": clean,
+            }
+
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def get_latest_stfile_any(self, conn=None, full_scan_only: bool = False):
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            self.ensure_stfiles_schema(conn=conn)
+            cur = conn.cursor()
+            sql = "SELECT * FROM STFiles WHERE 1=1"
+            params = []
+            if full_scan_only:
+                sql += " AND import_mode = 'full'"
+            sql += " ORDER BY id DESC LIMIT 1"
+            row = cur.execute(sql, params).fetchone()
+            return dict(row) if row else None
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def get_latest_stfile_name(self, conn=None) -> str | None:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            self.ensure_stfiles_schema(conn=conn)
+            cur = conn.cursor()
+            row = cur.execute("""
+                SELECT file_name
+                FROM STFiles
+                ORDER BY id DESC
+                LIMIT 1
+            """).fetchone()
+
+            if not row:
+                return None
+
+            return str(row["file_name"]).strip() if row["file_name"] is not None else None
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def _table_exists(self, table_name: str, conn=None) -> bool:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            cur = conn.cursor()
+            row = cur.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name = ?
+                """,
+                (table_name,),
+            ).fetchone()
+            return row is not None
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def _get_table_columns(self, table_name: str, conn=None) -> list[str]:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            cur = conn.cursor()
+            rows = cur.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+            return [r["name"] if hasattr(r, "keys") else r[1] for r in rows]
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def _table_columns_match(self, table_name: str, expected_cols: list[str], conn=None) -> bool:
+        if not self._table_exists(table_name, conn=conn):
+            return False
+        actual_cols = self._get_table_columns(table_name, conn=conn)
+        return actual_cols == expected_cols
+
+    def _drop_table_if_exists(self, table_name: str, conn=None):
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+            if own_conn:
+                conn.commit()
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
+
+    def ensure_source_runtime_schema(self, conn=None) -> dict:
+        """
+        Checks runtime Source tables:
+          - SHOT_TABLE
+          - SHOT_LineSummary
+          - STFiles
+          - STFileLines
+          - STDeletedLines
+
+        Rules:
+          - if table does not exist -> create it
+          - if columns do not match -> drop and recreate
+          - if columns match -> keep as is
+        """
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        shot_table_expected = [
+            "id",
+            "sail_line",
+            "shot_station",
+            "shot_index",
+            "shot_status",
+            "nav_line_code",
+            "nav_line",
+            "attempt",
+            "seq",
+            "post_point_code",
+            "fire_code",
+            "gun_depth",
+            "water_depth",
+            "shot_x",
+            "shot_y",
+            "shot_day",
+            "shot_hour",
+            "shot_minute",
+            "shot_second",
+            "shot_microsecond",
+            "shot_year",
+            "vessel",
+            "array_id",
+            "source_id",
+            "nav_station",
+            "shot_group_id",
+            "elevation",
+            "File_FK",
+            "Seq_FK",
+        ]
+
+        stfiles_expected = [
+            "id",
+            "file_name",
+            "file_size",
+            "file_mtime",
+            "file_hash",
+            "previous_stfile_id",
+            "previous_file_size",
+            "start_byte",
+            "end_byte",
+            "last_read_byte",
+            "import_mode",
+            "row_count",
+            "inserted_count",
+            "duplicate_count",
+            "changed_lines_count",
+            "deleted_lines_count",
+            "created_at",
+            "updated_at",
+        ]
+
+        stfilelines_expected = [
+            "id",
+            "stfile_id",
+            "nav_line_code",
+            "byte_start",
+            "byte_end",
+            "first_nav_station",
+            "last_nav_station",
+            "row_count",
+            "checksum",
+            "created_at",
+        ]
+
+        stdeletedlines_expected = [
+            "id",
+            "nav_line_code",
+            "deleted_at",
+            "deleted_by",
+            "restore_mode",
+        ]
+
+        shot_linesummary_expected = [
+            "nav_line_code",
+            "nav_line",
+            "attempt",
+            "seq",
+            "purpose_id",
+            "purpose",
+            "vessel_id",
+            "vessel_name",
+            "IsInSLSolution",
+            "ShotCount",
+            "ProdShots",
+            "NonProdShots",
+            "KillShots",
+            "FSP",
+            "LSP",
+            "FGSP",
+            "LGSP",
+            "Sum_shot_station",
+            "Sum_shot_index",
+            "Sum_shot_status",
+            "Sum_seq",
+            "Sum_post_point_code",
+            "Sum_fire_code",
+            "Sum_gun_depth",
+            "Sum_water_depth",
+            "Sum_shot_x",
+            "Sum_shot_y",
+            "Sum_shot_day",
+            "Sum_shot_hour",
+            "Sum_shot_minute",
+            "Sum_shot_second",
+            "Sum_shot_microsecond",
+            "Sum_shot_year",
+            "Sum_array_id",
+            "Sum_source_id",
+            "Sum_nav_station",
+            "Sum_shot_group_id",
+            "Sum_elevation",
+            "sps_SailLine",
+            "sps_Line",
+            "sps_Attempt",
+            "sps_Seq",
+            "sps_Sum_Line",
+            "sps_Sum_Seq",
+            "sps_Sum_Point",
+            "sps_Sum_PointCode",
+            "sps_Sum_FireCode",
+            "sps_Sum_ArrayCode",
+            "sps_Sum_Static",
+            "sps_Sum_PointDepth",
+            "sps_Sum_Datum",
+            "sps_Sum_Uphole",
+            "sps_Sum_WaterDepth",
+            "sps_Sum_Easting",
+            "sps_Sum_Northing",
+            "sps_Sum_Elevation",
+            "sps_Sum_JDay",
+            "sps_Sum_Hour",
+            "sps_Sum_Minute",
+            "sps_Sum_Second",
+            "sps_Sum_Microsecond",
+            "cmp_Line",
+            "cmp_Attempt",
+            "cmp_Seq",
+            "cmp_Point",
+            "cmp_PointCode",
+            "cmp_FireCode",
+            "cmp_WaterDepth",
+            "cmp_Easting",
+            "cmp_Northing",
+            "cmp_Elevation",
+            "cmp_JDay",
+            "cmp_Hour",
+            "cmp_Minute",
+            "cmp_Second",
+            "cmp_Microsecond",
+            "diff_Attempt",
+            "diff_Seq",
+            "diff_Point",
+            "diff_PointCode",
+            "diff_FireCode",
+            "diff_WaterDepth",
+            "diff_Easting",
+            "diff_Northing",
+            "diff_Elevation",
+            "diff_JDay",
+            "diff_Hour",
+            "diff_Minute",
+            "diff_Second",
+            "diff_Microsecond",
+            "SumDiff",
+            "QC_AllMatch",
+            "QC_AnyMatch",
+        ]
+
+        result = {
+            "created": [],
+            "recreated": [],
+            "ok": [],
+        }
+
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN;")
+
+            # -----------------------------
+            # STFiles / STFileLines / STDeletedLines
+            # -----------------------------
+            stfiles_ok = self._table_columns_match("STFiles", stfiles_expected, conn=conn)
+            stfilelines_ok = self._table_columns_match("STFileLines", stfilelines_expected, conn=conn)
+            stdeleted_ok = self._table_columns_match("STDeletedLines", stdeletedlines_expected, conn=conn)
+
+            if not stfiles_ok or not stfilelines_ok or not stdeleted_ok:
+                # drop children first
+                if self._table_exists("STFileLines", conn=conn):
+                    cur.execute('DROP TABLE IF EXISTS "STFileLines"')
+                if self._table_exists("STDeletedLines", conn=conn):
+                    cur.execute('DROP TABLE IF EXISTS "STDeletedLines"')
+                if self._table_exists("STFiles", conn=conn):
+                    cur.execute('DROP TABLE IF EXISTS "STFiles"')
+
+                self.ensure_stfiles_schema(conn=conn)
+
+                for name in ["STFiles", "STFileLines", "STDeletedLines"]:
+                    result["recreated"].append(name)
+            else:
+                result["ok"].extend(["STFiles", "STFileLines", "STDeletedLines"])
+
+            # -----------------------------
+            # SHOT_TABLE
+            # -----------------------------
+            if not self._table_columns_match("SHOT_TABLE", shot_table_expected, conn=conn):
+                # твоя функция уже умеет сама пересоздать таблицу если схема не совпала
+                self.ensure_shot_table_schema(conn=conn)
+                self.create_shot_table_indexes(conn=conn, drop_duplicates=False)
+
+                if self._table_exists("SHOT_TABLE", conn=conn):
+                    result["recreated"].append("SHOT_TABLE")
+                else:
+                    result["created"].append("SHOT_TABLE")
+            else:
+                result["ok"].append("SHOT_TABLE")
+                self.create_shot_table_indexes(conn=conn, drop_duplicates=False)
+
+            # -----------------------------
+            # SHOT_LineSummary
+            # -----------------------------
+            if not self._table_columns_match("SHOT_LineSummary", shot_linesummary_expected, conn=conn):
+                self.create_shot_line_summary_table(conn=conn)
+                result["recreated"].append("SHOT_LineSummary")
+            else:
+                result["ok"].append("SHOT_LineSummary")
+
+            if own_conn:
+                conn.commit()
+
+            return result
+
+        except Exception:
+            if own_conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
+        finally:
+            if own_conn:
+                print("[DB CLOSE]", self.db_path)
+                conn.close()
