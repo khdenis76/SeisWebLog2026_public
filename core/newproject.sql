@@ -566,6 +566,125 @@ CREATE TABLE IF NOT EXISTS BlackBox (
         );
 CREATE INDEX IF NOT EXISTS idx_blackbox_ts ON BlackBox(TimeStamp);
 CREATE INDEX IF NOT EXISTS idx_blackbox_file ON BlackBox(File_FK);
+--Create BBOX file statistics
+CREATE TABLE IF NOT EXISTS BlackBox_FileStats (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    File_FK INTEGER NOT NULL UNIQUE,
+
+    -- =========================
+    -- TIME
+    -- =========================
+    StartTime TEXT,
+    EndTime TEXT,
+    RowCount INTEGER DEFAULT 0,
+    DurationSec INTEGER,
+    MaxTimeGapSec REAL,
+
+    -- =========================
+    -- CONFIG
+    -- =========================
+    Config_FK INTEGER,
+
+    -- =========================
+    -- VESSEL
+    -- =========================
+    VesselEasting_Min REAL,
+    VesselEasting_Max REAL,
+    VesselNorthing_Min REAL,
+    VesselNorthing_Max REAL,
+    VesselElevation_Min REAL,
+    VesselElevation_Max REAL,
+
+    VesselHDG_Min REAL,
+    VesselHDG_Max REAL,
+    VesselSOG_Min REAL,
+    VesselSOG_Max REAL,
+    VesselCOG_Min REAL,
+    VesselCOG_Max REAL,
+
+    -- =========================
+    -- ROV MOTION
+    -- =========================
+    ROV1_SOG_Min REAL,
+    ROV1_SOG_Max REAL,
+    ROV2_SOG_Min REAL,
+    ROV2_SOG_Max REAL,
+
+    -- =========================
+    -- ROV DEPTH (RAW + SENSORS)
+    -- =========================
+    ROV1_Depth_Min REAL,
+    ROV1_Depth_Max REAL,
+    ROV2_Depth_Min REAL,
+    ROV2_Depth_Max REAL,
+
+    ROV1_Depth1_Min REAL,
+    ROV1_Depth1_Max REAL,
+    ROV1_Depth2_Min REAL,
+    ROV1_Depth2_Max REAL,
+
+    ROV2_Depth1_Min REAL,
+    ROV2_Depth1_Max REAL,
+    ROV2_Depth2_Min REAL,
+    ROV2_Depth2_Max REAL,
+
+    -- =========================
+    -- GNSS QC (GEOMETRY)
+    -- =========================
+    GNSS1_HDOP_Min REAL,
+    GNSS1_HDOP_Max REAL,
+    GNSS1_PDOP_Min REAL,
+    GNSS1_PDOP_Max REAL,
+    GNSS1_VDOP_Min REAL,
+    GNSS1_VDOP_Max REAL,
+
+    GNSS2_HDOP_Min REAL,
+    GNSS2_HDOP_Max REAL,
+    GNSS2_PDOP_Min REAL,
+    GNSS2_PDOP_Max REAL,
+    GNSS2_VDOP_Min REAL,
+    GNSS2_VDOP_Max REAL,
+
+    -- =========================
+    -- GNSS QC (QUALITY)
+    -- =========================
+    GNSS1_NOS_Min INTEGER,
+    GNSS1_NOS_Max INTEGER,
+    GNSS1_DiffAge_Min REAL,
+    GNSS1_DiffAge_Max REAL,
+    GNSS1_FixQuality_Min INTEGER,
+    GNSS1_FixQuality_Max INTEGER,
+
+    GNSS2_NOS_Min INTEGER,
+    GNSS2_NOS_Max INTEGER,
+    GNSS2_DiffAge_Min REAL,
+    GNSS2_DiffAge_Max REAL,
+    GNSS2_FixQuality_Min INTEGER,
+    GNSS2_FixQuality_Max INTEGER,
+
+    -- =========================
+    -- ENVIRONMENT
+    -- =========================
+    Barometer_Min REAL,
+    Barometer_Max REAL,
+
+    -- =========================
+    -- INS vs USBL POSITION QC
+    -- =========================
+    ROV1_PosDiff_Min REAL,
+    ROV1_PosDiff_Max REAL,
+    ROV1_PosDiff_Avg REAL,
+
+    ROV2_PosDiff_Min REAL,
+    ROV2_PosDiff_Max REAL,
+    ROV2_PosDiff_Avg REAL,
+
+    -- =========================
+    -- CONSTRAINTS
+    -- =========================
+    FOREIGN KEY (File_FK) REFERENCES BlackBox_Files(ID) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_blackbox_filestats_file_fk ON BlackBox_FileStats(File_FK);
 
 --Create Source Solution
 CREATE TABLE  IF NOT EXISTS  SLSolution (

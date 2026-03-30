@@ -311,8 +311,8 @@ class DSRLineGraphics(object):
 
     def _error_layout(
             self,
-            title: str,
-            message: str,
+            title: str = "Plot Error",
+            message: str ="",
             *,
             details: str = "",
             level: str = "error",  # "error" | "warning" | "info"
@@ -1198,7 +1198,7 @@ class DSRLineGraphics(object):
             y1_label=None,
             y2_label=None,
             y3_label=None,
-            y_axis_label="Water depth",
+            y_axis_label="Value",
             category_col="ROV",
             line_col="Line",
             point_col=None,
@@ -1207,141 +1207,150 @@ class DSRLineGraphics(object):
             require_category=True,
             reverse_y_if_negative=True,
             legend_title="Legend",
-            x_tick_step=5,  # show each N label (others blank)
+            x_tick_step=5,
             x_tick_font_size="8pt",
+
+            p1_line1_col=None,
+            p1_line2_col=None,
+            p2_line1_col=None,
+            p2_line2_col=None,
+            p3_line1_col=None,
+            p3_line2_col=None,
+
+            p1_line1_label=None,
+            p1_line2_label=None,
+            p2_line1_label=None,
+            p2_line2_label=None,
+            p3_line1_label=None,
+            p3_line2_label=None,
+
+            p1_line1_color="#d62728",
+            p1_line2_color="#1f77b4",
+            p2_line1_color="#2ca02c",
+            p2_line2_color="#ff7f0e",
+            p3_line1_color="#9467bd",
+            p3_line2_color="#8c564b",
+
+            line_line_width=2,
+            line_marker_size=6,
+
             json_return=False,
             is_show=False,
     ):
         """
-        3 stacked vbar plots (shared categorical x):
-          - shared X (Stations) via shared FactorRange
-          - merged toolbar for all plots (gridplot merge_tools=True)
-          - one legend above the stack (attached to top plot 'above')
-          - per plot: one numeric series (y_col) with separate renderer per category_col (e.g. ROV)
-          - X labels vertical and not dense: only each `x_tick_step` label is shown (others blank)
+        Three stacked Bokeh plots with shared categorical X axis.
 
-        Returns:
-          layout OR json_item(layout) if json_return=True
+        Each plot contains:
+          - one vbar series colored by category_col
+          - two optional line+circle series specific to that plot
+
+        If no line columns are provided, only bars are drawn.
         """
 
-        # ---------- unified error return (uses your self._error_layout)
-        def _err(msg: str):
+        def _err(msg: str, details: str = ""):
             try:
-                return self._error_layout(msg, json_return=json_return, is_show=is_show)
+                return self._error_layout(
+                    title="Plot build error",
+                    message=msg,
+                    details=details,
+                    level="error",
+                    json_return=json_return,
+                    is_show=is_show,
+                )
             except TypeError:
-                # fallback if your _error_layout has different signature
-                return self._error_layout(msg)
+                try:
+                    return self._error_layout(
+                        "Plot build error",
+                        msg,
+                        details=details,
+                        json_return=json_return,
+                        is_show=is_show,
+                    )
+                except Exception:
+                    return self._error_layout(msg)
 
-        # ---------- df checks
-        if df is None:
-            return _err("No dataframe provided.")
-        if not hasattr(df, "columns"):
-            return _err("Input must be a pandas DataFrame.")
-        if len(df) == 0:
-            return _err("No data to plot (dataframe is empty).")
+        def _to_num(series):
+            return pd.to_numeric(series, errors="coerce")
 
-        d = df.copy()
-
-        # ---------- required columns
-        if x_col not in d.columns:
-            return _err(f"Missing required x column: '{x_col}'.")
-
-        # At least one Y must exist
-        if (y1_col not in d.columns) and (y2_col not in d.columns) and (y3_col not in d.columns):
-            return _err(f"None of y-columns exist in df: '{y1_col}', '{y2_col}', '{y3_col}'.")
-
-        # ---------- category
-        if category_col not in d.columns:
-            d[category_col] = ""
-        else:
-            d[category_col] = d[category_col].astype(str).fillna("")
-
-        # ---------- numeric conversion
-        d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
-
-        for yc in (y1_col, y2_col, y3_col):
-            if yc in d.columns:
-                d[yc] = pd.to_numeric(d[yc], errors="coerce")
-
-        # ---------- drop invalid x
-        d = d.dropna(subset=[x_col])
-        if len(d) == 0:
-            return _err(f"No valid '{x_col}' values after numeric conversion.")
-
-        # ---------- require category
-        if require_category:
-            d = d[d[category_col].astype(str).str.strip().ne("")]
-            if len(d) == 0:
-                return _err(f"No rows with non-empty '{category_col}' after filtering.")
-
-        # ---------- ensure at least some finite y exists
-        def _finite_count(col: str) -> int:
-            if col not in d.columns:
+        def _finite_count(frame, col):
+            if not col or col not in frame.columns:
                 return 0
-            arr = pd.to_numeric(d[col], errors="coerce").to_numpy(dtype=float)
+            arr = _to_num(frame[col]).to_numpy(dtype=float)
             return int(np.isfinite(arr).sum())
 
-        if (_finite_count(y1_col) + _finite_count(y2_col) + _finite_count(y3_col)) == 0:
-            return _err("No numeric Y values available to plot (all Y columns are empty/NaN).")
+        def _label_or_col(label, col, fallback):
+            return label or col or fallback
 
-        # ---------- sort
-        d = d.sort_values(by=[x_col])
+        def _series_to_str(frame, col, default=""):
+            if col and col in frame.columns:
+                return frame[col].fillna(default).astype(str)
+            return pd.Series([default] * len(frame), index=frame.index)
 
-        # ---------- station factors (categorical)
-        stations = d[x_col].to_numpy(dtype=float)
-        station_factors = [str(int(s)) if float(s).is_integer() else str(s) for s in stations]
-        d["_station_factor"] = station_factors
+        def _make_y_range(frame, main_y_col, extra_cols=None):
+            cols = []
+            if main_y_col and main_y_col in frame.columns:
+                cols.append(main_y_col)
+            if extra_cols:
+                cols.extend([c for c in extra_cols if c and c in frame.columns])
 
-        x_factors = d["_station_factor"].drop_duplicates().tolist()
-        if not x_factors:
-            return _err("No stations available after processing.")
+            vals = []
+            for c in cols:
+                arr = _to_num(frame[c]).to_numpy(dtype=float)
+                arr = arr[np.isfinite(arr)]
+                if arr.size:
+                    vals.append(arr)
 
-        shared_x = FactorRange(*x_factors)
-
-        # ---------- x label density (categorical-safe)
-        try:
-            step = int(x_tick_step)
-            if step < 1:
-                step = 1
-        except Exception:
-            step = 1
-
-        # Only show each Nth label; others become ""
-        x_label_overrides = {
-            f: (f if (i % step == 0) else "")
-            for i, f in enumerate(x_factors)
-        }
-
-        # ---------- y-range helper
-        def _make_y_range(dframe, y_col):
-            if y_col not in dframe.columns:
+            if not vals:
                 return Range1d(start=-1, end=1)
 
-            arr = pd.to_numeric(dframe[y_col], errors="coerce").to_numpy(dtype=float)
-            arr = arr[np.isfinite(arr)]
-            if arr.size == 0:
-                return Range1d(start=-1, end=1)
+            arr = np.concatenate(vals)
+            y_min = float(np.min(arr))
+            y_max = float(np.max(arr))
 
-            y_min, y_max = float(np.min(arr)), float(np.max(arr))
-            pad = (y_max - y_min) * 0.05 if (y_max - y_min) > 0 else (abs(y_min) * 0.05 + 1.0)
+            if y_min == y_max:
+                pad = abs(y_min) * 0.05 + 1.0
+            else:
+                pad = (y_max - y_min) * 0.05
 
             if reverse_y_if_negative and y_min < 0:
-                return Range1d(start=y_max + pad, end=y_min - pad)  # reversed
+                return Range1d(start=y_max + pad, end=y_min - pad)
+
             return Range1d(start=y_min - pad, end=y_max + pad)
 
-        # ---------- palette (repeats)
-        base_palette = [
-            "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-            "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
-        ]
+        def _build_line_source(frame, l1_col, l2_col):
+            return ColumnDataSource(data=dict(
+                station=frame["_station_factor"].tolist(),
+                line1=_to_num(frame[l1_col]).tolist() if l1_col and l1_col in frame.columns else [np.nan] * len(frame),
+                line2=_to_num(frame[l2_col]).tolist() if l2_col and l2_col in frame.columns else [np.nan] * len(frame),
+                rov=_series_to_str(frame, rov_col).tolist(),
+                ts=_series_to_str(frame, ts_col).tolist(),
+                line=_series_to_str(frame, line_col).tolist(),
+                point=_series_to_str(frame, point_col).tolist() if point_col else [""] * len(frame),
+            ))
 
-        categories = sorted(d[category_col].unique().tolist())
-        if not categories:
-            categories = [""]
+        def _build_bar_source(frame, y_col):
+            return ColumnDataSource(data=dict(
+                station=frame["_station_factor"].tolist(),
+                y=_to_num(frame[y_col]).tolist(),
+                rov=_series_to_str(frame, rov_col).tolist(),
+                ts=_series_to_str(frame, ts_col).tolist(),
+                line=_series_to_str(frame, line_col).tolist(),
+                point=_series_to_str(frame, point_col).tolist() if point_col else [""] * len(frame),
+                cat=_series_to_str(frame, category_col).tolist(),
+            ))
 
-        # ---------- build one plot
-        def _build_one_plot(plot_title, y_col, y_label_text):
-            # If missing or empty series -> create a “soft” plot with note (not a hard error)
+        def _build_one_plot(
+                *,
+                plot_title,
+                y_col,
+                y_label_text,
+                line1_col,
+                line2_col,
+                line1_label,
+                line2_label,
+                line1_color,
+                line2_color,
+        ):
             if y_col not in d.columns:
                 p = figure(
                     title=f"{plot_title} (missing '{y_col}')",
@@ -1353,7 +1362,7 @@ class DSRLineGraphics(object):
                 )
                 return p, []
 
-            if _finite_count(y_col) == 0:
+            if _finite_count(d, y_col) == 0:
                 p = figure(
                     title=f"{plot_title} (no numeric values in '{y_col}')",
                     x_range=shared_x,
@@ -1367,9 +1376,9 @@ class DSRLineGraphics(object):
             p = figure(
                 title=plot_title,
                 x_range=shared_x,
-                y_range=_make_y_range(d, y_col),
+                y_range=_make_y_range(d, y_col, [line1_col, line2_col]),
                 x_axis_label="Station",
-                y_axis_label=y_axis_label,
+                y_axis_label=y_axis_label or y_label_text,
                 tools="pan,wheel_zoom,box_zoom,reset,save",
                 active_scroll="wheel_zoom",
                 sizing_mode="stretch_both",
@@ -1378,85 +1387,249 @@ class DSRLineGraphics(object):
 
             p.xgrid.grid_line_alpha = 0.15
             p.ygrid.grid_line_alpha = 0.15
-
-            # X axis style: vertical + not dense (categorical-safe)
-            p.xaxis.major_label_orientation = 1.5708  # 90 degrees
+            p.xaxis.major_label_orientation = 1.5708
             p.xaxis.major_label_text_font_size = x_tick_font_size
             p.xaxis.major_label_standoff = 6
             p.xaxis.major_label_overrides = x_label_overrides
 
-            hover = HoverTool(
-                mode="mouse",
-                tooltips=[
-                    ("Line", "@line"),
-                    ("ROV", "@rov"),
-                    ("TimeStamp", "@ts"),
-                    ("Station", "@station"),
-                    (y_label_text, "@y{0.00}"),
-                ],
-            )
-            p.add_tools(hover)
-
             renderers = []
             legend_items = []
 
-            for i, cat in enumerate(categories):
-                sub = d[d[category_col] == cat]
-                if len(sub) == 0:
+            for cat in categories:
+                sub = d[d[category_col] == cat].copy()
+                if sub.empty:
                     continue
 
-                y_arr = pd.to_numeric(sub[y_col], errors="coerce").to_numpy(dtype=float)
+                src_bar = _build_bar_source(sub, y_col)
+                color = cat_color.get(cat, "#94a3b8")
 
-                src = ColumnDataSource(
-                    data=dict(
-                        station=sub["_station_factor"].to_numpy(),
-                        y=y_arr,
-                        rov=(sub[rov_col].astype(str).fillna("").to_numpy()
-                             if rov_col in sub.columns else np.array([""] * len(sub))),
-                        ts=(sub[ts_col].astype(str).fillna("").to_numpy()
-                            if ts_col in sub.columns else np.array([""] * len(sub))),
-                        line=(sub[line_col].astype(str).fillna("").to_numpy()
-                              if line_col in sub.columns else np.array([""] * len(sub))),
-                        point=(sub[point_col].astype(str).fillna("").to_numpy()
-                               if (point_col and point_col in sub.columns) else np.array([""] * len(sub))),
-                    )
-                )
-
-                color = base_palette[i % len(base_palette)]
-                r = p.vbar(
+                r_bar = p.vbar(
                     x="station",
                     top="y",
                     width=0.82,
-                    source=src,
+                    source=src_bar,
                     fill_color=color,
                     line_color=color,
                     fill_alpha=0.85,
                 )
-                renderers.append(r)
+                renderers.append(r_bar)
+                legend_items.append(
+                    LegendItem(label=f"{y_label_text} · {cat or 'N/A'}", renderers=[r_bar])
+                )
 
-                legend_items.append(LegendItem(label=f"{y_label_text} · {cat}", renderers=[r]))
+            src_line = _build_line_source(d, line1_col, line2_col)
 
-            hover.renderers = renderers
+            if line1_col and line1_col in d.columns and _finite_count(d, line1_col) > 0:
+                r_l1 = p.line(
+                    x="station",
+                    y="line1",
+                    source=src_line,
+                    line_width=line_line_width,
+                    color=line1_color,
+                    alpha=0.95,
+                )
+                r_l1c = p.circle(
+                    x="station",
+                    y="line1",
+                    source=src_line,
+                    size=line_marker_size,
+                    color=line1_color,
+                    alpha=0.95,
+                )
+                renderers.extend([r_l1, r_l1c])
+                legend_items.append(
+                    LegendItem(
+                        label=_label_or_col(line1_label, line1_col, "Line 1"),
+                        renderers=[r_l1, r_l1c]
+                    )
+                )
+
+            if line2_col and line2_col in d.columns and _finite_count(d, line2_col) > 0:
+                r_l2 = p.line(
+                    x="station",
+                    y="line2",
+                    source=src_line,
+                    line_width=line_line_width,
+                    color=line2_color,
+                    alpha=0.95,
+                )
+                r_l2c = p.circle(
+                    x="station",
+                    y="line2",
+                    source=src_line,
+                    size=line_marker_size,
+                    color=line2_color,
+                    alpha=0.95,
+                )
+                renderers.extend([r_l2, r_l2c])
+                legend_items.append(
+                    LegendItem(
+                        label=_label_or_col(line2_label, line2_col, "Line 2"),
+                        renderers=[r_l2, r_l2c]
+                    )
+                )
+
+            tooltips = [
+                ("Line", "@line"),
+                ("Point", "@point"),
+                ("ROV", "@rov"),
+                ("TimeStamp", "@ts"),
+                ("Station", "@station"),
+                (y_label_text, "@y{0.00}"),
+            ]
+
+            if line1_col and line1_col in d.columns:
+                tooltips.append((_label_or_col(line1_label, line1_col, "Line 1"), "@line1{0.00}"))
+            if line2_col and line2_col in d.columns:
+                tooltips.append((_label_or_col(line2_label, line2_col, "Line 2"), "@line2{0.00}"))
+
+            hover = HoverTool(
+                mode="mouse",
+                renderers=renderers,
+                tooltips=tooltips,
+            )
+            p.add_tools(hover)
+
             return p, legend_items
 
-        # ---------- build 3 plots
+        if df is None:
+            return _err("No dataframe provided.")
+        if not hasattr(df, "columns"):
+            return _err("Input must be a pandas DataFrame.")
+        if len(df) == 0:
+            return _err("No data to plot (dataframe is empty).")
+
+        d = df.copy()
+
+        if x_col not in d.columns:
+            return _err(f"Missing required x column: '{x_col}'.")
+
+        y_cols_existing = [c for c in [y1_col, y2_col, y3_col] if c in d.columns]
+        if not y_cols_existing:
+            return _err(f"None of Y columns exist: '{y1_col}', '{y2_col}', '{y3_col}'.")
+
+        if category_col not in d.columns:
+            d[category_col] = ""
+        d[category_col] = d[category_col].fillna("").astype(str).str.strip()
+
+        d[x_col] = _to_num(d[x_col])
+        d = d.dropna(subset=[x_col]).copy()
+        if d.empty:
+            return _err(f"No valid numeric values in '{x_col}'.")
+
+        numeric_cols = [
+            y1_col, y2_col, y3_col,
+            p1_line1_col, p1_line2_col,
+            p2_line1_col, p2_line2_col,
+            p3_line1_col, p3_line2_col,
+        ]
+        for c in numeric_cols:
+            if c and c in d.columns:
+                d[c] = _to_num(d[c])
+
+        if require_category:
+            d = d[d[category_col].ne("")].copy()
+            if d.empty:
+                return _err(f"No rows with non-empty '{category_col}' after filtering.")
+
+        if (
+                _finite_count(d, y1_col) +
+                _finite_count(d, y2_col) +
+                _finite_count(d, y3_col)
+        ) == 0:
+            return _err("No numeric Y values available to plot (all Y columns are empty/NaN).")
+
+        d = d.sort_values(by=[x_col]).reset_index(drop=True)
+
+        stations = d[x_col].to_numpy(dtype=float)
+        d["_station_factor"] = [
+            str(int(v)) if float(v).is_integer() else str(v)
+            for v in stations
+        ]
+
+        x_factors = d["_station_factor"].drop_duplicates().tolist()
+        if not x_factors:
+            return _err("No stations available after processing.")
+
+        shared_x = FactorRange(*x_factors)
+
+        try:
+            step = max(1, int(x_tick_step))
+        except Exception:
+            step = 1
+
+        x_label_overrides = {
+            fac: (fac if (i % step == 0) else "")
+            for i, fac in enumerate(x_factors)
+        }
+
+        base_palette = [
+            "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+            "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+            "#393b79", "#637939", "#8c6d31", "#843c39", "#7b4173",
+            "#3182bd", "#31a354", "#756bb1", "#636363", "#e6550d",
+        ]
+
+        categories = sorted([
+            c for c in d[category_col].dropna().astype(str).unique().tolist()
+            if c != ""
+        ])
+
+        if not categories:
+            categories = [""]
+
+        cat_color = {
+            cat: base_palette[i % len(base_palette)]
+            for i, cat in enumerate(categories)
+        }
+        cat_color[""] = "#94a3b8"
+
         s1_label = y1_label or y1_col
         s2_label = y2_label or y2_col
         s3_label = y3_label or y3_col
 
-        p1, leg_items1 = _build_one_plot(title1, y1_col, s1_label)
-        p2, leg_items2 = _build_one_plot(title2, y2_col, s2_label)
-        p3, leg_items3 = _build_one_plot(title3, y3_col, s3_label)
+        p1, leg1 = _build_one_plot(
+            plot_title=title1,
+            y_col=y1_col,
+            y_label_text=s1_label,
+            line1_col=p1_line1_col,
+            line2_col=p1_line2_col,
+            line1_label=p1_line1_label,
+            line2_label=p1_line2_label,
+            line1_color=p1_line1_color,
+            line2_color=p1_line2_color,
+        )
 
-        # only bottom plot shows x-axis labels
+        p2, leg2 = _build_one_plot(
+            plot_title=title2,
+            y_col=y2_col,
+            y_label_text=s2_label,
+            line1_col=p2_line1_col,
+            line2_col=p2_line2_col,
+            line1_label=p2_line1_label,
+            line2_label=p2_line2_label,
+            line1_color=p2_line1_color,
+            line2_color=p2_line2_color,
+        )
+
+        p3, leg3 = _build_one_plot(
+            plot_title=title3,
+            y_col=y3_col,
+            y_label_text=s3_label,
+            line1_col=p3_line1_col,
+            line2_col=p3_line2_col,
+            line1_label=p3_line1_label,
+            line2_label=p3_line2_label,
+            line1_color=p3_line1_color,
+            line2_color=p3_line2_color,
+        )
+
         p1.xaxis.visible = False
         p2.xaxis.visible = False
 
-        # ---------- one legend ABOVE all plots
-        all_leg_items = leg_items1 + leg_items2 + leg_items3
-
+        all_leg_items = leg1 + leg2 + leg3
         if all_leg_items:
-            L = Legend(
+            legend = Legend(
                 items=all_leg_items,
                 title=legend_title,
                 orientation="horizontal",
@@ -1466,12 +1639,12 @@ class DSRLineGraphics(object):
                 margin=4,
                 label_text_font_size="9pt",
                 title_text_font_size="9pt",
+                ncols=5,
             )
-            p1.add_layout(L, "above")
+            p1.add_layout(legend, "above")
         else:
-            L = None
+            legend = None
 
-        # ---------- merged toolbar for all
         stack = gridplot(
             [[p1], [p2], [p3]],
             merge_tools=True,
@@ -1479,14 +1652,17 @@ class DSRLineGraphics(object):
             sizing_mode="stretch_both",
         )
 
-        # ---------- legend toggle button
         btn_toggle = Button(label="Legend", button_type="default", width=80)
-        if L is not None:
-            btn_toggle.js_on_click(CustomJS(args=dict(leg=L), code="leg.visible = !leg.visible;"))
+        if legend is not None:
+            btn_toggle.js_on_click(CustomJS(args=dict(leg=legend), code="leg.visible = !leg.visible;"))
         else:
             btn_toggle.disabled = True
 
-        layout = column(row(btn_toggle), stack, sizing_mode="stretch_both")
+        layout = column(
+            row(btn_toggle),
+            stack,
+            sizing_mode="stretch_both",
+        )
 
         if is_show and not json_return:
             show(layout)
@@ -3123,6 +3299,408 @@ class DSRLineGraphics(object):
             show(layout)
             return
         return layout
+
+    def bokeh_three_vbar_with_2l_by_category_shared_x(
+            self,
+            df,
+            *,
+            title1="Series 1",
+            title2="Series 2",
+            title3="Series 3",
+            x_col="Station",
+            y1_col="PrimaryElevation",
+            y2_col="SecondaryElevation",
+            y3_col="WaterDepth",
+            y1_label=None,
+            y2_label=None,
+            y3_label=None,
+            y_axis_label="Water depth",
+            category_col="ROV",
+            line_col="Line",
+            point_col=None,
+            rov_col="ROV",
+            ts_col="TimeStamp",
+            require_category=True,
+            reverse_y_if_negative=True,
+            legend_title="Legend",
+            x_tick_step=5,
+            x_tick_font_size="8pt",
+
+            # --- new params for 2 line graphs ---
+            line1_col=None,
+            line2_col=None,
+            line1_label=None,
+            line2_label=None,
+            line1_color="#d62728",
+            line2_color="#1f77b4",
+            line_line_width=2,
+            line_marker_size=6,
+            show_lines_on_all_plots=True,
+
+            json_return=False,
+            is_show=False,
+    ):
+        """
+        3 stacked vbar plots (shared categorical x):
+          - shared X (Stations) via shared FactorRange
+          - merged toolbar for all plots
+          - one legend above the stack
+          - per plot:
+              * one numeric vbar series split by category_col (e.g. ROV / ROV1)
+              * optional 2 line series over bars
+          - X labels vertical and sparse via x_tick_step
+
+        New:
+          - line1_col / line2_col are optional numeric columns
+          - same two lines are drawn on each of the three plots
+        """
+
+        def _err(msg: str, details: str = ""):
+            try:
+                return self._error_layout(
+                    title="Plot build error",
+                    message=msg,
+                    details=details,
+                    level="error",
+                    json_return=json_return,
+                    is_show=is_show,
+                )
+            except TypeError:
+                return self._error_layout(msg)
+
+        if df is None:
+            return _err("No dataframe provided.")
+        if not hasattr(df, "columns"):
+            return _err("Input must be a pandas DataFrame.")
+        if len(df) == 0:
+            return _err("No data to plot (dataframe is empty).")
+
+        d = df.copy()
+
+        # ---------- required columns
+        if x_col not in d.columns:
+            return _err(f"Missing required x column: '{x_col}'.")
+
+        if (y1_col not in d.columns) and (y2_col not in d.columns) and (y3_col not in d.columns):
+            return _err(f"None of y-columns exist in df: '{y1_col}', '{y2_col}', '{y3_col}'.")
+
+        # ---------- category
+        if category_col not in d.columns:
+            d[category_col] = ""
+        else:
+            d[category_col] = d[category_col].fillna("").astype(str)
+
+        # ---------- numeric conversion
+        d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
+
+        for yc in (y1_col, y2_col, y3_col, line1_col, line2_col):
+            if yc and yc in d.columns:
+                d[yc] = pd.to_numeric(d[yc], errors="coerce")
+
+        # ---------- drop invalid x
+        d = d.dropna(subset=[x_col]).copy()
+        if len(d) == 0:
+            return _err(f"No valid '{x_col}' values after numeric conversion.")
+
+        # ---------- require category
+        if require_category:
+            d = d[d[category_col].astype(str).str.strip().ne("")]
+            if len(d) == 0:
+                return _err(f"No rows with non-empty '{category_col}' after filtering.")
+
+        def _finite_count(col: str) -> int:
+            if not col or col not in d.columns:
+                return 0
+            arr = pd.to_numeric(d[col], errors="coerce").to_numpy(dtype=float)
+            return int(np.isfinite(arr).sum())
+
+        if (_finite_count(y1_col) + _finite_count(y2_col) + _finite_count(y3_col)) == 0:
+            return _err("No numeric Y values available to plot (all Y columns are empty/NaN).")
+
+        # ---------- sort
+        d = d.sort_values(by=[x_col]).copy()
+
+        # ---------- station factors
+        stations = d[x_col].to_numpy(dtype=float)
+        station_factors = [str(int(s)) if float(s).is_integer() else str(s) for s in stations]
+        d["_station_factor"] = station_factors
+
+        x_factors = d["_station_factor"].drop_duplicates().tolist()
+        if not x_factors:
+            return _err("No stations available after processing.")
+
+        shared_x = FactorRange(*x_factors)
+
+        # ---------- x label density
+        try:
+            step = int(x_tick_step)
+            if step < 1:
+                step = 1
+        except Exception:
+            step = 1
+
+        x_label_overrides = {
+            f: (f if (i % step == 0) else "")
+            for i, f in enumerate(x_factors)
+        }
+
+        # ---------- y-range helper
+        def _make_y_range(dframe, y_col, extra_cols=None):
+            cols = [y_col]
+            if extra_cols:
+                cols.extend([c for c in extra_cols if c and c in dframe.columns])
+
+            vals = []
+            for c in cols:
+                if c not in dframe.columns:
+                    continue
+                arr = pd.to_numeric(dframe[c], errors="coerce").to_numpy(dtype=float)
+                arr = arr[np.isfinite(arr)]
+                if arr.size:
+                    vals.append(arr)
+
+            if not vals:
+                return Range1d(start=-1, end=1)
+
+            arr = np.concatenate(vals)
+            y_min, y_max = float(np.min(arr)), float(np.max(arr))
+            pad = (y_max - y_min) * 0.05 if (y_max - y_min) > 0 else (abs(y_min) * 0.05 + 1.0)
+
+            if reverse_y_if_negative and y_min < 0:
+                return Range1d(start=y_max + pad, end=y_min - pad)
+            return Range1d(start=y_min - pad, end=y_max + pad)
+
+        # ---------- palette for categories
+        base_palette = [
+            "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+            "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+        ]
+
+        categories = sorted(d[category_col].unique().tolist())
+        if not categories:
+            categories = [""]
+
+        # ---------- shared line source
+        line_src = ColumnDataSource(
+            data=dict(
+                station=d["_station_factor"].to_numpy(),
+                station_num=d[x_col].to_numpy(dtype=float),
+                line1=(pd.to_numeric(d[line1_col], errors="coerce").to_numpy(dtype=float)
+                       if line1_col and line1_col in d.columns else np.full(len(d), np.nan)),
+                line2=(pd.to_numeric(d[line2_col], errors="coerce").to_numpy(dtype=float)
+                       if line2_col and line2_col in d.columns else np.full(len(d), np.nan)),
+                rov=(d[rov_col].astype(str).fillna("").to_numpy()
+                     if rov_col in d.columns else np.array([""] * len(d))),
+                ts=(d[ts_col].astype(str).fillna("").to_numpy()
+                    if ts_col in d.columns else np.array([""] * len(d))),
+                line=(d[line_col].astype(str).fillna("").to_numpy()
+                      if line_col in d.columns else np.array([""] * len(d))),
+                point=(d[point_col].astype(str).fillna("").to_numpy()
+                       if (point_col and point_col in d.columns) else np.array([""] * len(d))),
+            )
+        )
+
+        # ---------- build one plot
+        def _build_one_plot(plot_title, y_col, y_label_text, add_lines=True):
+            if y_col not in d.columns:
+                p = figure(
+                    title=f"{plot_title} (missing '{y_col}')",
+                    x_range=shared_x,
+                    sizing_mode="stretch_both",
+                    tools="pan,wheel_zoom,box_zoom,reset,save",
+                    active_scroll="wheel_zoom",
+                    min_border_right=35,
+                )
+                return p, []
+
+            if _finite_count(y_col) == 0:
+                p = figure(
+                    title=f"{plot_title} (no numeric values in '{y_col}')",
+                    x_range=shared_x,
+                    sizing_mode="stretch_both",
+                    tools="pan,wheel_zoom,box_zoom,reset,save",
+                    active_scroll="wheel_zoom",
+                    min_border_right=35,
+                )
+                return p, []
+
+            p = figure(
+                title=plot_title,
+                x_range=shared_x,
+                y_range=_make_y_range(
+                    d, y_col,
+                    extra_cols=[line1_col if add_lines else None, line2_col if add_lines else None]
+                ),
+                x_axis_label="Station",
+                y_axis_label=y_axis_label,
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+                sizing_mode="stretch_both",
+                min_border_right=35,
+            )
+
+            p.xgrid.grid_line_alpha = 0.15
+            p.ygrid.grid_line_alpha = 0.15
+            p.xaxis.major_label_orientation = 1.5708
+            p.xaxis.major_label_text_font_size = x_tick_font_size
+            p.xaxis.major_label_standoff = 6
+            p.xaxis.major_label_overrides = x_label_overrides
+
+            hover = HoverTool(
+                mode="mouse",
+                tooltips=[
+                    ("Line", "@line"),
+                    ("ROV", "@rov"),
+                    ("TimeStamp", "@ts"),
+                    ("Station", "@station"),
+                    (y_label_text, "@y{0.00}"),
+                    *(([(line1_label or line1_col, "@line1{0.00}")] if line1_col and line1_col in d.columns else [])),
+                    *(([(line2_label or line2_col, "@line2{0.00}")] if line2_col and line2_col in d.columns else [])),
+                ],
+            )
+            p.add_tools(hover)
+
+            renderers = []
+            legend_items = []
+
+            # ----- category bars
+            for i, cat in enumerate(categories):
+                sub = d[d[category_col] == cat]
+                if len(sub) == 0:
+                    continue
+
+                y_arr = pd.to_numeric(sub[y_col], errors="coerce").to_numpy(dtype=float)
+
+                src = ColumnDataSource(
+                    data=dict(
+                        station=sub["_station_factor"].to_numpy(),
+                        y=y_arr,
+                        rov=(sub[rov_col].astype(str).fillna("").to_numpy()
+                             if rov_col in sub.columns else np.array([""] * len(sub))),
+                        ts=(sub[ts_col].astype(str).fillna("").to_numpy()
+                            if ts_col in sub.columns else np.array([""] * len(sub))),
+                        line=(sub[line_col].astype(str).fillna("").to_numpy()
+                              if line_col in sub.columns else np.array([""] * len(sub))),
+                        point=(sub[point_col].astype(str).fillna("").to_numpy()
+                               if (point_col and point_col in sub.columns) else np.array([""] * len(sub))),
+                        line1=(pd.to_numeric(sub[line1_col], errors="coerce").to_numpy(dtype=float)
+                               if line1_col and line1_col in sub.columns else np.full(len(sub), np.nan)),
+                        line2=(pd.to_numeric(sub[line2_col], errors="coerce").to_numpy(dtype=float)
+                               if line2_col and line2_col in sub.columns else np.full(len(sub), np.nan)),
+                    )
+                )
+
+                color = base_palette[i % len(base_palette)]
+                r = p.vbar(
+                    x="station",
+                    top="y",
+                    width=0.82,
+                    source=src,
+                    fill_color=color,
+                    line_color=color,
+                    fill_alpha=0.85,
+                )
+                renderers.append(r)
+                legend_items.append(LegendItem(label=f"{y_label_text} · {cat}", renderers=[r]))
+
+            # ----- two overlay lines
+            if add_lines:
+                if line1_col and line1_col in d.columns and _finite_count(line1_col) > 0:
+                    r_l1 = p.line(
+                        x="station",
+                        y="line1",
+                        source=line_src,
+                        line_width=line_line_width,
+                        color=line1_color,
+                        alpha=0.95,
+                    )
+                    r_l1c = p.circle(
+                        x="station",
+                        y="line1",
+                        source=line_src,
+                        size=line_marker_size,
+                        color=line1_color,
+                        alpha=0.95,
+                    )
+                    renderers.extend([r_l1, r_l1c])
+                    legend_items.append(LegendItem(
+                        label=(line1_label or line1_col),
+                        renderers=[r_l1, r_l1c]
+                    ))
+
+                if line2_col and line2_col in d.columns and _finite_count(line2_col) > 0:
+                    r_l2 = p.line(
+                        x="station",
+                        y="line2",
+                        source=line_src,
+                        line_width=line_line_width,
+                        color=line2_color,
+                        alpha=0.95,
+                    )
+                    r_l2c = p.circle(
+                        x="station",
+                        y="line2",
+                        source=line_src,
+                        size=line_marker_size,
+                        color=line2_color,
+                        alpha=0.95,
+                    )
+                    renderers.extend([r_l2, r_l2c])
+                    legend_items.append(LegendItem(
+                        label=(line2_label or line2_col),
+                        renderers=[r_l2, r_l2c]
+                    ))
+
+            hover.renderers = renderers
+            return p, legend_items
+
+        s1_label = y1_label or y1_col
+        s2_label = y2_label or y2_col
+        s3_label = y3_label or y3_col
+
+        p1, leg_items1 = _build_one_plot(title1, y1_col, s1_label, add_lines=show_lines_on_all_plots)
+        p2, leg_items2 = _build_one_plot(title2, y2_col, s2_label, add_lines=show_lines_on_all_plots)
+        p3, leg_items3 = _build_one_plot(title3, y3_col, s3_label, add_lines=show_lines_on_all_plots)
+
+        p1.xaxis.visible = False
+        p2.xaxis.visible = False
+
+        all_leg_items = leg_items1 + leg_items2 + leg_items3
+        if all_leg_items:
+            L = Legend(
+                items=all_leg_items,
+                title=legend_title,
+                orientation="horizontal",
+                click_policy="hide",
+                spacing=6,
+                padding=6,
+                margin=4,
+                label_text_font_size="9pt",
+                title_text_font_size="9pt",
+            )
+            p1.add_layout(L, "above")
+        else:
+            L = None
+
+        stack = gridplot(
+            [[p1], [p2], [p3]],
+            merge_tools=True,
+            toolbar_location="above",
+            sizing_mode="stretch_both",
+        )
+
+        btn_toggle = Button(label="Legend", button_type="default", width=80)
+        if L is not None:
+            btn_toggle.js_on_click(CustomJS(args=dict(leg=L), code="leg.visible = !leg.visible;"))
+        else:
+            btn_toggle.disabled = True
+
+        layout = column(row(btn_toggle), stack, sizing_mode="stretch_both")
+
+        if is_show and not json_return:
+            show(layout)
+
+        return json_item(layout) if json_return else layout
 
 
 

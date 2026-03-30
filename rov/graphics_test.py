@@ -8,9 +8,9 @@ from bbox_graphics import BlackBoxGraphics
 
 
 
-project_db_path="D:\\313311_AW1-APEX\\16_SWL_DATA\\AW1\\data\\project.sqlite3"
+project_db_path="G:\\02_PROJECTS\AW1\\16_SWL_DATA\\AW1\\data\\project.sqlite3"
 plgr=DSRLineGraphics(project_db_path)
-line_df = plgr.read_dsr_for_line(13513)
+line_df = plgr.read_dsr_for_line(17353)
 line_df['Primary_e95']= line_df['Sigma1']*math.sqrt(5.991)
 line_df['Primary_n95']= line_df['Sigma2']*math.sqrt(5.991)
 line_df['Primary_z95']= line_df['Sigma5']*math.sqrt(5.991)
@@ -19,10 +19,34 @@ line_df['Secondary_n95']= line_df['Sigma4']*math.sqrt(5.991)
 
 line_df['dX_primary'] = line_df['PreplotEasting']-line_df['PrimaryEasting']
 line_df['dX_secondary'] = line_df['PreplotEasting']-line_df['SecondaryEasting']
+line_df['dX_primary1'] = line_df['PreplotEasting']-line_df['PrimaryEasting1']
+line_df['dY_primary1'] = line_df['PreplotNorthing']-line_df['PrimaryNorthing1']
+
 
 line_df['dY_primary'] = line_df['PreplotNorthing']-line_df['PrimaryNorthing']
 line_df['dY_secondary'] = line_df['PreplotNorthing']-line_df['SecondaryNorthing']
+plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
+                                           rov_col="ROV1",
+                                           is_show=True,
+                                           json_return=False,
+                                           reverse_y_if_negative=False,
+                                           ts_col='TimeStamp1',
+                                           y1_col="DeployedtoRetrievedEasting",
+                                           y2_col="DeployedtoRetrievedNorthing",
+                                           y3_col='DeployedtoRetrievedRange',
+                                           title1="Δ Easting Primary(DEP) to Primary(REC)",
+                                           title2="Δ Northing Primary(DEP) to Primary(REC)",
+                                           title3="Δ Range Dep -> Rec",
+                                           y1_label="σE",y2_label="σN",y3_label="σZ ",y_axis_label="Offset,m",
+                                           p1_line1_col="dX_primary",p1_line2_col="dX_primary1",
+                                           p2_line1_col="dY_primary",p2_line2_col="dY_primary1",
+                                           p3_line1_col="RangetoPrePlot",p3_line2_col="RangetoPrePlot1",
+                                           p1_line1_label='ΔX(Dep->Preplot)',p1_line2_label='ΔX(Recp->Preplot)',
+                                           p2_line1_label='ΔY(Dep->Preplot)',p2_line2_label='ΔY(Recp->Preplot)',
+                                           p3_line1_label='Range 2 Prep (Dep)',p3_line2_label='Range 2 Prep (Rec)',
 
+                                           )
+"""
 plgr.make_dxdy_primary_secondary_with_hists(
             line_df,
             dx_p_col="dX_primary",
@@ -40,7 +64,7 @@ plgr.make_dxdy_primary_secondary_with_hists(
             json_return=False,
             target_id="dxdy_plot",
     )
-"""
+
 plgr.bokeh_three_vbar_by_category_shared_x(df=line_df,
                                            rov_col="ROV",
                                            is_show=True,

@@ -27,6 +27,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+pytest.ini
 /tests/
 /ftpsync/ftp_sync_config.json
 

@@ -1,5 +1,19 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}ROV page DSR BBOX ETC — {{ project.name }}{% endblock %}
+{% block extra_head %}
+   <link rel="stylesheet" href="{% static 'rov/css/bbox_file_table.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/bbox_qc_tab.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/black_box_config_modal.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/dsr_line_table.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/dsr_line_filter_modal.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/dsr_single_line_table.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/export_sm_modal.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/export_sps_modal.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/selected_dsr_qc_tab.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/sv_map_pills.css' %}">
+   <link rel="stylesheet" href="{% static 'rov/css/rov_upload_modal.css' %}">
+{% endblock %}
 {% block content %}
 <div class="container-fluid">
 
@@ -143,7 +157,10 @@
 {% include "rov/modals/bbox_config_modal.html" %}
 {% include "rov/modals/export_to_sm_modal.html" %}
 {% include "rov/modals/export_to_sps_modal.html" %}
+{% include "rov/modals/bbox_delete_modal.html" %}
+{% include "rov/modals/bbox_filter_modal.html" %}
 {% include "rov/partials/toast_container_rov.html" %}
+{% include "rov/modals/bbox_recalc_all.html" %}
 <div class="toast-container position-fixed top-0 end-0 p-3" id="app-toast-container" style="z-index: 2000;"></div>
 <div class="modal fade" id="app-confirm-modal" tabindex="-1" aria-hidden="true"></div>
 

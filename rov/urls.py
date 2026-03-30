@@ -33,5 +33,7 @@ urlpatterns = [
     path("bbox/config/import-json/", bbox_config_import_json, name="bbox_config_import_json"),
     #path("bbox/config/export-file/", bbox_config_export_to_file, name="bbox_config_export_file"),
     path("bbox/config/import-file/", bbox_config_import_from_file, name="bbox_config_import_file"),
+    path("bbox/recalc_all/",recalc_all_bbox_file_stats,name="recalc_all_bbox_file_stats"),
+    path("bbox/filter/", bbox_file_filter, name="bbox_file_filter"),
 
 ]

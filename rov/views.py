@@ -131,11 +131,13 @@ def rov_main_view(request):
     dsr_lines_body = dsrdb.render_dsr_line_summary_body()
     bbox_fields_selectors = dsrdb.get_config_selector_table()
     bbox_config_list = dsrdb.get_bbox_configs_list()
-    bbox_file_tbody = dsrdb.get_bbox_file_table()
+    dsrdb.ensure_blackbox_file_stats_schema()
     rows = dsrdb.get_bbox_configs_list()  # you already have this
     sm_file_name = Path(project.export_csv / "sm.csv")
     dsrdb.export_dsr_to_csv(file_name=sm_file_name, sql=dsrdb.build_dsr_export_sql())
     dsr_statistics_table =dsrdb.get_dsr_html_stat()
+    bbox_vessel_options = dsrdb.get_bbox_vessel_options()
+    bbox_file_tbody = dsrdb.get_bbox_file_table()
     return render(request,
                   "rov/rovpage.html",
                   {"project": project,
@@ -154,6 +156,7 @@ def rov_main_view(request):
                    "d_rec_script":d_rec_script,
                    "deployment_pie":deployment_pie,
                    "recovery_pie":recovery_pie,
+                   "bbox_vessel_options": bbox_vessel_options,
                    })
 @require_POST
 @login_required
@@ -383,6 +386,7 @@ def rov_upload_black_box(request):
                 file_fk=file_fk,
                 chunk_rows=5000,
             )
+            dsr.refresh_blackbox_file_stats(file_fk)
 
             inserted_total += n
             processed.append({"file": f.name, "rows": n, "file_fk": file_fk})
@@ -1393,6 +1397,8 @@ def dsr_line_qc_plot_item(request):
 
         df['dY_primary'] = df['PreplotNorthing'] - df['PrimaryNorthing']
         df['dY_secondary'] = df['PreplotNorthing'] - df['SecondaryNorthing']
+        df['dX_primary1'] = df['PreplotEasting'] - df['PrimaryEasting1']
+        df['dY_primary1'] = df['PreplotNorthing'] - df['PrimaryNorthing1']
 
         # Build ONE plot depending on tab requested
         if plot_key == "water":
@@ -1532,6 +1538,36 @@ def dsr_line_qc_plot_item(request):
                 "plot_key": plot_key,
                 "item": json_item(layout)
             })
+        elif plot_key == "noderec":
+            layout = g.bokeh_three_vbar_by_category_shared_x(df=df,
+                                                       rov_col="ROV1",
+                                                       is_show=False,
+                                                       json_return=False,
+                                                       reverse_y_if_negative=False,
+                                                       ts_col='TimeStamp1',
+                                                       y1_col="DeployedtoRetrievedEasting",
+                                                       y2_col="DeployedtoRetrievedNorthing",
+                                                       y3_col='DeployedtoRetrievedRange',
+                                                       title1="Δ Easting Primary(DEP) to Primary(REC)",
+                                                       title2="Δ Northing Primary(DEP) to Primary(REC)",
+                                                       title3="Δ Range Dep -> Rec",
+                                                       y1_label="σE", y2_label="σN", y3_label="σZ ",
+                                                       y_axis_label="Offset,m",
+                                                       p1_line1_col="dX_primary", p1_line2_col="dX_primary1",
+                                                       p2_line1_col="dY_primary", p2_line2_col="dY_primary1",
+                                                       p3_line1_col="RangetoPrePlot", p3_line2_col="RangetoPrePlot1",
+                                                       p1_line1_label='ΔX(Dep->Preplot)',
+                                                       p1_line2_label='ΔX(Recp->Preplot)',
+                                                       p2_line1_label='ΔY(Dep->Preplot)',
+                                                       p2_line2_label='ΔY(Recp->Preplot)',
+                                                       p3_line1_label='Range 2 Prep (Dep)',
+                                                       p3_line2_label='Range 2 Prep (Rec)',)
+            return JsonResponse({
+                "ok": True,
+                "plot_key": plot_key,
+                "item": json_item(layout)
+            })
+
 
         return JsonResponse({"ok": False, "error": f"Unknown plot_key: {plot_key}"}, status=400)
 
@@ -1648,3 +1684,66 @@ def bbox_config_export_to_file(request):
     result = dsr.export_all_bbox_configs_to_file()
 
     return JsonResponse(result)
+
+@login_required
+@log_action("recalc all bbox file stats", object_type="BBOX")
+def recalc_all_bbox_file_stats(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
+    try:
+        dsrdb = DSRDB(project.db_path)
+
+        result = dsrdb.refresh_all_blackbox_file_stats()
+        bbox_file_tbody = dsrdb.get_bbox_file_table()
+
+        return JsonResponse({
+            "success": True,
+            "tbody": bbox_file_tbody,
+            "total_files": result.get("total_files", 0),
+            "recalculated": result.get("recalculated", 0),
+            "skipped": result.get("skipped", 0),
+            "errors": result.get("errors", []),
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            "success": False,
+            "error": str(e),
+        }, status=500)
+@login_required
+@require_POST
+@log_action("filter bbox files", object_type="BBOX")
+def bbox_file_filter(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
+
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+        vessel = (payload.get("vessel") or "").strip()
+        start_day = (payload.get("start_day") or "").strip()
+        end_day = (payload.get("end_day") or "").strip()
+
+        dsrdb = DSRDB(project.db_path)
+        bbox_file_tbody = dsrdb.get_bbox_file_table(
+            vessel=vessel,
+            start_day=start_day,
+            end_day=end_day,
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "bbox_file_tbody": bbox_file_tbody,
+        })
+    except Exception as e:
+        return JsonResponse({
+            "ok": False,
+            "error": str(e),
+        }, status=500)

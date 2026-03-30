@@ -98,7 +98,20 @@ Datum and Static fields were not loaded for Source SPS before this issue was fix
 Change shot_table loader. loading more fast but database should be isolated
 
 ### Changed
+## [2026.1.02.01] - 2026-03-30
+### Added
+  Recover vs Dep plots added 
+  BBOX filter button added 
+  BBOX recalc button added 
+ 
+### Fixed
+Datum and Static fields were not loaded for Source SPS before this issue was fixed.
+Change shot_table loader. loading more fast but database should be isolated
 
+### Changed
+  BBOX File statistics changed 
+  Update loader changed 
+  
 
 
 

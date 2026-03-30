@@ -15,18 +15,52 @@
             </button>
         </div>
         <div class="card-body collapse show" id="bbox-log-card-body">
-           <div class="table-scroll w-100" style="height: 50vh">
-               <table class="table table-hover" id="bbox-file-table">
-                   <thead>
-                         <th><input type="checkbox" id="mainBboxFileCheckBox"></th>
-                         <th>File Name</th>
-                   </thead>
-                   {{ bbox_file_tbody }}
-               </table>
-           </div>
+           <div class="table-responsive bbox-file-table-container">
+               <table class="table table-sm table-hover table-bordered align-middle text-nowrap" id="bbox-file-table">
+                      <thead class="table-dark">
+                          <tr>
+                            <th>ID</th>
+                            <th>File</th>
+                            <th>Config</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Dur (s)</th>
+                            <th>Rows</th>
+                            <th>Gap</th>
+
+                            <th class="text-center">ROV1 Depth</th>
+                            <th class="text-center">ROV2 Depth</th>
+
+                            <th class="text-center">ROV1 SOG</th>
+                            <th class="text-center">ROV2 SOG</th>
+
+                            <th class="text-center">INS/USBL ROV1</th>
+                            <th class="text-center">INS/USBL ROV2</th>
+
+                            <th class="text-center">GNSS1 HDOP</th>
+                            <th class="text-center">GNSS2 HDOP</th>
+
+                            <th class="text-center">GNSS1 Q</th>
+                            <th class="text-center">GNSS2 Q</th>
+
+                            <th class="text-center">Baro</th>
+                          </tr>
+                      </thead>
+                <tbody id="bbox-file-tbody">
+
+                </tbody>
+
+            </table>
+          </div>
 
         </div><!--End of card-body-->
         <div class="card-footer clearfix">
+            <button type = "button"
+                id="btn-recalc-all-bbox-stats"
+                class="btn btn-sm btn-warning shadow"
+                data-url="{% url 'rov:recalc_all_bbox_file_stats' project.id %}">
+                <i class="fa fa-sync me-2"></i> Recalc All BBOX Stats
+            </button>
             <button type="button"
                     class="btn btn-danger float-end me-2"
                     id="deleteBboxFileBtn"

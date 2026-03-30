@@ -18,6 +18,7 @@ export function initDSRLineQCTabs() {
     "pane-map":     { key: "map",     divId: "plot-map" },
     "pane-delta":   { key: "delta",   divId: "plot-delta" },
     "pane-xline":   { key: "xline",   divId: "plot-xline" },
+    "pane-recovery":{key:"noderec", divId: "plot-noderec"},
 
     // two target divs for one backend key
     "pane-timing": {

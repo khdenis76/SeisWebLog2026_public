@@ -1,0 +1,44 @@
+<div class="modal fade" id="bboxFilterModal" tabindex="-1" aria-labelledby="bboxFilterModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-success-subtle">
+                <h5 class="modal-title" id="bboxFilterModalLabel">
+                    <i class="fas fa-filter me-2"></i>BBOX Filter
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="bbox-filter-vessel" class="form-label">Vessel</label>
+                    <select class="form-select" id="bbox-filter-vessel">
+                        <option value="">All vessels</option>
+                        {% for item in bbox_vessel_options %}
+                            <option value="{{ item }}">{{ item }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label for="bbox-filter-start-day" class="form-label">Start day</label>
+                        <input type="date" class="form-control" id="bbox-filter-start-day">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="bbox-filter-end-day" class="form-label">End day</label>
+                        <input type="date" class="form-control" id="bbox-filter-end-day">
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light border" id="bbox-filter-reset-btn">
+                    Reset
+                </button>
+                <button type="button" class="btn btn-success" id="bbox-filter-apply-btn">
+                    <i class="fas fa-check me-2"></i>Apply
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

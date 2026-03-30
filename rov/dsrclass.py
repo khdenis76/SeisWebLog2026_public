@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import math
 import sqlite3
 from pathlib import Path
 import datetime
@@ -851,10 +852,152 @@ class DSRDB:
                 """
             )
             return [dict(r) for r in cur.fetchall()]
-    def get_bbox_file_table(self):
-        bbox_file_list = self.get_blackbox_files()
-        html = render_to_string("rov/partials/bbox_list_body.html",{"bbox_file_list": bbox_file_list})
-        return html
+
+    def get_bbox_file_rows(self, vessel="", start_day="", end_day=""):
+        conn = self._connect()
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            where = []
+            params = []
+
+            if vessel:
+                where.append("COALESCE(cfg.Vessel_name, '') = ?")
+                params.append(vessel)
+
+            if start_day:
+                where.append("date(COALESCE(fs.StartTime, bf.UploadedAt)) >= date(?)")
+                params.append(start_day)
+
+            if end_day:
+                where.append("date(COALESCE(fs.EndTime, bf.UploadedAt)) <= date(?)")
+                params.append(end_day)
+
+            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+            sql = f"""
+            SELECT
+                bf.ID,
+                bf.FileName,
+                bf.UploadedAt,
+                bf.Config_FK,
+
+                cfg.Name AS ConfigName,
+                cfg.Vessel_name AS VesselName,
+                cfg.rov1_name AS ROV1_Name,
+                cfg.rov2_name AS ROV2_Name,
+                cfg.gnss1_name AS GNSS1_Name,
+                cfg.gnss2_name AS GNSS2_Name,
+
+                fs.StartTime,
+                fs.EndTime,
+                fs.RowCount,
+                fs.DurationSec,
+                fs.MaxTimeGapSec,
+
+                fs.ROV1_SOG_Min,
+                fs.ROV1_SOG_Max,
+                fs.ROV2_SOG_Min,
+                fs.ROV2_SOG_Max,
+
+                fs.ROV1_Depth_Min,
+                fs.ROV1_Depth_Max,
+                fs.ROV2_Depth_Min,
+                fs.ROV2_Depth_Max,
+
+                fs.ROV1_Depth1_Min,
+                fs.ROV1_Depth1_Max,
+                fs.ROV1_Depth2_Min,
+                fs.ROV1_Depth2_Max,
+
+                fs.ROV2_Depth1_Min,
+                fs.ROV2_Depth1_Max,
+                fs.ROV2_Depth2_Min,
+                fs.ROV2_Depth2_Max,
+
+                fs.GNSS1_HDOP_Min,
+                fs.GNSS1_HDOP_Max,
+                fs.GNSS2_HDOP_Min,
+                fs.GNSS2_HDOP_Max,
+
+                fs.GNSS1_PDOP_Min,
+                fs.GNSS1_PDOP_Max,
+                fs.GNSS2_PDOP_Min,
+                fs.GNSS2_PDOP_Max,
+
+                fs.GNSS1_VDOP_Min,
+                fs.GNSS1_VDOP_Max,
+                fs.GNSS2_VDOP_Min,
+                fs.GNSS2_VDOP_Max,
+
+                fs.GNSS1_NOS_Min,
+                fs.GNSS1_NOS_Max,
+                fs.GNSS1_DiffAge_Min,
+                fs.GNSS1_DiffAge_Max,
+                fs.GNSS1_FixQuality_Min,
+                fs.GNSS1_FixQuality_Max,
+
+                fs.GNSS2_NOS_Min,
+                fs.GNSS2_NOS_Max,
+                fs.GNSS2_DiffAge_Min,
+                fs.GNSS2_DiffAge_Max,
+                fs.GNSS2_FixQuality_Min,
+                fs.GNSS2_FixQuality_Max,
+
+                fs.Barometer_Min,
+                fs.Barometer_Max,
+
+                fs.ROV1_PosDiff_Min,
+                fs.ROV1_PosDiff_Max,
+                fs.ROV1_PosDiff_Avg,
+
+                fs.ROV2_PosDiff_Min,
+                fs.ROV2_PosDiff_Max,
+                fs.ROV2_PosDiff_Avg
+
+            FROM BlackBox_Files bf
+            LEFT JOIN BlackBox_FileStats fs
+                ON fs.File_FK = bf.ID
+            LEFT JOIN BBox_Configs_List cfg
+                ON cfg.ID = bf.Config_FK
+            {where_sql}
+            ORDER BY bf.ID DESC
+            """
+
+            cur.execute(sql, params)
+            rows = [dict(r) for r in cur.fetchall()]
+
+            for item in rows:
+                duration = item.get("DurationSec")
+                if duration is None:
+                    item["DurationText"] = ""
+                else:
+                    try:
+                        duration = int(duration)
+                        hh = duration // 3600
+                        mm = (duration % 3600) // 60
+                        ss = duration % 60
+                        item["DurationText"] = f"{hh:02d}:{mm:02d}:{ss:02d}"
+                    except Exception:
+                        item["DurationText"] = str(duration)
+
+            return rows
+        finally:
+            conn.close()
+
+    def get_bbox_file_table(self, vessel="", start_day="", end_day=""):
+        rows = self.get_bbox_file_rows(
+            vessel=vessel,
+            start_day=start_day,
+            end_day=end_day,
+        )
+        return render_to_string(
+            "rov/partials/bbox_list_body.html",
+            {"rows": rows}
+        )
+
+
     def _detect_encoding(self, fname: str | Path) -> str:
         p = str(fname)
         if hasattr(self, "prj") and hasattr(self.prj, "detect_encoding"):
@@ -2372,7 +2515,7 @@ WHERE Area IS NOT NULL
                     created_files.append(str(fpath))
             else:
                 base = (
-                    f"{selected_lines[0]}-{selected_lines[-1]}"if len(selected_lines) > 1else f"{selected_lines[0]}"
+                    f"{selected_lines[0]}-{selected_lines[-1]}"if len(selected_lines) > 1 else f"{selected_lines[0]}"
                 )
                 if use_seq and seq:
                     base = (
@@ -2917,6 +3060,517 @@ WHERE Area IS NOT NULL
                 }
 
         return None
+
+    def ensure_blackbox_file_stats_schema(self):
+        ddl = """
+        CREATE TABLE IF NOT EXISTS BlackBox_FileStats (
+            ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            File_FK INTEGER NOT NULL UNIQUE,
+
+            -- TIME
+            StartTime TEXT,
+            EndTime TEXT,
+            RowCount INTEGER DEFAULT 0,
+            DurationSec INTEGER,
+            MaxTimeGapSec REAL,
+
+            -- CONFIG
+            Config_FK INTEGER,
+
+            -- VESSEL
+            VesselEasting_Min REAL,
+            VesselEasting_Max REAL,
+            VesselNorthing_Min REAL,
+            VesselNorthing_Max REAL,
+            VesselElevation_Min REAL,
+            VesselElevation_Max REAL,
+
+            VesselHDG_Min REAL,
+            VesselHDG_Max REAL,
+            VesselSOG_Min REAL,
+            VesselSOG_Max REAL,
+            VesselCOG_Min REAL,
+            VesselCOG_Max REAL,
+
+            -- ROV MOTION
+            ROV1_SOG_Min REAL,
+            ROV1_SOG_Max REAL,
+            ROV2_SOG_Min REAL,
+            ROV2_SOG_Max REAL,
+
+            -- ROV DEPTH
+            ROV1_Depth_Min REAL,
+            ROV1_Depth_Max REAL,
+            ROV2_Depth_Min REAL,
+            ROV2_Depth_Max REAL,
+
+            ROV1_Depth1_Min REAL,
+            ROV1_Depth1_Max REAL,
+            ROV1_Depth2_Min REAL,
+            ROV1_Depth2_Max REAL,
+
+            ROV2_Depth1_Min REAL,
+            ROV2_Depth1_Max REAL,
+            ROV2_Depth2_Min REAL,
+            ROV2_Depth2_Max REAL,
+
+            -- GNSS GEOMETRY QC
+            GNSS1_HDOP_Min REAL,
+            GNSS1_HDOP_Max REAL,
+            GNSS1_PDOP_Min REAL,
+            GNSS1_PDOP_Max REAL,
+            GNSS1_VDOP_Min REAL,
+            GNSS1_VDOP_Max REAL,
+
+            GNSS2_HDOP_Min REAL,
+            GNSS2_HDOP_Max REAL,
+            GNSS2_PDOP_Min REAL,
+            GNSS2_PDOP_Max REAL,
+            GNSS2_VDOP_Min REAL,
+            GNSS2_VDOP_Max REAL,
+
+            -- GNSS QUALITY QC
+            GNSS1_NOS_Min INTEGER,
+            GNSS1_NOS_Max INTEGER,
+            GNSS1_DiffAge_Min REAL,
+            GNSS1_DiffAge_Max REAL,
+            GNSS1_FixQuality_Min INTEGER,
+            GNSS1_FixQuality_Max INTEGER,
+
+            GNSS2_NOS_Min INTEGER,
+            GNSS2_NOS_Max INTEGER,
+            GNSS2_DiffAge_Min REAL,
+            GNSS2_DiffAge_Max REAL,
+            GNSS2_FixQuality_Min INTEGER,
+            GNSS2_FixQuality_Max INTEGER,
+
+            -- ENV
+            Barometer_Min REAL,
+            Barometer_Max REAL,
+
+            -- INS vs USBL POSITION QC
+            ROV1_PosDiff_Min REAL,
+            ROV1_PosDiff_Max REAL,
+            ROV1_PosDiff_Avg REAL,
+
+            ROV2_PosDiff_Min REAL,
+            ROV2_PosDiff_Max REAL,
+            ROV2_PosDiff_Avg REAL,
+
+            FOREIGN KEY (File_FK) REFERENCES BlackBox_Files(ID) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_blackbox_filestats_file_fk
+            ON BlackBox_FileStats(File_FK);
+        """
+
+        with self._connect() as conn:
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.executescript(ddl)
+            conn.commit()
+
+    def refresh_blackbox_file_stats(self, file_fk: int, conn=None) -> bool:
+        """
+        Recalculate BlackBox_FileStats for one file.
+        Call this right after the file has been fully loaded into BlackBox.
+        """
+        if not file_fk:
+            return False
+
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.create_function("sqrt", 1, lambda x: None if x is None else math.sqrt(x))
+            self.ensure_blackbox_file_stats_schema()
+
+            cur = conn.cursor()
+
+            # Check file exists
+            row = cur.execute(
+                "SELECT ID, Config_FK FROM BlackBox_Files WHERE ID = ?",
+                (file_fk,)
+            ).fetchone()
+            if row is None:
+                return False
+
+            # Remove old stats row first, then insert fresh one
+            cur.execute("DELETE FROM BlackBox_FileStats WHERE File_FK = ?", (file_fk,))
+
+            sql = """
+            INSERT INTO BlackBox_FileStats (
+                File_FK,
+
+                StartTime,
+                EndTime,
+                RowCount,
+                DurationSec,
+                MaxTimeGapSec,
+
+                Config_FK,
+
+                VesselEasting_Min,
+                VesselEasting_Max,
+                VesselNorthing_Min,
+                VesselNorthing_Max,
+                VesselElevation_Min,
+                VesselElevation_Max,
+
+                VesselHDG_Min,
+                VesselHDG_Max,
+                VesselSOG_Min,
+                VesselSOG_Max,
+                VesselCOG_Min,
+                VesselCOG_Max,
+
+                ROV1_SOG_Min,
+                ROV1_SOG_Max,
+                ROV2_SOG_Min,
+                ROV2_SOG_Max,
+
+                ROV1_Depth_Min,
+                ROV1_Depth_Max,
+                ROV2_Depth_Min,
+                ROV2_Depth_Max,
+
+                ROV1_Depth1_Min,
+                ROV1_Depth1_Max,
+                ROV1_Depth2_Min,
+                ROV1_Depth2_Max,
+
+                ROV2_Depth1_Min,
+                ROV2_Depth1_Max,
+                ROV2_Depth2_Min,
+                ROV2_Depth2_Max,
+
+                GNSS1_HDOP_Min,
+                GNSS1_HDOP_Max,
+                GNSS1_PDOP_Min,
+                GNSS1_PDOP_Max,
+                GNSS1_VDOP_Min,
+                GNSS1_VDOP_Max,
+
+                GNSS2_HDOP_Min,
+                GNSS2_HDOP_Max,
+                GNSS2_PDOP_Min,
+                GNSS2_PDOP_Max,
+                GNSS2_VDOP_Min,
+                GNSS2_VDOP_Max,
+
+                GNSS1_NOS_Min,
+                GNSS1_NOS_Max,
+                GNSS1_DiffAge_Min,
+                GNSS1_DiffAge_Max,
+                GNSS1_FixQuality_Min,
+                GNSS1_FixQuality_Max,
+
+                GNSS2_NOS_Min,
+                GNSS2_NOS_Max,
+                GNSS2_DiffAge_Min,
+                GNSS2_DiffAge_Max,
+                GNSS2_FixQuality_Min,
+                GNSS2_FixQuality_Max,
+
+                Barometer_Min,
+                Barometer_Max,
+
+                ROV1_PosDiff_Min,
+                ROV1_PosDiff_Max,
+                ROV1_PosDiff_Avg,
+
+                ROV2_PosDiff_Min,
+                ROV2_PosDiff_Max,
+                ROV2_PosDiff_Avg
+            )
+            WITH
+            bb AS (
+                SELECT *
+                FROM BlackBox
+                WHERE File_FK = :file_fk
+            ),
+            gap_cte AS (
+                SELECT
+                    CAST(strftime('%s', TimeStamp) AS REAL)
+                    - CAST(strftime('%s', LAG(TimeStamp) OVER (ORDER BY TimeStamp)) AS REAL) AS gap_sec
+                FROM bb
+                WHERE TimeStamp IS NOT NULL AND TimeStamp != ''
+            ),
+            pos_cte AS (
+                SELECT
+                    CASE
+                        WHEN ROV1_INS_Easting IS NOT NULL
+                         AND ROV1_INS_Northing IS NOT NULL
+                         AND ROV1_USBL_Easting IS NOT NULL
+                         AND ROV1_USBL_Northing IS NOT NULL
+                        THEN sqrt(
+                            ((ROV1_INS_Easting - ROV1_USBL_Easting) * (ROV1_INS_Easting - ROV1_USBL_Easting)) +
+                            ((ROV1_INS_Northing - ROV1_USBL_Northing) * (ROV1_INS_Northing - ROV1_USBL_Northing))
+                        )
+                    END AS rov1_posdiff,
+                    CASE
+                        WHEN ROV2_INS_Easting IS NOT NULL
+                         AND ROV2_INS_Northing IS NOT NULL
+                         AND ROV2_USBL_Easting IS NOT NULL
+                         AND ROV2_USBL_Northing IS NOT NULL
+                        THEN sqrt(
+                            ((ROV2_INS_Easting - ROV2_USBL_Easting) * (ROV2_INS_Easting - ROV2_USBL_Easting)) +
+                            ((ROV2_INS_Northing - ROV2_USBL_Northing) * (ROV2_INS_Northing - ROV2_USBL_Northing))
+                        )
+                    END AS rov2_posdiff
+                FROM bb
+            ),
+            agg AS (
+                SELECT
+                    :file_fk AS File_FK,
+
+                    MIN(TimeStamp) AS StartTime,
+                    MAX(TimeStamp) AS EndTime,
+                    COUNT(*) AS RowCount,
+                    CASE
+                        WHEN COUNT(*) > 0
+                         AND MIN(TimeStamp) IS NOT NULL
+                         AND MAX(TimeStamp) IS NOT NULL
+                        THEN CAST(strftime('%s', MAX(TimeStamp)) AS INTEGER)
+                           - CAST(strftime('%s', MIN(TimeStamp)) AS INTEGER)
+                    END AS DurationSec,
+
+                    MIN(VesselEasting) AS VesselEasting_Min,
+                    MAX(VesselEasting) AS VesselEasting_Max,
+                    MIN(VesselNorthing) AS VesselNorthing_Min,
+                    MAX(VesselNorthing) AS VesselNorthing_Max,
+                    MIN(VesselElevation) AS VesselElevation_Min,
+                    MAX(VesselElevation) AS VesselElevation_Max,
+
+                    MIN(VesselHDG) AS VesselHDG_Min,
+                    MAX(VesselHDG) AS VesselHDG_Max,
+                    MIN(VesselSOG) AS VesselSOG_Min,
+                    MAX(VesselSOG) AS VesselSOG_Max,
+                    MIN(VesselCOG) AS VesselCOG_Min,
+                    MAX(VesselCOG) AS VesselCOG_Max,
+
+                    MIN(ROV1_SOG) AS ROV1_SOG_Min,
+                    MAX(ROV1_SOG) AS ROV1_SOG_Max,
+                    MIN(ROV2_SOG) AS ROV2_SOG_Min,
+                    MAX(ROV2_SOG) AS ROV2_SOG_Max,
+
+                    MIN(ROV1_Depth) AS ROV1_Depth_Min,
+                    MAX(ROV1_Depth) AS ROV1_Depth_Max,
+                    MIN(ROV2_Depth) AS ROV2_Depth_Min,
+                    MAX(ROV2_Depth) AS ROV2_Depth_Max,
+
+                    MIN(ROV1_Depth1) AS ROV1_Depth1_Min,
+                    MAX(ROV1_Depth1) AS ROV1_Depth1_Max,
+                    MIN(ROV1_Depth2) AS ROV1_Depth2_Min,
+                    MAX(ROV1_Depth2) AS ROV1_Depth2_Max,
+
+                    MIN(ROV2_Depth1) AS ROV2_Depth1_Min,
+                    MAX(ROV2_Depth1) AS ROV2_Depth1_Max,
+                    MIN(ROV2_Depth2) AS ROV2_Depth2_Min,
+                    MAX(ROV2_Depth2) AS ROV2_Depth2_Max,
+
+                    MIN(GNSS1_HDOP) AS GNSS1_HDOP_Min,
+                    MAX(GNSS1_HDOP) AS GNSS1_HDOP_Max,
+                    MIN(GNSS1_PDOP) AS GNSS1_PDOP_Min,
+                    MAX(GNSS1_PDOP) AS GNSS1_PDOP_Max,
+                    MIN(GNSS1_VDOP) AS GNSS1_VDOP_Min,
+                    MAX(GNSS1_VDOP) AS GNSS1_VDOP_Max,
+
+                    MIN(GNSS2_HDOP) AS GNSS2_HDOP_Min,
+                    MAX(GNSS2_HDOP) AS GNSS2_HDOP_Max,
+                    MIN(GNSS2_PDOP) AS GNSS2_PDOP_Min,
+                    MAX(GNSS2_PDOP) AS GNSS2_PDOP_Max,
+                    MIN(GNSS2_VDOP) AS GNSS2_VDOP_Min,
+                    MAX(GNSS2_VDOP) AS GNSS2_VDOP_Max,
+
+                    MIN(GNSS1_NOS) AS GNSS1_NOS_Min,
+                    MAX(GNSS1_NOS) AS GNSS1_NOS_Max,
+                    MIN(GNSS1_DiffAge) AS GNSS1_DiffAge_Min,
+                    MAX(GNSS1_DiffAge) AS GNSS1_DiffAge_Max,
+                    MIN(GNSS1_FixQuality) AS GNSS1_FixQuality_Min,
+                    MAX(GNSS1_FixQuality) AS GNSS1_FixQuality_Max,
+
+                    MIN(GNSS2_NOS) AS GNSS2_NOS_Min,
+                    MAX(GNSS2_NOS) AS GNSS2_NOS_Max,
+                    MIN(GNSS2_DiffAge) AS GNSS2_DiffAge_Min,
+                    MAX(GNSS2_DiffAge) AS GNSS2_DiffAge_Max,
+                    MIN(GNSS2_FixQuality) AS GNSS2_FixQuality_Min,
+                    MAX(GNSS2_FixQuality) AS GNSS2_FixQuality_Max,
+
+                    MIN(Barometer) AS Barometer_Min,
+                    MAX(Barometer) AS Barometer_Max
+                FROM bb
+            ),
+            pos_agg AS (
+                SELECT
+                    MIN(rov1_posdiff) AS ROV1_PosDiff_Min,
+                    MAX(rov1_posdiff) AS ROV1_PosDiff_Max,
+                    AVG(rov1_posdiff) AS ROV1_PosDiff_Avg,
+
+                    MIN(rov2_posdiff) AS ROV2_PosDiff_Min,
+                    MAX(rov2_posdiff) AS ROV2_PosDiff_Max,
+                    AVG(rov2_posdiff) AS ROV2_PosDiff_Avg
+                FROM pos_cte
+            ),
+            gap_agg AS (
+                SELECT MAX(gap_sec) AS MaxTimeGapSec
+                FROM gap_cte
+            )
+            SELECT
+                agg.File_FK,
+
+                agg.StartTime,
+                agg.EndTime,
+                agg.RowCount,
+                agg.DurationSec,
+                gap_agg.MaxTimeGapSec,
+
+                bf.Config_FK,
+
+                agg.VesselEasting_Min,
+                agg.VesselEasting_Max,
+                agg.VesselNorthing_Min,
+                agg.VesselNorthing_Max,
+                agg.VesselElevation_Min,
+                agg.VesselElevation_Max,
+
+                agg.VesselHDG_Min,
+                agg.VesselHDG_Max,
+                agg.VesselSOG_Min,
+                agg.VesselSOG_Max,
+                agg.VesselCOG_Min,
+                agg.VesselCOG_Max,
+
+                agg.ROV1_SOG_Min,
+                agg.ROV1_SOG_Max,
+                agg.ROV2_SOG_Min,
+                agg.ROV2_SOG_Max,
+
+                agg.ROV1_Depth_Min,
+                agg.ROV1_Depth_Max,
+                agg.ROV2_Depth_Min,
+                agg.ROV2_Depth_Max,
+
+                agg.ROV1_Depth1_Min,
+                agg.ROV1_Depth1_Max,
+                agg.ROV1_Depth2_Min,
+                agg.ROV1_Depth2_Max,
+
+                agg.ROV2_Depth1_Min,
+                agg.ROV2_Depth1_Max,
+                agg.ROV2_Depth2_Min,
+                agg.ROV2_Depth2_Max,
+
+                agg.GNSS1_HDOP_Min,
+                agg.GNSS1_HDOP_Max,
+                agg.GNSS1_PDOP_Min,
+                agg.GNSS1_PDOP_Max,
+                agg.GNSS1_VDOP_Min,
+                agg.GNSS1_VDOP_Max,
+
+                agg.GNSS2_HDOP_Min,
+                agg.GNSS2_HDOP_Max,
+                agg.GNSS2_PDOP_Min,
+                agg.GNSS2_PDOP_Max,
+                agg.GNSS2_VDOP_Min,
+                agg.GNSS2_VDOP_Max,
+
+                agg.GNSS1_NOS_Min,
+                agg.GNSS1_NOS_Max,
+                agg.GNSS1_DiffAge_Min,
+                agg.GNSS1_DiffAge_Max,
+                agg.GNSS1_FixQuality_Min,
+                agg.GNSS1_FixQuality_Max,
+
+                agg.GNSS2_NOS_Min,
+                agg.GNSS2_NOS_Max,
+                agg.GNSS2_DiffAge_Min,
+                agg.GNSS2_DiffAge_Max,
+                agg.GNSS2_FixQuality_Min,
+                agg.GNSS2_FixQuality_Max,
+
+                agg.Barometer_Min,
+                agg.Barometer_Max,
+
+                pos_agg.ROV1_PosDiff_Min,
+                pos_agg.ROV1_PosDiff_Max,
+                pos_agg.ROV1_PosDiff_Avg,
+
+                pos_agg.ROV2_PosDiff_Min,
+                pos_agg.ROV2_PosDiff_Max,
+                pos_agg.ROV2_PosDiff_Avg
+            FROM agg
+            CROSS JOIN pos_agg
+            CROSS JOIN gap_agg
+            LEFT JOIN BlackBox_Files bf
+                ON bf.ID = agg.File_FK
+            WHERE agg.RowCount > 0
+            """
+
+            cur.execute(sql, {"file_fk": int(file_fk)})
+
+            if own_conn:
+                conn.commit()
+
+            return True
+
+        except Exception:
+            if own_conn:
+                conn.rollback()
+            raise
+        finally:
+            if own_conn:
+                conn.close()
+
+    def refresh_all_blackbox_file_stats(self, conn=None) -> int:
+        """
+        Recalculate stats for all files from BlackBox_Files.
+        """
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            self.ensure_blackbox_file_stats_schema()
+            cur = conn.cursor()
+            rows = cur.execute("SELECT ID FROM BlackBox_Files ORDER BY ID").fetchall()
+
+            count = 0
+            for row in rows:
+                file_fk = int(row["ID"] if hasattr(row, "keys") else row[0])
+                ok = self.refresh_blackbox_file_stats(file_fk, conn=conn)
+                if ok:
+                    count += 1
+
+            if own_conn:
+                conn.commit()
+
+            return count
+
+        except Exception:
+            if own_conn:
+                conn.rollback()
+            raise
+        finally:
+            if own_conn:
+                conn.close()
+
+    def get_bbox_vessel_options(self):
+        conn = self._connect()
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT DISTINCT COALESCE(Vessel_name, '') AS VesselName
+                FROM BBox_Configs_List
+                WHERE COALESCE(Vessel_name, '') <> ''
+                ORDER BY Vessel_name
+            """)
+            return [row["VesselName"] for row in cur.fetchall()]
+        finally:
+            conn.close()
+
 
 
 

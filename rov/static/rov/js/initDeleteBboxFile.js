@@ -1,35 +1,58 @@
 import { getCSRFToken } from "../../baseproject/js/csrf.js";
-import { showToast } from "./toast.js";
-import { showConfirmModal } from "./confirmModal.js";
+import { initBBoxFileTable } from "./initBBoxFileTable.js";
 
-export function initDeleteBboxFiles() {
-  const btn = document.getElementById("deleteBboxFileBtn");
+export function initDeleteBBoxFiles() {
+  const btn = document.getElementById("btn-delete-bbox-files");
+  const confirmBtn = document.getElementById("confirm-delete-bbox-files");
+  const modalEl = document.getElementById("deleteBBoxFilesModal");
   const tbody = document.getElementById("bbox-list-tbody");
-  if (!btn) return;
+  const countText = document.getElementById("delete-bbox-files-count-text");
 
-  btn.addEventListener("click", async () => {
-    const checked = document.querySelectorAll(".bbox-file-checkbox:checked");
+  if (!btn || !confirmBtn || !modalEl || !tbody) return;
 
-    if (!checked.length) {
-      showToast({
-        title: "Delete BBOX files",
-        message: "No BBOX files selected.",
-        type: "warning",
-      });
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+  function getSelectedIds() {
+    return Array.from(tbody.querySelectorAll(".bbox-file-checkbox:checked"))
+      .map(cb => parseInt(cb.value, 10))
+      .filter(v => !Number.isNaN(v));
+  }
+
+  function showToast(message, type = "success") {
+    if (window.showToast) {
+      window.showToast(message, type);
+    } else {
+      console.log(type, message);
+    }
+  }
+
+  btn.addEventListener("click", () => {
+    const ids = getSelectedIds();
+    if (!ids.length) {
+      showToast("No BBOX files selected.", "warning");
+      return;
+    }
+    countText.textContent = `Selected: ${ids.length} file(s).`;
+    modal.show();
+  });
+
+  confirmBtn.addEventListener("click", async () => {
+    const ids = getSelectedIds();
+    const url = btn.dataset.url;
+
+    if (!ids.length) {
+      showToast("No BBOX files selected.", "warning");
+      return;
+    }
+    if (!url) {
+      showToast("Delete URL is missing.", "danger");
       return;
     }
 
-    const ids = Array.from(checked).map((cb) => cb.value);
-    const confirmed = await showConfirmModal({
-      title: "Delete BBOX files",
-      message: `Delete ${ids.length} BBOX file(s)? This cannot be undone.`,
-      confirmText: "Delete",
-      cancelText: "Cancel",
-      confirmClass: "btn-danger",
-    });
-    if (!confirmed) return;
-
-    const url = btn.dataset.deleteUrl;
+    const originalHtml = confirmBtn.innerHTML;
+    confirmBtn.disabled = true;
+    btn.disabled = true;
+    confirmBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Deleting...`;
 
     try {
       const resp = await fetch(url, {
@@ -41,27 +64,22 @@ export function initDeleteBboxFiles() {
         body: JSON.stringify({ ids }),
       });
 
-      const data = await resp.json().catch(() => ({}));
+      const data = await resp.json();
+
       if (!resp.ok || !data.ok) {
-        throw new Error(data.error || "Delete failed");
+        throw new Error(data.error || "Failed to delete BBOX files.");
       }
 
-      if (tbody && data.bbox_file_tbody !== undefined) {
-        tbody.innerHTML = data.bbox_file_tbody;
-      }
-
-      showToast({
-        title: "Delete BBOX files",
-        message: data.toast?.message || `Deleted ${data.deleted || ids.length} file(s).`,
-        type: "success",
-      });
+      tbody.innerHTML = data.bbox_file_tbody || "";
+      modal.hide();
+      initBBoxFileTable();
+      showToast(`Deleted ${data.deleted || ids.length} file(s).`, "success");
     } catch (err) {
-      console.error(err);
-      showToast({
-        title: "Delete BBOX files",
-        message: err.message || "Delete failed.",
-        type: "danger",
-      });
+      showToast(err.message || "Unexpected error.", "danger");
+    } finally {
+      confirmBtn.disabled = false;
+      btn.disabled = false;
+      confirmBtn.innerHTML = originalHtml;
     }
   });
 }

@@ -66,22 +66,70 @@
 
                </div>
                <div class="tab-pane fade" id="pills-bbox-list" role="tabpanel" aria-labelledby="pills-bbox-list-tab" tabindex="0">
-                    <div class="table-scroll w-100" style="height: 50vh">
-                           <table class="table table-hover" id="bbox-file-table">
-                                <thead>
-                                      <th><input type="checkbox" id="mainBboxFileCheckBox"></th>
-                                      <th>File Name</th>
+                   <div class="clearfix mb-2">
+                        <button type="button"
+                                class="btn btn-success float-end me-2"
+                                id="bbox-filter-button"
+                                data-url="{% url 'bbox_file_filter' %}">
+                            <i class="fas fa-filter me-2"></i>Filter
+                        </button>
+                   </div>
+                    <div class="table-responsive bbox-file-table-container">
+                          <table class="table table-sm table-hover table-bordered align-middle text-nowrap" id="bbox-file-table">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th class="sticky-check text-center align-middle">
+                                            <div class="form-check d-flex justify-content-center mb-0">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    id="bbox-file-check-all"
+                                                    title="Select all visible rows"
+                                                >
+                                            </div>
+                                        </th>
+                                        <th>ID</th>
+                                        <th>File</th>
+                                        <th>Config</th>
+                                        <th>Uploaded</th>
+                                        <th>Start</th>
+                                        <th>End</th>
+                                        <th>Duration</th>
+                                        <th>Rows</th>
+                                        <th>Max Gap</th>
+                                        <th>ROV1 Depth</th>
+                                        <th>ROV2 Depth</th>
+                                        <th>ROV1 SOG</th>
+                                        <th>ROV2 SOG</th>
+                                        <th>ROV1 INS/USBL</th>
+                                        <th>ROV2 INS/USBL</th>
+                                        <th>GNSS1</th>
+                                        <th>GNSS2</th>
+                                        <th>Barometer</th>
+                                    </tr>
                                 </thead>
-                                {{ bbox_file_tbody }}
-                           </table>
-                    </div>
+                          <tbody id="bbox-list-tbody" data-plot-item-url="{% url 'bbox_plot_item' %}">
+                              {{ bbox_file_tbody }}
+                           </tbody>
+
+                       </table>
+                     </div>
+
                     <div class="clearfix mt-2">
+
                            <button type="button"
-                                   class="btn btn-danger float-end me-2"
-                                   id="deleteBboxFileBtn"
-                                   data-delete-url="{% url 'delete_bbox_files' %}">
-                                      <i class="fas fa-trash-can me-2"></i> DELETE
-                           </button>
+                                    class="btn btn-danger float-end me-2"
+                                    id="btn-delete-bbox-files"
+                                    data-url="{% url 'delete_bbox_files' %}"
+                                    disabled>
+                                <i class="fas fa-trash-can me-2"></i> DELETE
+                            </button>
+                            <button type = "button"
+                                id="btn-recalc-all-bbox-stats"
+                                class="btn btn btn-warning shadow float-end me-2"
+                                data-url="{% url 'recalc_all_bbox_file_stats' %}">
+                                <i class="fa fa-sync me-2"></i> Recalc All
+                            </button>
                     </div>
                </div>
             <div class="tab-pane fade" id="pills-daily-prod" role="tabpanel" aria-labelledby="daily-prod-tab" tabindex="0">

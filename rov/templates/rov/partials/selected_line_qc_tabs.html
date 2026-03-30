@@ -78,6 +78,13 @@
       <i class="fa-solid fa-cubes"></i><span>3D View</span>
     </button>
   </li>
+  <li class="nav-item" role="presentation">
+    <button class="qc-btn qc-xline"
+            id="tab-recovery" data-bs-toggle="tab" data-bs-target="#pane-recovery"
+            type="button" role="tab" aria-controls="pane-recovery" aria-selected="false">
+      <i class="fa-solid fa-truck-pickup"></i><span>Node recover</span>
+    </button>
+  </li>
 
 </ul>
 
@@ -121,5 +128,9 @@
 
   <div class="tab-pane fade" id="pane-3d" role="tabpanel" aria-labelledby="tab-3d">
     <div id="plot-3d" class="qc-plot-slot">Open tab to load…</div>
+  </div>
+
+  <div class="tab-pane fade" id="pane-recovery" role="tabpanel" aria-labelledby="tab-recovery">
+    <div id="plot-noderec" class="qc-plot-slot" style="height: 90vh">Open tab to load…</div>
   </div>
 </div>

@@ -1,76 +1,88 @@
-// core/static/core/js/version-check.js
+document.addEventListener("DOMContentLoaded", function () {
+    checkVersion();
+});
 
-const VersionChecker = (function () {
-
-    let config = {
-        endpoint: "/api/version/",
-        showOncePerSession: true,
-        toastDelay: 15000,
-    };
-
-    async function check() {
-
-        if (config.showOncePerSession &&
-            sessionStorage.getItem("swl_update_shown") === "1") {
-            return;
+function checkVersion() {
+    fetch("/api/version/", {
+        method: "GET",
+        headers: {
+            "X-Requested-With": "XMLHttpRequest"
         }
-
-        try {
-            const response = await fetch(config.endpoint, { cache: "no-store" });
-            const data = await response.json();
-
-            if (data.ok && data.new_available) {
-                showToast(data);
-
-                if (config.showOncePerSession) {
-                    sessionStorage.setItem("swl_update_shown", "1");
-                }
+    })
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error("Version check request failed");
             }
+            return response.json();
+        })
+        .then((data) => {
+            if (!data || !data.update_available) {
+                return;
+            }
+            showUpdateToast(data);
+        })
+        .catch((error) => {
+            console.warn("Version check failed:", error);
+        });
+}
 
-        } catch (err) {
-            console.warn("Version check failed:", err);
-        }
+function showUpdateToast(data) {
+    if (document.getElementById("swl-version-update-toast")) {
+        return;
     }
 
-    function showToast(data) {
+    const localVersion = data.local_version || "unknown";
+    const remoteVersion = data.remote_version || "unknown";
 
-        const container = document.getElementById("versionToastContainer");
-
-        if (!container) return;
-
-        const toastHtml = `
-            <div class="toast align-items-center text-bg-warning border-0"
-                 role="alert"
-                 data-bs-delay="${config.toastDelay}">
-              <div class="d-flex">
+    const toastHtml = `
+        <div
+            id="swl-version-update-toast"
+            class="toast align-items-center text-bg-warning border-0 show position-fixed bottom-0 end-0 m-3 shadow"
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+            style="z-index: 1080; min-width: 360px;"
+        >
+            <div class="d-flex">
                 <div class="toast-body">
-                  🚀 New version <strong>${data.remote}</strong> available
-                  (you have ${data.local})
-                  <a href="${data.download_url}" target="_blank"
-                     class="btn btn-sm btn-dark ms-2">
-                     Download
-                  </a>
+                    <div class="fw-bold mb-1">
+                        <i class="fa-solid fa-arrow-rotate-right me-2"></i>
+                        New SeisWebLog version available
+                    </div>
+
+                    <div class="small">
+                        <div><strong>Current:</strong> ${escapeHtml(localVersion)}</div>
+                        <div><strong>Latest:</strong> ${escapeHtml(remoteVersion)}</div>
+                    </div>
+
+                    <div class="small mt-2">
+                        Close SWL and run <code>update_project.bat</code>.
+                    </div>
+
+                    <div class="small mt-1">
+                        A local backup will be created before update.
+                        You can roll back later with <code>restore_project.bat</code>.
+                    </div>
                 </div>
-                <button type="button" class="btn-close me-2 m-auto"
-                        data-bs-dismiss="toast"></button>
-              </div>
+
+                <button
+                    type="button"
+                    class="btn-close btn-close-white me-2 m-auto"
+                    aria-label="Close"
+                    onclick="this.closest('.toast').remove()"
+                ></button>
             </div>
-        `;
+        </div>
+    `;
 
-        container.insertAdjacentHTML("beforeend", toastHtml);
+    document.body.insertAdjacentHTML("beforeend", toastHtml);
+}
 
-        const toastEl = container.lastElementChild;
-        const toast = new bootstrap.Toast(toastEl);
-        toast.show();
-    }
-
-    function init(userConfig = {}) {
-        config = { ...config, ...userConfig };
-        document.addEventListener("DOMContentLoaded", check);
-    }
-
-    return {
-        init
-    };
-
-})();
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}

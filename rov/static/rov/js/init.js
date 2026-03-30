@@ -8,7 +8,7 @@ import {initSetDefaultBBoxConfig} from "./initSetDefaultBboxCfg.js";
 import {initBboxFileSelectAll} from "./initmainBboxFileCheckbox.js";
 import {initProdCardToggle} from "./initProdCardCollapseBtn.js";
 import {initDeleteDSRLines} from "./initDeleteDsrLines.js";
-import {initDeleteBboxFiles} from "./initDeleteBboxFile.js";
+import {initDeleteBBoxFiles} from "./initDeleteBboxFile.js";
 import {initBboxPlotClick} from "./initBboxRowClick.js";
 import {initCardMinMax} from "./initMinMaxCardButton.js";
 import {initBBoxConfigDatalist} from "./bboxConfigPick.js";
@@ -27,6 +27,10 @@ import {initDSRHistogram} from "./initDSRHistogram.js";
 import {initDSRLineSort} from "./initDSRLineSort.js";
 import {initLineMinMaxQc} from "./initLineMinMaxQCBtn.js";
 import {initDSRLineQCTabs} from "./initDSRLineQCTabs.js";
+import {initRecalcAllBBoxStats} from "./initRecalcAllBBoxStats.js";
+import {initBBoxFileTable} from "./initBBoxFileTable.js";
+import {initBBoxFilter} from "./initBBoxFilter.js";
+
 
 
 
@@ -43,8 +47,9 @@ export function initAllJSForRovUpload() {
   initProdCardToggle();
   initDeleteDSRLines();
   initDeleteDSRLines();
-  initDeleteBboxFiles();
+  initDeleteBBoxFiles();
   initBboxPlotClick();
+  initBBoxFilter();
   initHoverDivs();
   initHoverTabPopups();
   initQCWindowButtons();
@@ -52,13 +57,15 @@ export function initAllJSForRovUpload() {
   initDailyProdDaySelect();
   initExportSpsModal();
   initDsrExportSmModal({ rovNames: window.DSR_ROV_NAMES || [] });
-
+  initBBoxFileTable();
+  initRecalcAllBBoxStats();
   initBatteryLifeMap();
   initBatteryLifeRestMap();
   initDSRHistogram();
   initDSRLineSort();
   initLineMinMaxQc();
   initDSRLineQCTabs();
+
 
 
     // GNSS QC

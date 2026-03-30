@@ -18,4 +18,5 @@ urlpatterns = [
     path("api/shot/delete-lines/",views.shot_delete_selected_lines,name="shot_delete_selected_lines",),
     path("api/recalc-lines/", views.recalc_selected_lines, name="recalc_selected_lines"),
     path("source/shot-summary/filter/",views.source_shot_line_summary_tbody,name="source_shot_line_summary_tbody",),
+
 ]
