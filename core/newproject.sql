@@ -1066,7 +1066,7 @@ CREATE TABLE IF NOT EXISTS "sequence_vessel_assignment" (
 	FOREIGN KEY("vessel_id") REFERENCES "project_fleet"("id") ON DELETE CASCADE
 );
 -- Create main shot table table
-CREATE TABLE SHOT_TABLE (
+CREATE TABLE IF NOT EXISTS SHOT_TABLE (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         sail_line INTEGER,
                         shot_station INTEGER,
