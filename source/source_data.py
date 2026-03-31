@@ -4098,7 +4098,6 @@ class SourceData:
 
         try:
             cur = conn.cursor()
-            cur.execute("BEGIN;")
 
             cur.execute("DROP TABLE IF EXISTS SHOT_LineSummary;")
 
