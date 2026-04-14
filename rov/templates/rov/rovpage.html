@@ -13,6 +13,7 @@
    <link rel="stylesheet" href="{% static 'rov/css/selected_dsr_qc_tab.css' %}">
    <link rel="stylesheet" href="{% static 'rov/css/sv_map_pills.css' %}">
    <link rel="stylesheet" href="{% static 'rov/css/rov_upload_modal.css' %}">
+
 {% endblock %}
 {% block content %}
 <div class="container-fluid">
@@ -161,6 +162,7 @@
 {% include "rov/modals/bbox_filter_modal.html" %}
 {% include "rov/partials/toast_container_rov.html" %}
 {% include "rov/modals/bbox_recalc_all.html" %}
+{% include "rov/modals/eol_report_modal.html" %}
 <div class="toast-container position-fixed top-0 end-0 p-3" id="app-toast-container" style="z-index: 2000;"></div>
 <div class="modal fade" id="app-confirm-modal" tabindex="-1" aria-hidden="true"></div>
 

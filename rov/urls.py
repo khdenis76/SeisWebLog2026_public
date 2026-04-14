@@ -1,6 +1,6 @@
 # baseproject/urls.py
 from django.urls import path
-
+from rov.eol.views import eol_generate_reports
 from .views import *
 urlpatterns = [
     path("", rov_main_view, name="rov_main_view"),
@@ -35,5 +35,7 @@ urlpatterns = [
     path("bbox/config/import-file/", bbox_config_import_from_file, name="bbox_config_import_file"),
     path("bbox/recalc_all/",recalc_all_bbox_file_stats,name="recalc_all_bbox_file_stats"),
     path("bbox/filter/", bbox_file_filter, name="bbox_file_filter"),
+    path("eol/generate/", eol_generate_reports, name="eol_generate_reports"),
+
 
 ]

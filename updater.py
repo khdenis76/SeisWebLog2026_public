@@ -62,8 +62,18 @@ def read_local_version() -> str:
     return "0.0.0.0"
 
 def get_remote_version() -> str:
-    response = requests.get(REMOTE_VERSION_URL, timeout=20)
+    print(f"REMOTE_VERSION_URL = {REMOTE_VERSION_URL}")
+    response = requests.get(
+        REMOTE_VERSION_URL,
+        timeout=20,
+        headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+    )
     response.raise_for_status()
+    print(f"HTTP status = {response.status_code}")
+    print(f"DEBUG remote raw = [{response.text}]")
     return response.text.strip()
 
 def parse_version(version_text: str) -> list[int]:
@@ -75,8 +85,14 @@ def parse_version(version_text: str) -> list[int]:
             parts.append(0)
     return parts
 
+def normalize_version(version_text: str, length: int = 4) -> list[int]:
+    parts = parse_version(version_text)
+    while len(parts) < length:
+        parts.append(0)
+    return parts
+
 def is_remote_newer(local_version: str, remote_version: str) -> bool:
-    return parse_version(remote_version) > parse_version(local_version)
+    return normalize_version(remote_version) > normalize_version(local_version)
 
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
@@ -127,7 +143,15 @@ def create_backup_zip() -> Path:
 
 def download_zip(zip_path: Path) -> None:
     print("[2/4] Downloading update archive...")
-    with requests.get(REMOTE_ZIP_URL, stream=True, timeout=60) as response:
+    with requests.get(
+        REMOTE_ZIP_URL,
+        stream=True,
+        timeout=60,
+        headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+    ) as response:
         response.raise_for_status()
         with open(zip_path, "wb") as fh:
             for chunk in response.iter_content(chunk_size=1024 * 256):
@@ -192,6 +216,10 @@ def main() -> int:
 
         remote_version = get_remote_version()
         print(f"Remote version: {remote_version}")
+
+        print(f"Parsed local  = {normalize_version(local_version)}")
+        print(f"Parsed remote = {normalize_version(remote_version)}")
+        print(f"is_remote_newer = {is_remote_newer(local_version, remote_version)}")
 
         if not is_remote_newer(local_version, remote_version):
             print("You already have the latest version.")

@@ -30,6 +30,7 @@ import {initDSRLineQCTabs} from "./initDSRLineQCTabs.js";
 import {initRecalcAllBBoxStats} from "./initRecalcAllBBoxStats.js";
 import {initBBoxFileTable} from "./initBBoxFileTable.js";
 import {initBBoxFilter} from "./initBBoxFilter.js";
+import {initEOLReport} from "./eol_report.js";
 
 
 
@@ -50,6 +51,7 @@ export function initAllJSForRovUpload() {
   initDeleteBBoxFiles();
   initBboxPlotClick();
   initBBoxFilter();
+  initEOLReport();
   initHoverDivs();
   initHoverTabPopups();
   initQCWindowButtons();

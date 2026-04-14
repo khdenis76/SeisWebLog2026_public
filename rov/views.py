@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib import request
 import pickle
 
+import numpy as np
 from bokeh.embed import json_item, components
 from bokeh.layouts import column, gridplot
 from bokeh.palettes import Turbo256
@@ -34,6 +35,7 @@ from utils.audit import audit_event
 def rov_main_view(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+
     if not project:
         # No active project → go to project list
         return redirect("projects")
@@ -43,8 +45,10 @@ def rov_main_view(request):
 
 
     dsrdb = DSRDB(project.db_path)
+
     pdb=ProjectDB(project.db_path)
-    dsrdb.pdb.update_days_in_water()
+
+    dsrdb.ensure_dsr_line_summary_ready()
     dsr_map_plot = DSRMapPlots(project.db_path,default_epsg=dsrdb.pdb.get_main().epsg,use_tiles=True)
     plotly_template="plotly_dark" if pdb.get_main().color_scheme == "dark" else "plotly_white"
     rp_data = dsr_map_plot.read_rp_preplot()
@@ -168,17 +172,25 @@ def rov_upload_dsr(request):
 
     project = user_settings.active_project
     if not project:
-        # No active project → go to project list
         return redirect("projects")
+
     if not project.can_edit(request.user):
         raise PermissionDenied
-    files = request.FILES.getlist("files")
 
+    files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"error": "No files uploaded"}, status=400)
 
-    tier = int(request.POST.get("tier", 1))
-    rec_idx = int(request.POST.get("rec_idx", 1))
+    try:
+        tier = int(request.POST.get("tier", 1))
+    except (TypeError, ValueError):
+        tier = 1
+
+    try:
+        rec_idx = int(request.POST.get("rec_idx", 1))
+    except (TypeError, ValueError):
+        rec_idx = 1
+
     solution_name = request.POST.get("solution", "Normal")
 
     dsrdb = DSRDB(project.db_path)
@@ -187,11 +199,11 @@ def rov_upload_dsr(request):
     total_upserted = 0
     total_skipped = 0
     result_files = []
+    all_changed_lines = set()
 
     for f in files:
         try:
-
-            processed, upserted,skipped = dsrdb.upsert_ip_stream(
+            processed, upserted, skipped, changed_lines = dsrdb.upsert_ip_stream(
                 file_obj=f.file,
                 rec_idx=rec_idx,
                 tier=tier,
@@ -201,28 +213,75 @@ def rov_upload_dsr(request):
             total_upserted += upserted
             total_skipped += skipped
 
+            if changed_lines:
+                all_changed_lines.update(changed_lines)
+
             result_files.append({
                 "file": f.name,
                 "processed": processed,
                 "upserted": upserted,
                 "skipped": skipped,
+                "changed_lines": sorted(changed_lines) if changed_lines else [],
             })
 
         except Exception as e:
             return JsonResponse(
-                {"error": str(e), "file": f.name},
+                {
+                    "ok": False,
+                    "error": str(e),
+                    "file": f.name,
+                },
                 status=500,
             )
-    dsr_lines_body = dsrdb.render_dsr_line_summary_body()
-    dsr_statistics_table = dsrdb.get_dsr_html_stat()
-    file_name = Path(project.export_csv / "dsr.csv")
-    dsrdb.export_dsr_to_csv(file_name=file_name)
+
+    try:
+        if all_changed_lines:
+            refreshed_count = dsrdb.refresh_dsr_line_summary_lines(
+                lines=sorted(all_changed_lines)
+            )
+        else:
+            dsrdb.ensure_dsr_line_summary_table()
+            refreshed_count = 0
+    except Exception as e:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": f"DSR uploaded, but summary refresh failed: {e}",
+                "files": result_files,
+            },
+            status=500,
+        )
+
+    try:
+        dsr_lines_body = dsrdb.render_dsr_line_summary_body()
+        dsr_statistics_table = dsrdb.get_dsr_html_stat()
+    except Exception as e:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": f"DSR uploaded and summary refreshed, but HTML render failed: {e}",
+                "files": result_files,
+            },
+            status=500,
+        )
+
+    try:
+        file_name = Path(project.export_csv) / "dsr.csv"
+        dsrdb.export_dsr_to_csv(file_name=file_name)
+    except Exception:
+        # CSV export should not break successful upload
+        file_name = None
 
     return JsonResponse({
         "ok": True,
         "toast": {
             "title": "DSR upload",
-            "message": f"Processed {total_processed}, upserted {total_upserted}, skipped {total_skipped}.",
+            "message": (
+                f"Processed {total_processed}, "
+                f"upserted {total_upserted}, "
+                f"skipped {total_skipped}. "
+                f"Refreshed {refreshed_count} line summaries."
+            ),
             "type": "success",
         },
         "tier": tier,
@@ -231,9 +290,12 @@ def rov_upload_dsr(request):
         "total_processed": total_processed,
         "total_upserted": total_upserted,
         "total_skipped": total_skipped,
+        "refreshed_lines": refreshed_count,
+        "changed_lines": sorted(all_changed_lines),
         "files": result_files,
         "dsr_lines_body": dsr_lines_body,
         "dsr_statistics_table": dsr_statistics_table,
+        "export_file": str(file_name) if file_name else "",
     })
 @require_POST
 @login_required
@@ -1399,18 +1461,29 @@ def dsr_line_qc_plot_item(request):
         df['dY_secondary'] = df['PreplotNorthing'] - df['SecondaryNorthing']
         df['dX_primary1'] = df['PreplotEasting'] - df['PrimaryEasting1']
         df['dY_primary1'] = df['PreplotNorthing'] - df['PrimaryNorthing1']
+        df['RangeToPreplotSecondary'] = np.sqrt(df['dX_secondary']**2+df['dY_secondary']**2)
 
         # Build ONE plot depending on tab requested
         if plot_key == "water":
-            layout = g.bokeh_two_series_vs_station(df=df,
-                                 series1_col="PrimaryElevation",
-                                 series2_col="SecondaryElevation",
-                                 series1_label="PRIMARY DEPTH",
-                                 series2_label="SECONDARY DEPTH",
-                                 rov_col="ROV",
-                                 is_show=False,
-                                 json_item=False,
-                                 reverse_y_if_negative=False)
+            layout = g.bokeh_two_series_vs_station_with_diff_bar(
+                df=df,
+                title=f"Line {line} Water",
+                x_col="Station",
+                series1_col="PrimaryElevation",
+                series2_col="SecondaryElevation",
+                series1_label="PRIMARY DEPTH",
+                series2_label="SECONDARY DEPTH",
+                rov_col="ROV",
+                line_col="Line",
+                point_col="Point",
+                ts_col="TimeStamp",
+                y_label="Depth",
+                diff_y_label="Primary - Secondary",
+                diff_mode="series1_minus_series2",
+                x_tick_step=2,
+                json_return=False,
+                is_show=False,
+            )
             return JsonResponse({"ok": True, "plot_key": plot_key, "item": json_item(layout)})
 
         elif plot_key == "primsec":
@@ -1425,7 +1498,17 @@ def dsr_line_qc_plot_item(request):
                                            title1="Δ Easting Primary(INS) to Secondary(USBL)",
                                            title2="Δ Northing Primary(INS) to Secondary(USBL)",
                                            title3="Radial Offset Primary(INS) to Secondary(USBL)",
-                                           y1_label="ΔE",y2_label="ΔN",y3_label="Rad. Offset ",y_axis_label="Offset,m"
+                                           y1_label="ΔE",y2_label="ΔN",y3_label="Rad. Offset ",y_axis_label="Offset,m",
+                                           p1_line1_col="dX_primary", p1_line2_col="dX_secondary",
+                                           p2_line1_col="dY_primary", p2_line2_col="dY_secondary",
+                                           p3_line1_col="RangetoPrePlot",
+                                           p3_line2_col="RangeToPreplotSecondary",
+                                           p1_line1_label='ΔX(Primary->Preplot)',
+                                           p1_line2_label='ΔX(Secondary->Preplot)',
+                                           p2_line1_label='ΔY(Primary->Preplot)',
+                                           p2_line2_label='ΔY(Secondary->Preplot)',
+                                           p3_line1_label='Range 2 Prep (Primary)',
+                                           p3_line2_label='Range 2 Prep (Secondary)',
                                            )
             return JsonResponse({"ok": True, "plot_key": plot_key, "item": json_item(layout)})
         elif plot_key == "ellipse":
@@ -1462,22 +1545,37 @@ def dsr_line_qc_plot_item(request):
 
         # placeholders for later tabs: "deplpre", "map", "xline", "timing", "3d"
         elif plot_key in {"delta"}:
+            # example 1: if you already have a dataframe df_line
             layout = g.make_dxdy_primary_secondary_with_hists(
-                df,
+                df=df,
                 dx_p_col="dX_primary",
                 dy_p_col="dY_primary",
                 dx_s_col="dX_secondary",
                 dy_s_col="dY_secondary",
-                title="DSR dX/dY (Primary & Secondary)",
-                red_radius=pdb.get_node_qc().max_radial_offset,  # fixed, legend-controlled
-                red_is_show=True,
+                line_col="Line",
+                station_col="Station",
+                rov_col="ROV",
+                deploy_time_col="TimeStamp",
+                range_to_preplot_col="RangeToPreplot",
+                sma_col="SMA95",
+                p_sma_e95_col="Primary_e95",
+                p_sma_n95_col="Primary_n95",
+                s_sma_e95_col="Secondary_e95",
+                s_sma_n95_col="Secondary_n95",
+                title="Line 13210 - dX/dY Primary & Secondary",
                 p_name="Primary",
                 s_name="Secondary",
-                bins=40,
-                padding_ratio=0.10,
-                is_show=False,
+                red_radius_mode="max",
+                red_is_show=True,
+                display_radius_mode="p95",
+                show_station_labels=True,
+                max_station_labels=150,
+                connect_pairs=True,
+                show_pair_heatmap=True,
+                show_worst_station=True,
+                show_percentile_circles=True,
+                show_colorbar=True,
                 json_return=False,
-                target_id="dxdy_plot",
             )
             return JsonResponse({"ok": True, "plot_key": plot_key,"item": json_item(layout)})
         elif plot_key == "deplpre":

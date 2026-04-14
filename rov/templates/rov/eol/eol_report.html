@@ -1,0 +1,206 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page portrait_page {
+      size: A4 portrait;
+      margin: 14mm;
+    }
+
+    @page landscape_page {
+      size: A4 landscape;
+      margin: 12mm;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      color: #1f2937;
+      font-size: 12px;
+    }
+
+    .page {
+      page-break-after: always;
+    }
+
+    .portrait {
+      page: portrait_page;
+    }
+
+    .landscape {
+      page: landscape_page;
+    }
+
+    .cover {
+      min-height: 250mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .logos {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20mm;
+    }
+
+    .logos img {
+      max-height: 28mm;
+      max-width: 70mm;
+    }
+
+    .title {
+      text-align: center;
+      margin-top: 30mm;
+    }
+
+    .title h1 {
+      font-size: 28px;
+      margin: 0 0 8px;
+    }
+
+    .title h2 {
+      font-size: 18px;
+      margin: 0;
+      font-weight: normal;
+    }
+
+    .info-table, .simple-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .info-table th, .info-table td,
+    .simple-table th, .simple-table td {
+      border: 1px solid #d1d5db;
+      padding: 6px 8px;
+      vertical-align: top;
+    }
+
+    .info-table th, .simple-table th {
+      background: #f3f4f6;
+      text-align: left;
+    }
+
+    .toc a {
+      color: #111827;
+      text-decoration: none;
+    }
+
+    .chart {
+      width: 100%;
+      margin: 4mm 0;
+    }
+
+    .chart img {
+      width: 100%;
+      border: 1px solid #e5e7eb;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .kpi-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 10px;
+      background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+
+{% if "front_page" in sections %}
+<section class="page portrait cover" id="front-page">
+  <div class="logos">
+    <div>
+      {% if include_tgs_logo and tgs_logo_path %}
+      <img src="{{ tgs_logo_path }}">
+      {% endif %}
+    </div>
+    <div>
+      {% if include_client_logo and client_logo_path %}
+      <img src="{{ client_logo_path }}">
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="title">
+    <h1>End Of Line Report</h1>
+    <h2>Project: {{ project_name }}</h2>
+    <h2>Line: {{ line }}</h2>
+  </div>
+
+  <table class="info-table">
+    <tr><th>Prepared By</th><td>{{ prepared_by }}</td></tr>
+    <tr><th>Client</th><td>{{ client_name }}</td></tr>
+  </table>
+</section>
+{% endif %}
+
+{% if "table_of_contents" in sections %}
+<section class="page portrait" id="toc">
+  <h1>Table of Contents</h1>
+  <div class="toc">
+    <p><a href="#line-summary">3. Line Summary</a></p>
+    <p><a href="#project-map">4. Project Map</a></p>
+    <p><a href="#dsr-info">5. Info Table from DSR</a></p>
+    <p><a href="#comments">9. Comments</a></p>
+  </div>
+</section>
+{% endif %}
+
+{% if "line_summary" in sections %}
+<section class="page portrait" id="line-summary">
+  <h1>3. Line Summary</h1>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div><strong>Line</strong></div>
+      <div>{{ summary.line }}</div>
+    </div>
+    <div class="kpi-card">
+      <div><strong>Node Count</strong></div>
+      <div>{{ summary.node_count }}</div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if "project_map" in sections %}
+<section class="page landscape" id="project-map">
+  <h1>4. Project Map</h1>
+  {% if charts.project_map %}
+  <div class="chart"><img src="{{ charts.project_map }}"></div>
+  {% else %}
+  <p>Project map not available.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if "dsr_info_table" in sections %}
+<section class="page portrait" id="dsr-info">
+  <h1>5. Info Table from DSR</h1>
+  <table class="simple-table">
+    {% for k, v in dsr_info.items %}
+    <tr>
+      <th style="width:35%;">{{ k }}</th>
+      <td>{{ v }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+{% if "comments" in sections %}
+<section class="page portrait" id="comments">
+  <h1>9. Comments</h1>
+  <p>{{ comments_text|linebreaksbr }}</p>
+</section>
+{% endif %}
+
+</body>
+</html>

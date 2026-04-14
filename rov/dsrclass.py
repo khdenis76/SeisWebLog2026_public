@@ -160,47 +160,24 @@ class DSRDB:
             chunk_size: int = 5000,
     ):
         file_cols = [
-            "Line", "Station", "Node",
-            "PreplotEasting", "PreplotNorthing",
-            "ROV", "TimeStamp",
-            "PrimaryEasting", "Sigma",
-            "PrimaryNorthing", "Sigma1",
-            "SecondaryEasting", "Sigma2",
-            "SecondaryNorthing", "Sigma3",
-            "DeltaEprimarytosecondary",
-            "DeltaNprimarytosecondary",
-            "Rangeprimarytosecondary",
-            "RangetoPrePlot", "BrgtoPrePlot",
-            "PrimaryElevation", "Sigma4",
-            "SecondaryElevation", "Sigma5",
-            "Quality",
-            "ROV1", "TimeStamp1",
-            "PrimaryEasting1", "Sigma6",
-            "PrimaryNorthing1", "Sigma7",
-            "SecondaryEasting1", "Sigma8",
-            "SecondaryNorthing1", "Sigma9",
-            "DeltaEprimarytosecondary1",
-            "DeltaNprimarytosecondary1",
-            "Rangeprimarytosecondary1",
-            "RangetoPrePlot1", "BrgtoPrePlot1",
-            "PrimaryElevation1", "Sigma10",
-            "SecondaryElevation1", "Sigma11",
-            "Quality1",
-            "DeployedtoRetrievedEasting",
-            "DeployedtoRetrievedNorthing",
-            "DeployedtoRecoveredElevation",
-            "DeployedtoRetrievedRange",
-            "DeployedtoRetrievedBrg",
-            "Comments",
+            "Line", "Station", "Node", "PreplotEasting", "PreplotNorthing", "ROV",
+            "TimeStamp", "PrimaryEasting", "Sigma", "PrimaryNorthing", "Sigma1",
+            "SecondaryEasting", "Sigma2", "SecondaryNorthing", "Sigma3",
+            "DeltaEprimarytosecondary", "DeltaNprimarytosecondary", "Rangeprimarytosecondary",
+            "RangetoPrePlot", "BrgtoPrePlot", "PrimaryElevation", "Sigma4",
+            "SecondaryElevation", "Sigma5", "Quality", "ROV1", "TimeStamp1",
+            "PrimaryEasting1", "Sigma6", "PrimaryNorthing1", "Sigma7",
+            "SecondaryEasting1", "Sigma8", "SecondaryNorthing1", "Sigma9",
+            "DeltaEprimarytosecondary1", "DeltaNprimarytosecondary1", "Rangeprimarytosecondary1",
+            "RangetoPrePlot1", "BrgtoPrePlot1", "PrimaryElevation1", "Sigma10",
+            "SecondaryElevation1", "Sigma11", "Quality1",
+            "DeployedtoRetrievedEasting", "DeployedtoRetrievedNorthing",
+            "DeployedtoRecoveredElevation", "DeployedtoRetrievedRange",
+            "DeployedtoRetrievedBrg", "Comments",
         ]
 
         insert_cols = [
-            "Solution_FK",
-            "RLPreplot_FK",
-            "LinePointIdx",
-            "LinePoint",
-            "RecIdx",
-            "TIER",
+            "Solution_FK", "RLPreplot_FK", "LinePointIdx", "LinePoint", "RecIdx", "TIER",
             "NODE_HEX_ID",
             "Year", "Month", "Week", "Day", "JDay",
             "Year1", "Month1", "Week1", "Day1", "JDay1",
@@ -212,14 +189,18 @@ class DSRDB:
         update_sql = ", ".join(f'"{c}"=excluded."{c}"' for c in update_cols)
 
         sql_upsert = f"""
-        INSERT INTO DSR ({",".join(insert_cols)})
-        VALUES ({placeholders})
-        ON CONFLICT(Line,Station,NODE_HEX_ID) DO UPDATE SET
-        {update_sql};
+            INSERT INTO DSR ({",".join(insert_cols)})
+            VALUES ({placeholders})
+            ON CONFLICT(Line,Station,NODE_HEX_ID) DO UPDATE SET
+            {update_sql};
         """
 
-        processed = upserted = skipped = 0
+        processed = 0
+        upserted = 0
+        skipped = 0
+        changed_lines = set()
         batch = []
+
         scaler = int(getattr(self, "pointscaler", 0) or 0)
 
         with self._connect() as conn:
@@ -242,6 +223,7 @@ class DSRDB:
 
                 line = self._to_int(row[0] if len(row) > 0 else "")
                 station = self._to_int(row[1] if len(row) > 1 else "")
+
                 if line is None or station is None:
                     skipped += 1
                     continue
@@ -279,8 +261,16 @@ class DSRDB:
                     "RecIdx": rec_idx,
                     "TIER": tier,
                     "NODE_HEX_ID": node_id,
-                    "Year": y, "Month": m, "Week": w, "Day": d, "JDay": j,
-                    "Year1": y1, "Month1": m1, "Week1": w1, "Day1": d1, "JDay1": j1,
+                    "Year": y,
+                    "Month": m,
+                    "Week": w,
+                    "Day": d,
+                    "JDay": j,
+                    "Year1": y1,
+                    "Month1": m1,
+                    "Week1": w1,
+                    "Day1": d1,
+                    "JDay1": j1,
                 }
 
                 for i, col in enumerate(file_cols):
@@ -303,6 +293,7 @@ class DSRDB:
 
                 batch.append(tuple(values.get(c) for c in insert_cols))
                 processed += 1
+                changed_lines.add(line)
 
                 if len(batch) >= chunk_size:
                     conn.executemany(sql_upsert, batch)
@@ -315,24 +306,24 @@ class DSRDB:
 
             conn.commit()
 
-        return processed, upserted, skipped
+        return processed, upserted, skipped, sorted(changed_lines)
 
     def render_dsr_line_summary_body(self, request=None):
         """
-        Returns rendered <tbody> HTML for DSR line summary table
-        using dsr_line_body.html template.
+        Returns rendered HTML for DSR line summary table using dsr_line_body.html template.
         """
-
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM V_DSR_LineSummary ORDER BY Line"
-            ).fetchall()
+            self.ensure_dsr_line_summary_ready(conn=conn, rebuild_if_empty=True)
 
+            rows = conn.execute(
+                "SELECT * FROM DSR_LineSummary ORDER BY Line"
+            ).fetchall()
 
         max_sma = self.pdb.get_node_qc().max_sma
         warning_sma = self.pdb.get_node_qc().warning_sma
         max_radial_offset = self.pdb.get_node_qc().max_radial_offset
-        radial80 = max_radial_offset*0.8
+        radial80 = max_radial_offset * 0.8
+
         context = {
             "lines": rows,
             "max_sma": max_sma,
@@ -340,10 +331,11 @@ class DSRDB:
             "max_radial_offset": max_radial_offset,
             "radial80": radial80,
         }
+
         return render_to_string(
             "rov/partials/dsr_line_body.html",
             context=context,
-            request=request,  # optional, but good for filters / csrf / i18n
+            request=request,
         )
     def set_dsr_line_clicked(self,line):
         with self.pdb._connect() as conn:
@@ -3570,7 +3562,532 @@ WHERE Area IS NOT NULL
             return [row["VesselName"] for row in cur.fetchall()]
         finally:
             conn.close()
+    # --------------------------------------------------
+    # DSR Line Summary SQL / table
+    # --------------------------------------------------
+    def dsr_line_summary_sql(self) -> str:
+        """
+        Source SQL used to build DSR_LineSummary.
+        """
+        return """
+        WITH
+        rec_by_line AS (
+            SELECT
+                rl.Line AS Line,
+                COUNT(*) AS ProcessedCount
+            FROM REC_DB r
+            JOIN RLPreplot rl
+              ON rl.ID = r.Preplot_FK
+            GROUP BY rl.Line
+        ),
 
+        dsr_by_line AS (
+            SELECT
+                d.Line AS Line,
+
+                -- Planned points
+                MAX(rl.Points) AS PlannedPoints,
+
+                -- RL line flags
+                MAX(rl.isLineClicked)  AS isLineClicked,
+                MAX(rl.isLineDeployed) AS isLineDeployed,
+                MAX(rl.isValidated)    AS isValidated,
+
+                -- Basic counts
+                COUNT(*)                  AS DSRRows,
+                COUNT(DISTINCT d.Station) AS Stations,
+                COUNT(DISTINCT d.Node)    AS Nodes,
+
+                MIN(d.Station) AS MinStation,
+                MAX(d.Station) AS MaxStation,
+
+                -- ROV Deployment / Retrieval counts
+                SUM(CASE
+                    WHEN d.TimeStamp IS NOT NULL AND TRIM(d.TimeStamp) <> ''
+                    THEN 1 ELSE 0
+                END) AS DeployedCount,
+
+                SUM(CASE
+                    WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> ''
+                    THEN 1 ELSE 0
+                END) AS RetrievedCount,
+
+                -- ROV lists
+                REPLACE(
+                    GROUP_CONCAT(
+                        DISTINCT CASE
+                            WHEN d.ROV IS NOT NULL AND TRIM(d.ROV) <> '' THEN TRIM(d.ROV)
+                        END
+                    ),
+                    ',', ', '
+                ) AS DepROVs,
+
+                REPLACE(
+                    GROUP_CONCAT(
+                        DISTINCT CASE
+                            WHEN d.ROV1 IS NOT NULL AND TRIM(d.ROV1) <> '' THEN TRIM(d.ROV1)
+                        END
+                    ),
+                    ',', ', '
+                ) AS RecROVs,
+
+                -- SM flags
+                SUM(CASE WHEN UPPER(TRIM(d.Deployed)) = 'YES' OR UPPER(TRIM(d.PickedUp)) = 'YES' THEN 1 ELSE 0 END) AS SMCount,
+                SUM(CASE WHEN UPPER(TRIM(d.PickedUp)) = 'YES' THEN 1 ELSE 0 END) AS SMRCount,
+
+                -- Timing (deployment)
+                MIN(CASE WHEN d.TimeStamp  IS NOT NULL AND TRIM(d.TimeStamp)  <> '' THEN d.TimeStamp  END) AS FirstDeployTime,
+                MAX(CASE WHEN d.TimeStamp  IS NOT NULL AND TRIM(d.TimeStamp)  <> '' THEN d.TimeStamp  END) AS LastDeployTime,
+                ROUND((
+                    julianday(MAX(CASE WHEN d.TimeStamp IS NOT NULL AND TRIM(d.TimeStamp) <> '' THEN d.TimeStamp END)) -
+                    julianday(MIN(CASE WHEN d.TimeStamp IS NOT NULL AND TRIM(d.TimeStamp) <> '' THEN d.TimeStamp END))
+                ) * 24, 2) AS DeploymentHours,
+
+                -- Timing (retrieval)
+                MIN(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END) AS StartOfRec,
+                MAX(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END) AS EndOfRec,
+                ROUND((
+                    julianday(MAX(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END)) -
+                    julianday(MIN(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END))
+                ) * 24, 2) AS RecDuration,
+
+                -- Keep old names too
+                MIN(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END) AS FirstRetrieveTime,
+                MAX(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END) AS LastRetrieveTime,
+                ROUND((
+                    julianday(MAX(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END)) -
+                    julianday(MIN(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END))
+                ) * 24, 2) AS RetrievalHours,
+
+                -- Total operation time
+                ROUND((
+                    julianday(MAX(CASE WHEN d.TimeStamp1 IS NOT NULL AND TRIM(d.TimeStamp1) <> '' THEN d.TimeStamp1 END)) -
+                    julianday(MIN(CASE WHEN d.TimeStamp  IS NOT NULL AND TRIM(d.TimeStamp)  <> '' THEN d.TimeStamp  END))
+                ) * 24, 2) AS TotalOperationHours,
+
+                -- Solution counts
+                SUM(CASE WHEN d.Solution_FK = 1 THEN 1 ELSE 0 END) AS Normal,
+                SUM(CASE WHEN d.Solution_FK = 2 THEN 1 ELSE 0 END) AS CoDeployed,
+                SUM(CASE WHEN d.Solution_FK = 3 THEN 1 ELSE 0 END) AS Losted,
+                SUM(CASE WHEN d.Solution_FK = 4 THEN 1 ELSE 0 END) AS Missplaced,
+                SUM(CASE WHEN d.Solution_FK = 5 THEN 1 ELSE 0 END) AS WrongID,
+                SUM(CASE WHEN d.Solution_FK = 6 THEN 1 ELSE 0 END) AS Overlap,
+
+                -- Delta statistics
+                AVG(d.DeltaEprimarytosecondary)  AS AvgDeltaE,
+                MIN(d.DeltaEprimarytosecondary)  AS MinDeltaE,
+                MAX(d.DeltaEprimarytosecondary)  AS MaxDeltaE,
+
+                AVG(d.DeltaNprimarytosecondary)  AS AvgDeltaN,
+                MIN(d.DeltaNprimarytosecondary)  AS MinDeltaN,
+                MAX(d.DeltaNprimarytosecondary)  AS MaxDeltaN,
+
+                AVG(d.DeltaEprimarytosecondary1) AS AvgDeltaE1,
+                MIN(d.DeltaEprimarytosecondary1) AS MinDeltaE1,
+                MAX(d.DeltaEprimarytosecondary1) AS MaxDeltaE1,
+
+                AVG(d.DeltaNprimarytosecondary1) AS AvgDeltaN1,
+                MIN(d.DeltaNprimarytosecondary1) AS MinDeltaN1,
+                MAX(d.DeltaNprimarytosecondary1) AS MaxDeltaN1,
+
+                -- Sigma statistics
+                AVG(d.Sigma)  AS AvgSigma,
+                MIN(d.Sigma)  AS MinSigma,
+                MAX(d.Sigma)  AS MaxSigma,
+
+                AVG(d.Sigma1) AS AvgSigma1,
+                MIN(d.Sigma1) AS MinSigma1,
+                MAX(d.Sigma1) AS MaxSigma1,
+
+                AVG(d.Sigma2) AS AvgSigma2,
+                MIN(d.Sigma2) AS MinSigma2,
+                MAX(d.Sigma2) AS MaxSigma2,
+
+                AVG(d.Sigma3) AS AvgSigma3,
+                MIN(d.Sigma3) AS MinSigma3,
+                MAX(d.Sigma3) AS MaxSigma3,
+
+                -- Radial Offset
+                AVG(d.RangetoPrePlot) AS AvgRadOffset,
+                MIN(d.RangetoPrePlot) AS MinRadOffset,
+                MAX(d.RangetoPrePlot) AS MaxRadOffset,
+
+                -- Range Primary to Secondary
+                AVG(d.Rangeprimarytosecondary) AS AvgRangePrimToSec,
+                MIN(d.Rangeprimarytosecondary) AS MinRangePrimToSec,
+                MAX(d.Rangeprimarytosecondary) AS MaxRangePrimToSec,
+
+                -- Elevation stats
+                AVG(d.PrimaryElevation)   AS AvgPrimaryElevation,
+                MIN(d.PrimaryElevation)   AS MinPrimaryElevation,
+                MAX(d.PrimaryElevation)   AS MaxPrimaryElevation,
+
+                AVG(d.SecondaryElevation) AS AvgSecondaryElevation,
+                MIN(d.SecondaryElevation) AS MinSecondaryElevation,
+                MAX(d.SecondaryElevation) AS MaxSecondaryElevation
+
+            FROM DSR d
+            LEFT JOIN RLPreplot rl
+              ON rl.Line = d.Line
+            GROUP BY d.Line
+        ),
+
+        config_per_line AS (
+            SELECT
+                d.Line,
+                MIN(bcl.ID) AS ConfigID
+            FROM DSR d
+            JOIN BBox_Configs_List bcl
+              ON TRIM(d.ROV) = bcl.rov1_name
+              OR TRIM(d.ROV) = bcl.rov2_name
+            WHERE d.ROV IS NOT NULL AND TRIM(d.ROV) <> ''
+            GROUP BY d.Line
+        ),
+
+        -- Deployment stats by ROV (unique stations)
+        dep_rov_counts AS (
+            SELECT
+                d.Line,
+                TRIM(d.ROV) AS ROV,
+                COUNT(DISTINCT d.Station) AS Cnt
+            FROM DSR d
+            WHERE d.ROV IS NOT NULL
+              AND TRIM(d.ROV) <> ''
+              AND d.TimeStamp IS NOT NULL
+              AND TRIM(d.TimeStamp) <> ''
+            GROUP BY d.Line, TRIM(d.ROV)
+        ),
+
+        dep_rov_agg AS (
+            SELECT
+                Line,
+                REPLACE(
+                    GROUP_CONCAT(ROV || '(' || Cnt || ')'),
+                    ',', ', '
+                ) AS DepROVStats
+            FROM dep_rov_counts
+            GROUP BY Line
+        ),
+
+        -- Recovery stats by ROV1 (unique stations)
+        rec_rov_counts AS (
+            SELECT
+                d.Line,
+                TRIM(d.ROV1) AS ROV1,
+                COUNT(DISTINCT d.Station) AS Cnt
+            FROM DSR d
+            WHERE d.ROV1 IS NOT NULL
+              AND TRIM(d.ROV1) <> ''
+              AND d.TimeStamp1 IS NOT NULL
+              AND TRIM(d.TimeStamp1) <> ''
+            GROUP BY d.Line, TRIM(d.ROV1)
+        ),
+
+        rec_rov_agg AS (
+            SELECT
+                Line,
+                REPLACE(
+                    GROUP_CONCAT(ROV1 || '(' || Cnt || ')'),
+                    ',', ', '
+                ) AS RecROVStats
+            FROM rec_rov_counts
+            GROUP BY Line
+        )
+
+        SELECT
+            s.Line,
+            s.PlannedPoints,
+
+            s.isLineClicked,
+            s.isLineDeployed,
+            s.isValidated,
+
+            s.DSRRows,
+            s.Stations,
+            s.Nodes,
+            s.MinStation,
+            s.MaxStation,
+
+            s.DeployedCount,
+            s.RetrievedCount,
+
+            s.DepROVs,
+            s.RecROVs,
+            dra.DepROVStats,
+            rra.RecROVStats,
+
+            s.SMCount,
+            s.SMRCount,
+
+            COALESCE(r.ProcessedCount, 0) AS ProcessedCount,
+
+            s.FirstDeployTime,
+            s.LastDeployTime,
+            s.DeploymentHours,
+
+            s.StartOfRec,
+            s.EndOfRec,
+            s.RecDuration,
+
+            s.FirstRetrieveTime,
+            s.LastRetrieveTime,
+            s.RetrievalHours,
+
+            s.TotalOperationHours,
+
+            ROUND(100.0 * s.DeployedCount / NULLIF(s.PlannedPoints, 0), 1) AS DeployedPct,
+            ROUND(100.0 * s.RetrievedCount / NULLIF(s.PlannedPoints, 0), 1) AS RetrievedPct,
+            ROUND(100.0 * COALESCE(r.ProcessedCount, 0) / NULLIF(s.PlannedPoints, 0), 1) AS ProcessedPct,
+
+            s.Normal,
+            s.CoDeployed,
+            s.Losted,
+            s.Missplaced,
+            s.WrongID,
+            s.Overlap,
+
+            s.AvgDeltaE,  s.MinDeltaE,  s.MaxDeltaE,
+            s.AvgDeltaN,  s.MinDeltaN,  s.MaxDeltaN,
+            s.AvgDeltaE1, s.MinDeltaE1, s.MaxDeltaE1,
+            s.AvgDeltaN1, s.MinDeltaN1, s.MaxDeltaN1,
+
+            s.AvgSigma,  s.MinSigma,  s.MaxSigma,
+            s.AvgSigma1, s.MinSigma1, s.MaxSigma1,
+            s.AvgSigma2, s.MinSigma2, s.MaxSigma2,
+            s.AvgSigma3, s.MinSigma3, s.MaxSigma3,
+
+            (s.MaxSigma  * 2.44774683068) AS Primary_e95,
+            (s.MaxSigma1 * 2.44774683068) AS Primary_n95,
+
+            s.AvgRadOffset, s.MinRadOffset, s.MaxRadOffset,
+            s.AvgRangePrimToSec, s.MinRangePrimToSec, s.MaxRangePrimToSec,
+
+            bcl.*
+
+        FROM dsr_by_line s
+        LEFT JOIN rec_by_line r
+          ON r.Line = s.Line
+        LEFT JOIN config_per_line cpl
+          ON cpl.Line = s.Line
+        LEFT JOIN BBox_Configs_List bcl
+          ON bcl.ID = cpl.ConfigID
+        LEFT JOIN dep_rov_agg dra
+          ON dra.Line = s.Line
+        LEFT JOIN rec_rov_agg rra
+          ON rra.Line = s.Line
+        """
+
+    def _get_query_column_names(self, conn, sql: str) -> list[str]:
+        cur = conn.execute(f"SELECT * FROM ({sql}) q LIMIT 0")
+        return [d[0] for d in (cur.description or [])]
+
+    def _get_table_column_names(self, conn, table_name: str) -> list[str]:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return [row["name"] for row in rows]
+
+    def ensure_dsr_line_summary_table(self, conn=None, rebuild_if_schema_changed: bool = True):
+        """
+        Ensures DSR_LineSummary exists and matches current SELECT output columns.
+        Because the SELECT includes bcl.*, we create schema dynamically from the query itself.
+        """
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            sql = self.dsr_line_summary_sql()
+            expected_cols = self._get_query_column_names(conn, sql)
+
+            row = conn.execute("""
+                SELECT name
+                FROM sqlite_master
+                WHERE type='table' AND name='DSR_LineSummary'
+            """).fetchone()
+
+            table_exists = row is not None
+
+            if table_exists:
+                actual_cols = self._get_table_column_names(conn, "DSR_LineSummary")
+                if actual_cols != expected_cols and rebuild_if_schema_changed:
+                    conn.execute("DROP TABLE IF EXISTS DSR_LineSummary")
+                    table_exists = False
+
+            if not table_exists:
+                conn.execute(f"""
+                    CREATE TABLE DSR_LineSummary AS
+                    SELECT * FROM ({sql}) q
+                    WHERE 1 = 0
+                """)
+
+                conn.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS ux_dsr_linesummary_line
+                    ON DSR_LineSummary(Line)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS ix_dsr_linesummary_config_id
+                    ON DSR_LineSummary(ID)
+                """)
+
+            if own_conn:
+                conn.commit()
+
+        finally:
+            if own_conn:
+                conn.close()
+
+    def refresh_dsr_line_summary_table(self, conn=None) -> int:
+        """
+        Full rebuild of DSR_LineSummary.
+        Safe and simple.
+        """
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            self.ensure_dsr_line_summary_table(conn=conn)
+            sql = self.dsr_line_summary_sql()
+
+            conn.execute("DELETE FROM DSR_LineSummary")
+            conn.execute(f"""
+                INSERT INTO DSR_LineSummary
+                SELECT * FROM ({sql}) q
+            """)
+
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM DSR_LineSummary").fetchone()
+            count = int(row["cnt"]) if row else 0
+
+            if own_conn:
+                conn.commit()
+
+            return count
+
+        finally:
+            if own_conn:
+                conn.close()
+
+    def refresh_dsr_line_summary_lines(self, lines, conn=None) -> int:
+        """
+        Incremental refresh for only changed lines.
+        Use this after DSR upload.
+        """
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            self.ensure_dsr_line_summary_table(conn=conn)
+
+            if lines is None:
+                return 0
+
+            cleaned = []
+            seen = set()
+            for x in lines:
+                if x is None:
+                    continue
+                try:
+                    val = int(x)
+                except Exception:
+                    continue
+                if val in seen:
+                    continue
+                seen.add(val)
+                cleaned.append(val)
+
+            if not cleaned:
+                return 0
+
+            placeholders = ",".join("?" for _ in cleaned)
+            sql = self.dsr_line_summary_sql()
+
+            conn.execute(
+                f"DELETE FROM DSR_LineSummary WHERE Line IN ({placeholders})",
+                cleaned
+            )
+
+            conn.execute(f"""
+                INSERT INTO DSR_LineSummary
+                SELECT *
+                FROM ({sql}) q
+                WHERE q.Line IN ({placeholders})
+            """, cleaned)
+
+            if own_conn:
+                conn.commit()
+
+            return len(cleaned)
+
+        finally:
+            if own_conn:
+                conn.close()
+
+    def dsr_line_summary_rowcount(self, conn=None) -> int:
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            row = conn.execute("""
+                SELECT name
+                FROM sqlite_master
+                WHERE type='table' AND name='DSR_LineSummary'
+            """).fetchone()
+
+            if row is None:
+                return 0
+
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM DSR_LineSummary").fetchone()
+            return int(row["cnt"]) if row else 0
+
+        finally:
+            if own_conn:
+                conn.close()
+
+    def ensure_dsr_line_summary_ready(self, conn=None, rebuild_if_empty: bool = True) -> dict:
+        """
+        Ensure DSR_LineSummary exists.
+        If table exists but is empty, rebuild it.
+        Returns small status dict for logging/debugging.
+        """
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
+
+        try:
+            row = conn.execute("""
+                SELECT name
+                FROM sqlite_master
+                WHERE type='table' AND name='DSR_LineSummary'
+            """).fetchone()
+
+            created = False
+            refreshed = False
+            rowcount = 0
+
+            if row is None:
+                self.ensure_dsr_line_summary_table(conn=conn)
+                created = True
+
+            rowcount = self.dsr_line_summary_rowcount(conn=conn)
+
+            if rebuild_if_empty and rowcount == 0:
+                rowcount = self.refresh_dsr_line_summary_table(conn=conn)
+                refreshed = True
+
+            if own_conn:
+                conn.commit()
+
+            return {
+                "ok": True,
+                "created": created,
+                "refreshed": refreshed,
+                "rowcount": rowcount,
+            }
+
+        finally:
+            if own_conn:
+                conn.close()
 
 
 

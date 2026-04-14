@@ -1,0 +1,194 @@
+<div class="modal fade" id="eolReportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content border-0 shadow-lg rounded-4">
+      <div class="modal-header bg-dark text-white">
+        <h5 class="modal-title">
+          <i class="fa-solid fa-file-pdf me-2"></i>
+          End Of Line Report Settings
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <form id="eol-report-form">
+          {% csrf_token %}
+
+          <input type="hidden" name="lines_json" id="eol-lines-json" value="[]">
+
+          <div class="row g-4">
+            <div class="col-lg-5">
+              <div class="card border-0 shadow-sm rounded-4">
+                <div class="card-header bg-light fw-semibold">General</div>
+                <div class="card-body">
+                  <div class="mb-3">
+                    <label class="form-label">Project Name</label>
+                    <input type="text" class="form-control" name="project_name" value="{{ project_name|default:'' }}">
+                  </div>
+
+                  <div class="mb-3">
+                    <label class="form-label">Prepared By</label>
+                    <input type="text" class="form-control" name="prepared_by" value="{{ request.user.get_full_name|default:request.user.username }}">
+                  </div>
+
+                  <div class="mb-3">
+                    <label class="form-label">Client Name</label>
+                    <input type="text" class="form-control" name="client_name">
+                  </div>
+
+                  <div class="mb-3">
+                    <label class="form-label">Client Logo Path</label>
+                    <input type="text" class="form-control" name="client_logo_path" placeholder="Optional path to PNG/SVG">
+                  </div>
+
+                  <div class="mb-3">
+                    <label class="form-label">Comments</label>
+                    <textarea class="form-control" name="comments_text" rows="4" placeholder="Optional comments for final chapter"></textarea>
+                  </div>
+
+                  <div class="row g-3">
+                    <div class="col-md-6">
+                      <label class="form-label">Output Mode</label>
+                      <select class="form-select" name="output_mode">
+                        <option value="auto" selected>Auto</option>
+                        <option value="single_pdf">Single PDF</option>
+                        <option value="zip">ZIP</option>
+                      </select>
+                    </div>
+
+                    <div class="col-md-6">
+                      <label class="form-label">Page Size</label>
+                      <select class="form-select" name="page_size">
+                        <option value="A4" selected>A4</option>
+                        <option value="Letter">Letter</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <hr>
+
+                  <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="eol-include-tgs-logo" name="include_tgs_logo" checked>
+                    <label class="form-check-label" for="eol-include-tgs-logo">Include TGS logo</label>
+                  </div>
+
+                  <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="eol-include-client-logo" name="include_client_logo">
+                    <label class="form-check-label" for="eol-include-client-logo">Include client logo</label>
+                  </div>
+
+                  <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="eol-include-page-numbers" name="include_page_numbers" checked>
+                    <label class="form-check-label" for="eol-include-page-numbers">Include page numbers</label>
+                  </div>
+
+                  <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="eol-auto-orientation" name="auto_orientation" checked>
+                    <label class="form-check-label" for="eol-auto-orientation">Auto portrait / landscape</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-7">
+              <div class="card border-0 shadow-sm rounded-4">
+                <div class="card-header bg-light fw-semibold">Report Chapters</div>
+                <div class="card-body">
+
+                  <div class="form-check mb-2">
+                    <input class="form-check-input eol-parent" type="checkbox" id="sec-front-page" name="sections" value="front_page" checked>
+                    <label class="form-check-label fw-semibold" for="sec-front-page">1. Front Page</label>
+                  </div>
+
+                  <div class="form-check mb-2">
+                    <input class="form-check-input eol-parent" type="checkbox" id="sec-toc" name="sections" value="table_of_contents" checked>
+                    <label class="form-check-label fw-semibold" for="sec-toc">2. Table of Contents</label>
+                  </div>
+
+                  <div class="form-check mb-2">
+                    <input class="form-check-input eol-parent" type="checkbox" id="sec-line-summary" name="sections" value="line_summary" checked>
+                    <label class="form-check-label fw-semibold" for="sec-line-summary">3. Line Summary</label>
+                  </div>
+
+                  <div class="form-check mb-2">
+                    <input class="form-check-input eol-parent" type="checkbox" id="sec-project-map" name="sections" value="project_map" checked>
+                    <label class="form-check-label fw-semibold" for="sec-project-map">4. Project Map</label>
+                  </div>
+
+                  <div class="form-check mb-3">
+                    <input class="form-check-input eol-parent" type="checkbox" id="sec-dsr-info" name="sections" value="dsr_info_table" checked>
+                    <label class="form-check-label fw-semibold" for="sec-dsr-info">5. Info Table from DSR</label>
+                  </div>
+
+                  <div class="border rounded-4 p-3 mb-3">
+                    <div class="form-check mb-2">
+                      <input class="form-check-input eol-parent" type="checkbox" id="sec-deployment" data-children=".dep-child" checked>
+                      <label class="form-check-label fw-semibold" for="sec-deployment">6. Deployment</label>
+                    </div>
+
+                    <div class="ms-4">
+                      <div class="form-check">
+                        <input class="form-check-input dep-child" type="checkbox" name="sections" value="deployment_primary_secondary" checked>
+                        <label class="form-check-label">6.1 Primary vs Secondary</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input dep-child" type="checkbox" name="sections" value="deployment_vs_preplot" checked>
+                        <label class="form-check-label">6.2 Primary and Secondary vs Preplot</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input dep-child" type="checkbox" name="sections" value="water_depth" checked>
+                        <label class="form-check-label">6.3 Water Depth QC</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input dep-child" type="checkbox" name="sections" value="deployment_blackbox_qc" checked>
+                        <label class="form-check-label">6.4 Black Box QC</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input dep-child" type="checkbox" name="sections" value="deployment_vs_bbox">
+                        <label class="form-check-label">6.5 Deployment vs BBox</label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="border rounded-4 p-3 mb-3">
+                    <div class="form-check mb-2">
+                      <input class="form-check-input eol-parent" type="checkbox" id="sec-recovery" data-children=".rec-child" checked>
+                      <label class="form-check-label fw-semibold" for="sec-recovery">7. Recovery</label>
+                    </div>
+
+                    <div class="ms-4">
+                      <div class="form-check">
+                        <input class="form-check-input rec-child" type="checkbox" name="sections" value="recovery_main_qc" checked>
+                        <label class="form-check-label">7.1 Recovery QC package</label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="form-check mb-2">
+                    <input class="form-check-input eol-parent" type="checkbox" id="sec-final-comparison" name="sections" value="final_comparison" checked>
+                    <label class="form-check-label fw-semibold" for="sec-final-comparison">8. Final Comparison</label>
+                  </div>
+
+                  <div class="form-check mb-2">
+                    <input class="form-check-input eol-parent" type="checkbox" id="sec-comments" name="sections" value="comments" checked>
+                    <label class="form-check-label fw-semibold" for="sec-comments">9. Comments</label>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div class="modal-footer">
+        <div class="me-auto small text-muted">
+          Selected lines: <span id="eol-selected-lines-count">0</span>
+        </div>
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Close</button>
+        <button type="button" id="btn-run-eol-report" class="btn btn-danger">
+          <i class="fa-solid fa-gears me-2"></i>Generate Report
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

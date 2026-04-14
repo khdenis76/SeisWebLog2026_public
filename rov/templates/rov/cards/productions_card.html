@@ -45,7 +45,18 @@
                                      data-url ="{% url 'export_dsr_to_sps' %}"
                                      title="Click for Export selected lines to SPS ">
                                      <i class="fas fa-file-export me-2"></i> SPS
-                             </button>
+                       </button>
+                       <button
+                           type="button"
+                           id="btn-eol-report"
+                           class="btn btn-sm btn-danger shadow"
+                           data-bs-toggle="modal"
+                           data-bs-target="#eolReportModal"
+                           data-generate-url="{% url 'eol_generate_reports' %}"
+                           disabled>
+                           <i class="fa-solid fa-file-pdf me-2"></i>
+                           Generate EOL Report
+                       </button>
                        <div class="btn-group float-end" role="group">
 
                              <button type="button"

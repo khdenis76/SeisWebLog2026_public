@@ -34,4 +34,5 @@ REM Activate virtual environment
 call myenv\Scripts\activate
 
 REM Run module
-python -m ftpsync.ftp_sync_gui_v2
+python -m ftpsync.ftp_sync_gui_v3
+pause
