@@ -34,7 +34,10 @@ pytest.ini
 rov/*.html
 #Tests
 rov/*_test.py
+*test*.py
 
 
 
 
+/install_myenv.bat
+/install_tesseract.bat
