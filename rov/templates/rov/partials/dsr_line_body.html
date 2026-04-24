@@ -1,0 +1,170 @@
+
+{% for r in lines %}
+<tr data-line="{{ r.Line }}"
+    class="dsr-line"
+    data-day="{{ r.FirstDeployTime|default_if_none:''|slice:':10' }}"
+    data-depstart="{{ r.FirstDeployTime|default_if_none:'' }}"
+    data-depend="{{ r.LastDeployTime|default_if_none:'' }}"
+    data-preplot-nodes="{{ r.PlannedPoints|default_if_none:0 }}"
+    data-completely-deployed="{% if r.Stations == r.PlannedPoints %}1{% else %}0{% endif %}"
+    data-completely-recovered="{% if r.RetrievedCount == r.PlannedPoints %}1{% else %}0{% endif %}"
+    data-sm-loaded="{% if r.SMCount == r.Stations %}1{% else %}0{% endif %}"
+    data-smr-loaded="{% if r.SMRCount == r.RetrievedCount %}1{% else %}0{% endif %}"
+    data-deployment-hours="{{ r.DeploymentHours|default_if_none:0 }}"
+    data-retrieval-hours="{{ r.RetrievalHours|default_if_none:0 }}"
+    data-total-hours="{{ r.TotalOperationHours|default_if_none:0 }}"
+    data-vessel ="{{ r.Vessel_name }}"
+>
+    <!-- Line recovered 1 or not 0    data-completely-recovered="1"
+         Survey manager loaded 1 or not 0 data-sm-loaded="1"
+         Survey manager for recovery loaded 1 or not 0 data-smr-loaded="1"
+         Line deployed 1 or not 0 data-completely-deployed="1"
+         Line recovered 1 or not 0 data-completely-recovered=1
+         Survey manager loaded 1 or not 0 data-sm-loaded="1"
+         Survey manager for recovery loaded 1 or not 0 data-smr-loaded="1"
+     -->
+
+
+  <td class="text-center sticky-col sticky-col-1
+      {% if r.isLineClicked == 1 %} bg-success {% endif %}">
+    <input type="checkbox" class="dsr-line-checkbox" value="{{ r.Line }}">
+  </td>
+
+  <td class="sticky-col sticky-col-2 ship ship-{{ r.ID }}" title="Deployed by: {{ r.Vessel_name }} ROVs=({{ r.rov1_name }},{{ r.rov2_name }})">
+      <i class="dsr-line-click text-success fas fa-square-check me-1{% if r.isLineClicked != 1 %} d-none{% endif %}"></i>
+      {{ r.Line }}
+      {% if r.Stations < r.PlannedPoints %}
+          <i class="fas fa-triangle-exclamation text-warning" title="Line deployment incomplete"></i>
+      {% elif r.Stations > r.PlannedPoints %}
+          <i class="fas fa-triangle-exclamation text-danger" title="Number of nodes more than in Preplot"></i>
+      {% elif r.Stations == r.PlannedPoints %}
+          <i class="fas fa-circle-check text-success" title="Deployment completed"></i>
+      {% endif %}
+      {% if r.Stations > r.SMCount %}
+          <i class="fas fa-triangle-exclamation text-warning" title="Survey Manager does not fully loaded"></i>
+      {% elif r.Stations < r.SMCount %}
+          <i class="fas fa-triangle-exclamation text-danger" title="Survey Manager for this line has more records then in DSR"></i>
+      {% elif r.Stations == r.SMCount %}
+          <i class="fas fa-circle-check text-success" title="Survey manager completed"></i>
+      {% endif %}
+
+      {% if r.Stations > r.SMRCount %}
+          <i class="fas fa-triangle-exclamation text-warning" title="SM data for recovered nodes incomplete"></i>
+      {% elif r.Stations < r.SMRCount %}
+          <i class="fas fa-triangle-exclamation text-danger" title="SM data for recovery has more records for this line than DSR"></i>
+      {% elif r.Stations == r.SMRCount %}
+          <i class="fas fa-circle-check text-success" title="Survey manager for recovery completed"></i>
+      {% endif %}
+      {% if r.Primary_e95 > max_sma or r.Primary_n95 > max_sma  %}
+          <i class="fas fa-globe text-danger" title="Primary SMA is out of spec"></i>
+      {% elif r.Primary_e95 > warning_sma or r.Primary_n95 > warning_sma %}
+          <i class="fas fa-globe text-warning" title="Primary SMA exceed warning value {{ warning_sma }}"></i>
+      {% else%}
+          <i class="fas fa-globe text-success" title="All SMA within spec"></i>
+      {% endif %}
+      {% if r.PlannedPoints > r.RetrievedCount %}
+          <i class="fas fa-truck-pickup text-warning" title="Nodes recovery incompleted"></i>
+      {% elif r.PlannedPoints < r.RetrievedCount %}
+          <i class="fas fa-truck-pickup text-danger" title="Extra nodes were recovered"></i>
+      {% elif r.PlannedPoints == r.RetrievedCount %}
+          <i class="fas fa-truck-pickup text-success" title="Recovery completed"></i>
+      {% endif %}
+      {% if r.Stations > r.ProcessedCount %}
+          <i class="fas fa-egg text-warning" title="rec db incompleted"></i>
+      {% elif r.Stations < r.ProcessedCount %}
+          <i class="fas fa-egg text-danger" title="Extra nodes in rec db"></i>
+      {% elif r.Stations == r.ProcessedCount %}
+          <i class="fas fa-egg text-success" title="Processing completed"></i>
+      {% endif %}
+
+  </td>
+
+
+  <td class=" {% if r.Stations == r.PlannedPoints %}text-success fw-bold{% endif %}
+              {% if r.Stations < r.PlannedPoints %}bg-warning text-white fw-bold{% endif %}
+  ">{{ r.Stations }}</td>
+    <td class="fw-bold text-nowrap {% if r.MaxRadOffset > max_radial_offset %}text-danger{% elif r.MaxRadOffset  > radial80%}text-warning{% else %}text-success{% endif %}">
+         {% if r.MaxRadOffset > max_radial_offset %}<i class="fas fa-triangle-exclamation me-1"></i> {% endif %}{{ r.MaxRadOffset|floatformat:1 }}
+    </td>
+    <td>{{ r.MaxRangePrimToSec|floatformat:1 }}</td>
+  <td class ="
+         {% if r.Primary_e95 > warning_sma and r.Primary_e95 <= max_sma   %}bg-warning text-white
+         {% elif r.Primary_e95 > max_sma %}bg-danger text-white{% else %}
+           text-success fw-bold
+         {% endif %}">
+      {{ r.Primary_e95|floatformat:2 }}
+  </td>
+  <td class="
+             {% if r.Primary_n95 > warning_sma and r.Primary_n95 <= max_sma   %}bg-warning text-white
+                 {% elif r.Primary_n95 > max_sma %}
+                      bg-danger text-white
+                 {% else %}
+                     text-success fw-bold
+            {% endif %}">
+   {{ r.Primary_n95|floatformat:2 }}</td>
+  <td>{{ r.DeployedCount }}</td>
+  <td {% if r.SMCount == r.Stations %}class="text-success fw-bold"{% endif %}
+      {% if r.SMCount != r.Stations and r.SMCount != 0 %}class="bg-warning text-white fw-bold"{% endif %}
+      {% if r.SMCount == 0 and r.Stations > 0 %}class="bg-danger fw-bold"{% endif %} >
+     {{ r.SMCount }}
+  </td>
+  <td>{{ r.RetrievedCount }}</td>
+
+
+  <td {% if r.SMRCount == r.RetrievedCount %}class="text-success fw-bold"{% else %}{% endif %}>
+      {{ r.SMRCount }}</td>
+  <td>{{ r.ProcessedCount }}</td>
+
+  {# Dep % conditional #}
+  <td class="
+      {% if r.DeployedPct is not None and r.DeployedPct < 90 %}fw-bold text-warning{% endif %}
+      {% if r.DeployedPct == 100 %}fw-bold text-success{% endif %}
+      {% if r.DeployedPct > 100 %}fw-bold text-danger{% endif %}
+    ">
+    {{ r.DeployedPct|floatformat:1 }}
+  </td>
+
+  <td>{{ r.RetrievedPct|floatformat:1 }}</td>
+  <td>{{ r.ProcessedPct|floatformat:1 }}</td>
+  <td>{{ r.PlannedPoints|default_if_none:"" }}</td>
+   <td>{{ r.Nodes }}</td>
+  <td class="text-primary">{{ r.MinStation }}</td>
+  <td class="text-danger">{{ r.MaxStation }}</td>
+  <td class="dsr-datetime bg-primary text-white">{{ r.FirstDeployTime|default_if_none:"" }}</td>
+  <td class="dsr-datetime bg-success text-white">{{ r.LastDeployTime|default_if_none:"" }}</td>
+  <td>{{ r.DeploymentHours|floatformat:2 }}</td>
+  <td class="dsr-datetime text-primary fw-bold">{{ r.FirstRetrieveTime|default_if_none:"" }}</td>
+  <td class="dsr-datetime text-success fw-bold">{{ r.LastRetrieveTime|default_if_none:"" }}</td>
+  <td>{{ r.RetrievalHours|floatformat:2 }}</td>
+  <td>{{ r.TotalOperationHours|floatformat:2 }}</td>
+
+  <td>{{ r.AvgDeltaE|floatformat:1 }}</td>
+  <td>{{ r.MinDeltaE|floatformat:1 }}</td>
+  <td>{{ r.MaxDeltaE|floatformat:1 }}</td>
+  <td>{{ r.AvgDeltaN|floatformat:1 }}</td>
+  <td>{{ r.MinDeltaN|floatformat:1 }}</td>
+  <td>{{ r.MaxDeltaN|floatformat:1 }}</td>
+  <td>{{ r.AvgDeltaE1|floatformat:1 }}</td>
+  <td>{{ r.MinDeltaE1|floatformat:1 }}</td>
+  <td>{{ r.MaxDeltaE1|floatformat:1 }}</td>
+  <td>{{ r.AvgDeltaN1|floatformat:1 }}</td>
+  <td>{{ r.MinDeltaN1|floatformat:1 }}</td>
+  <td>{{ r.MaxDeltaN1|floatformat:1 }}</td>
+
+  <td>{{ r.AvgSigma|floatformat:1 }}</td>
+  <td>{{ r.MinSigma|floatformat:1 }}</td>
+  <td>{{ r.MaxSigma|floatformat:1 }}</td>
+  <td>{{ r.AvgSigma1|floatformat:1 }}</td>
+  <td>{{ r.MinSigma1|floatformat:1 }}</td>
+  <td>{{ r.MaxSigma1|floatformat:1 }}</td>
+  <td>{{ r.AvgSigma2|floatformat:1 }}</td>
+  <td>{{ r.MinSigma2|floatformat:1 }}</td>
+  <td>{{ r.MaxSigma2|floatformat:1 }}</td>
+  <td>{{ r.AvgSigma3|floatformat:1 }}</td>
+  <td>{{ r.MinSigma3|floatformat:1 }}</td>
+  <td>{{ r.MaxSigma3|floatformat:1 }}</td>
+</tr>
+{% empty %}
+<tr><td colspan="100%" class="text-center text-muted">No data</td></tr>
+{% endfor %}
+

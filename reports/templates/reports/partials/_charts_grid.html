@@ -1,0 +1,8 @@
+<section class="swl-card">
+  <div class="swl-card-header"><h2>Activity Charts</h2></div>
+  <div class="swl-grid swl-grid-2">
+    <div class="swl-card swl-inner-card">{{ payload.charts.daily_activity.html|safe }}</div>
+    <div class="swl-card swl-inner-card">{{ payload.charts.vessel_contribution.html|safe }}</div>
+    <div class="swl-card swl-inner-card">{{ payload.charts.rov_contribution.html|safe }}</div>
+  </div>
+</section>

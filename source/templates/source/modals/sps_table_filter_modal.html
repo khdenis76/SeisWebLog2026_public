@@ -1,0 +1,139 @@
+<!-- SPS Filter Modal -->
+<div class="modal fade" id="spsFilterModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="fa-solid fa-filter me-2"></i> SPS Table Filters
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="row g-3">
+
+          <div class="col-12">
+            <label class="form-label">Search (any text)</label>
+            <input type="text" class="form-control" id="spsf-search" placeholder="Search in table rows…">
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Vessel</label>
+            <select class="form-select" id="spsf-vessel">
+              <option value="">All vessels</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Purpose</label>
+            <select class="form-select" id="spsf-purpose">
+              <option value="">All purposes</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">SailLine</label>
+            <select class="form-select" id="spsf-sailline">
+              <option value="">All SailLines</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Attempt</label>
+            <select class="form-select" id="spsf-attempt">
+              <option value="">Any attempt</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Line (single or range)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="spsf-line-from" placeholder="From">
+              <span class="input-group-text">to</span>
+              <input type="number" class="form-control" id="spsf-line-to" placeholder="To">
+            </div>
+            <div class="form-text">Only From = “>= From”. Only To = “<= To”.</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Seq (single or range)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="spsf-seq-from" placeholder="From">
+              <span class="input-group-text">to</span>
+              <input type="number" class="form-control" id="spsf-seq-to" placeholder="To">
+            </div>
+            <div class="form-text">Only From = “>= From”. Only To = “<= To”.</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Water Depth QC</label>
+            <select class="form-select" id="spsf-wd">
+              <option value="">Any</option>
+              <option value="Ok">Ok</option>
+              <option value="Error">Error</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Gun Depth QC</label>
+            <select class="form-select" id="spsf-gd">
+              <option value="">Any</option>
+              <option value="Ok">Ok</option>
+              <option value="Error">Error</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Sort by</label>
+            <select class="form-select" id="spsf-sort-by">
+              <option value="sailline">SailLine</option>
+              <option value="line">Line</option>
+              <option value="seq">Seq</option>
+              <option value="attempt">Attempt</option>
+              <option value="vessel">Source</option>
+              <option value="purpose">Purpose</option>
+              <option value="maxspi">MaxSPI</option>
+              <option value="production">Production</option>
+              <option value="nonproduction">Non-Production</option>
+              <option value="kill">Kill</option>
+              <option value="gdmin">GD Min</option>
+              <option value="gdmax">GD Max</option>
+              <option value="wdmin">WD Min</option>
+              <option value="wdmax">WD Max</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Direction</label>
+            <select class="form-select" id="spsf-sort-dir">
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </div>
+
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="spsf-only-checked">
+              <label class="form-check-label" for="spsf-only-checked">
+                Show only checked rows
+              </label>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="spsf-reset">
+          <i class="fa-solid fa-rotate-left me-1"></i> Reset
+        </button>
+
+        <button type="button" class="btn btn-primary" id="spsf-apply">
+          <i class="fa-solid fa-check me-1"></i> Apply
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>

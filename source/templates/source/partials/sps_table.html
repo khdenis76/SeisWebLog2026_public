@@ -1,0 +1,51 @@
+<div class="table-scroll" style="height: 50vh">
+  <table class="mb-0" id="sps-table">
+    <thead id="sps-table-thead">
+      <tr>
+        <!-- MAIN CHECKBOX -->
+        <th class="sticky-col sticky-col-0">
+          <input class="form-check-input m-0" type="checkbox" id="sps-check-all">
+        </th>
+
+             <!-- FIRST 3 STICKY DATA COLS (SailLine, Line, Seq) -->
+             <th class="sticky-col sticky-col-1 sps-sortable" data-sort-key="sailline">SailLine</th>
+             <th class="sticky-col sticky-col-2 sps-sortable" data-sort-key="line">Line</th>
+             <th class="sticky-col sticky-col-3 num sps-sortable" data-sort-key="seq">Seq</th>
+             <!-- REST -->
+             <th class="num sps-sortable" data-sort-key="attempt">Attempt</th>
+             <th class="num sps-sortable" data-sort-key="fsp">FSP</th>
+             <th class="num sps-sortable" data-sort-key="fgsp">FGSP</th>
+             <th class="num sps-sortable" data-sort-key="lgsp">LGSP</th>
+             <th class="num sps-sortable" data-sort-key="lsp">LSP</th>
+
+             <th class="num sps-sortable" data-sort-key="linelength">Length</th>
+             <th class="num sps-sortable" data-sort-key="pplength">Preplot Len.</th>
+             <th class="num sps-sortable" data-sort-key="percentline">% Line</th>
+             <th class="num sps-sortable" data-sort-key="percentseq">% Sec</th>
+             <th class="num sps-sortable" data-sort-key="production">Production</th>
+             <th class="num sps-sortable" data-sort-key="nonproduction">Non-Production</th>
+             <th class="num sps-sortable" data-sort-key="kill">Kill</th>
+             <th class="num sps-sortable" data-sort-key="gdmin">GD Min</th>
+             <th class="num sps-sortable" data-sort-key="gdmax">GD Max</th>
+             <th class="num sps-sortable" data-sort-key="wdmin">WD Min</th>
+             <th class="num sps-sortable" data-sort-key="wdmax">WD Max</th>
+
+             <th class="num sps-sortable" data-sort-key="seqlenpercentage">SeqLenPercentage</th>
+             <th class="num sps-sortable" data-sort-key="maxspi">MaxSPI</th>
+             <th class="num sps-sortable" data-sort-key="startx">StartX</th>
+             <th class="num sps-sortable" data-sort-key="starty">StartY</th>
+             <th class="num sps-sortable" data-sort-key="endx">EndX</th>
+             <th class="num sps-sortable" data-sort-key="endy">EndY</th>
+
+             <th class="sps-sortable" data-sort-key="start_time">SOL,time</th>
+             <th class="sps-sortable" data-sort-key="prodstart">FGSP,Time</th>
+             <th class="sps-sortable" data-sort-key="prodend">LGSP,Time</th>
+             <th class="sps-sortable" data-sort-key="end_time">EOL,time</th>
+
+      </tr>
+    </thead>
+    <tbody id="sps-table-tbody">
+       {{ sps_summary|safe }}
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,80 @@
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+
+    {% block sidebar_toggle %}
+    <button class="btn btn-outline-light me-2"
+            type="button"
+            data-bs-toggle="offcanvas"
+            data-bs-target="#sidebarOffcanvas"
+            aria-controls="sidebarOffcanvas">
+      <i class="fa-solid fa-bars"></i>
+    </button>
+    {% endblock %}
+
+    <a class="navbar-brand" href="/">
+      <i class="fa-solid fa-wave-square me-2"></i>SeisWebLog v{{ APP_VERSION }}
+    </a>
+
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="topNav">
+
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item">
+          <a class="nav-link" href="{% url 'projects' %}">
+            Projects
+          </a>
+        </li>
+      </ul>
+      <!-- VERSION CONTROL -->
+      {% if NEW_VERSION_AVAILABLE %}
+          <div class="alert alert-warning text-center m-0 py-1 rounded-0">
+                   🚀 New version available: <b>{{ REMOTE_VERSION }}</b>
+                  <span class="ms-2 text-muted">(you have {{ LOCAL_VERSION }})</span>
+                     <a class="btn btn-sm btn-dark ms-3"
+                              href="{{ VERSION_DOWNLOAD_URL }}"
+                              target="_blank" rel="noopener">
+                              Download ZIP
+                     </a>
+          </div>
+      {% endif %}
+      <button
+          id="themeToggle"
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          title="Toggle theme"
+          aria-label="Toggle theme"
+          data-theme="{{ theme_mode|default:'dark' }}">
+            <span class="theme-icon">{% if theme_mode == 'dark' %}☀️{% else %}🌙{% endif %}</span>
+      </button>
+      <ul class="navbar-nav">
+
+        {% if user.is_authenticated %}
+        <li class="nav-item">
+          <span class="navbar-text me-3">
+            <i class="fa-regular fa-user"></i> {{ user.username }}
+          </span>
+        </li>
+
+        <li class="nav-item">
+          <a class="btn btn-outline-light" href="{% url 'logout' %}">
+            Exit
+          </a>
+        </li>
+
+        {% else %}
+        <li class="nav-item">
+          <a class="btn btn-outline-light" href="{% url 'login' %}">
+            Login
+          </a>
+        </li>
+        {% endif %}
+
+      </ul>
+
+    </div>
+
+  </div>
+</nav>

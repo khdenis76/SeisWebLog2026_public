@@ -1,0 +1,37 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title|default:"SeisWebLog Reports" }}</title>
+  <link href="{% static 'reports/css/reports.css' %}" rel="stylesheet">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body class="swl-report-body">
+  <div class="swl-shell">
+    <header class="swl-page-header">
+      <div>
+        <div class="swl-kicker">SeisWebLog</div>
+        <h1>{{ page_title|default:"Reports" }}</h1>
+        {% if project %}<div class="swl-subtitle">{{ project.name|default:project }}</div>{% endif %}
+      </div>
+      <div class="swl-actions">
+        <a class="swl-btn" href="{% url 'reports:home' %}">Reports Home</a>
+        <a class="swl-btn swl-btn-primary" href="{% url 'reports:generate' %}">Generate</a>
+      </div>
+    </header>
+
+    {% if messages %}
+      <section class="swl-messages">
+        {% for message in messages %}
+          <div class="swl-message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+      </section>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+  </div>
+  <script src="{% static 'reports/js/report_preview.js' %}"></script>
+</body>
+</html>

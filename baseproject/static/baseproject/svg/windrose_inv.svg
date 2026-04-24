@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 30 440 462" width="440px" height="462px">
+  <defs>
+    <style>
+      .ring { fill: white; stroke: #111; stroke-width: 3; }
+      .tickMinor { stroke: #333; stroke-width: 2; }
+      .tickMajor { stroke: #111; stroke-width: 3.2; }
+      .tickCard  { stroke: #111; stroke-width: 4.2; }
+      .degText { font-family: Arial, Helvetica, sans-serif; font-size: 16px; fill: #111; }
+      .cardText { font-family: Arial, Helvetica, sans-serif; font-size: 26px; font-weight: 700; fill: #111; }
+      .subText { font-family: Arial, Helvetica, sans-serif; font-size: 14px; fill: #111; opacity: 0.85; }
+    </style>
+  </defs>
+  <circle class="ring" cx="250" cy="250" r="220" style="stroke: none;" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)"/>
+  <circle cx="250" cy="250" r="170" fill="none" stroke-width="2" opacity="0.35" style="" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)"/>
+  <line class="tickCard" x1="250" y1="30" x2="250" y2="470" style="stroke: none;" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)"/>
+  <line class="tickCard" x1="30" y1="250" x2="470" y2="250" style="stroke: none;" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)"/>
+  <line x1="95" y1="95" x2="405" y2="405" stroke-width="2" opacity="0.35" style="" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)"/>
+  <line x1="405" y1="95" x2="95" y2="405" stroke-width="2" opacity="0.35" style="" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)"/>
+  <g transform="matrix(1, 0, 0, 1, 250, 250)">
+    <g transform="rotate(10)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(20)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(30)">
+      <line class="tickMajor" x1="0" y1="-195" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(40)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(50)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(60)">
+      <line class="tickMajor" x1="0" y1="-195" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(70)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(80)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(100)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(110)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(120)">
+      <line class="tickMajor" x1="0" y1="-195" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(130)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(140)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(150)">
+      <line class="tickMajor" x1="0" y1="-195" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(160)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(170)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(190)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(200)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(210)">
+      <line class="tickMajor" x1="0" y1="-195" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(220)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(230)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(240)">
+      <line class="tickMajor" x1="0" y1="-195" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(250)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(260)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(280)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(290)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(300)">
+      <line class="tickMajor" x1="0" y1="-195" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(310)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(320)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(330)">
+      <line class="tickMajor" x1="0" y1="-195" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(340)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+    <g transform="rotate(350)">
+      <line class="tickMinor" x1="0" y1="-206" x2="0" y2="-220" style="stroke: none;"/>
+    </g>
+  </g>
+  <g class="degText" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)">
+    <text style="text-anchor: middle; white-space: pre;" x="250" y="78">0</text>
+    <text style="text-anchor: middle; white-space: pre;" x="340" y="95">30</text>
+    <text style="text-anchor: middle; white-space: pre;" x="405" y="160">60</text>
+    <text style="text-anchor: middle; white-space: pre;" x="422" y="255">90</text>
+    <text style="text-anchor: middle; white-space: pre;" x="405" y="350">120</text>
+    <text style="text-anchor: middle; white-space: pre;" x="340" y="415">150</text>
+    <text style="text-anchor: middle; white-space: pre;" x="250" y="432">180</text>
+    <text style="text-anchor: middle; white-space: pre;" x="160" y="415">210</text>
+    <text style="text-anchor: middle; white-space: pre;" x="95" y="350">240</text>
+    <text style="text-anchor: middle; white-space: pre;" x="78" y="255">270</text>
+    <text style="text-anchor: middle; white-space: pre;" x="95" y="160">300</text>
+    <text style="text-anchor: middle; white-space: pre;" x="160" y="95">330</text>
+  </g>
+  <text class="cardText" style="text-anchor: middle; white-space: pre;" x="250" y="58" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)">N</text>
+  <text class="cardText" style="text-anchor: middle; white-space: pre;" x="450" y="260" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)">E</text>
+  <text class="cardText" style="text-anchor: middle; white-space: pre;" x="250" y="486" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)">S</text>
+  <text class="cardText" style="text-anchor: middle; white-space: pre;" x="50" y="260" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)">W</text>
+  <circle cx="250" cy="250" r="6" fill="#111" style="" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)"/>
+  <text class="subText" style="text-anchor: middle; white-space: pre;" x="250" y="290" transform="matrix(1, 0, 0, 1, 0, 1.4210854715202004e-14)">degrees clockwise from North</text>
+</svg>

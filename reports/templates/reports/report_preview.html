@@ -1,0 +1,24 @@
+{% extends "reports/base_report.html" %}
+{% block content %}
+  {{ all_bokeh_scripts|safe }}
+  <section class="swl-card">
+    <div class="swl-report-title-row">
+      <div>
+        <div class="swl-kicker">{{ report_type|title }} Report</div>
+        <h2>{{ report_title }}</h2>
+        <div class="swl-muted">{{ payload.start_date }} → {{ payload.end_date }}</div>
+      </div>
+    </div>
+  </section>
+  {% include "reports/partials/_summary_cards.html" %}
+  {% include "reports/partials/_maps_section.html" %}
+  {% include "reports/partials/_charts_grid.html" %}
+  {% include "reports/partials/_fleet_section.html" %}
+  {% include "reports/partials/_qc_section.html" %}
+  {% if payload.narrative %}
+  <section class="swl-card">
+    <div class="swl-card-header"><h2>Narrative</h2></div>
+    <div class="swl-preline">{{ payload.narrative }}</div>
+  </section>
+  {% endif %}
+{% endblock %}

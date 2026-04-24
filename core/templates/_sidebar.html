@@ -1,0 +1,115 @@
+<div class="offcanvas offcanvas-start"
+     tabindex="-1"
+     id="sidebarOffcanvas"
+     aria-labelledby="sidebarOffcanvasLabel">
+
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="sidebarOffcanvasLabel">
+      <i class="fa-solid fa-bars-staggered me-2"></i>Menu
+    </h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+  </div>
+
+  <div class="offcanvas-body">
+
+    <!-- PROJECT -->
+    <div class="sidebar-section-title">Project</div>
+    <ul class="nav flex-column">
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'projects' %}">
+          <i class="fa-solid fa-diagram-project"></i>All Projects
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'project_settings' %}">
+          <i class="fa-solid fa-gear"></i>1.Project Settings
+        </a>
+      </li>
+      <!--Vessels-->
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'fleet:vessel_page'%}">
+          <i class="fa-solid fa-ship"></i>2. Vessels
+        </a>
+      </li>  
+      <!--Preplot-->  
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'base_project_settings' %}">
+          <i class="fa-solid fa-shapes"></i>3.Preplot & shapes
+        </a>
+      </li>
+      <!--Seq Alocations--> 
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'fleet:sequence_assignments_page'%}">
+          <i class="fa-solid fa-ship"></i>4. Sequence Allocation
+        </a>
+      </li>   
+    </ul>
+
+    <!-- NAVIGATION -->
+    <div class="sidebar-section-title">QC & Production</div>
+    <ul class="nav flex-column">
+      
+      
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'rov_main_view' %}">
+          <i class="fa-solid fa-water"></i>ROV OBN
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="fa-solid fa-table"></i>NOAR OBN
+        </a>
+      </li>  
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'source_home' %}">
+          <i class="fa-solid fa-table"></i>SOURCE QC
+        </a>
+      </li>
+      <li class="nav-item" title="Sound Velocity Profile">
+        <a class="nav-link"  href="{% url 'svp:home' %}">
+          <i class="fa-solid fa-table"></i>SVP
+        </a>
+      </li>    
+    </ul>
+
+    <!-- QC -->
+    <div class="sidebar-section-title">QC reports</div>
+    <ul class="nav flex-column">
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'reports:home' %}">
+          <i class="fa-solid fa-chart-line"></i>Daily Monthly Weekly
+        </a>
+      </li>
+      
+       
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="fa-solid fa-clipboard-list"></i>Production Log
+        </a>
+      </li>
+    </ul>
+
+    <!-- SERVICE -->
+    <div class="sidebar-section-title">Service</div>
+    <ul class="nav flex-column">
+     
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'project_users_members' %}">
+          <i class="fa-solid fa-users"></i>Users
+        </a>
+      </li>
+        
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'log_viewer' %}">
+          <i class="fa-solid fa-file-lines"></i>Logs
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'admin:index' %}">
+          <i class="fa-solid fa-user-shield"></i>Admin Panel
+        </a>
+      </li>
+    </ul>
+
+  </div>
+</div>

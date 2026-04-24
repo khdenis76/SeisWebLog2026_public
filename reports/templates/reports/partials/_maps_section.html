@@ -1,0 +1,11 @@
+<section class="swl-card">
+  <div class="swl-card-header"><h2>Operational Maps</h2></div>
+  <div class="swl-grid swl-grid-1">
+    {% for key, map_item in payload.maps.items %}
+      <div class="swl-card swl-inner-card">
+        <h3>{{ map_item.title }}</h3>
+        {{ map_item.div|safe }}
+      </div>
+    {% endfor %}
+  </div>
+</section>

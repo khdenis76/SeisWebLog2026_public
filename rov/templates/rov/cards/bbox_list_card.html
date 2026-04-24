@@ -1,0 +1,72 @@
+<div class="card shadow collapse show" id="bbox-list-card">
+    <div class="card-header ">
+        <div class="clearfix bg-warning fw-bold mt-1 mb-1">
+            <h5 class="float-start ms-1"><i class="fas fa-location-arrow me-2"></i> BBOX LOG LIST </h5>
+            <button class="btn btn-sm float-end me-2"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#bbox-log-card-body"
+                    aria-expanded="true"
+                    onclick="$('#bbox-log-toggle-icon').toggleClass('fa-window-maximize fa-window-minimize');
+                                           $('#rov-stat-card-body').toggle();"
+
+            >
+
+                <i id="bbox-log-toggle-icon" class="fas fa-window-minimize"></i>
+            </button>
+        </div>
+        <div class="card-body collapse show" id="bbox-log-card-body">
+           <div class="table-responsive bbox-file-table-container">
+               <table class="table table-sm table-hover table-bordered align-middle text-nowrap" id="bbox-file-table">
+                      <thead class="table-dark">
+                          <tr>
+                            <th>ID</th>
+                            <th>File</th>
+                            <th>Config</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Dur (s)</th>
+                            <th>Rows</th>
+                            <th>Gap</th>
+
+                            <th class="text-center">ROV1 Depth</th>
+                            <th class="text-center">ROV2 Depth</th>
+
+                            <th class="text-center">ROV1 SOG</th>
+                            <th class="text-center">ROV2 SOG</th>
+
+                            <th class="text-center">INS/USBL ROV1</th>
+                            <th class="text-center">INS/USBL ROV2</th>
+
+                            <th class="text-center">GNSS1 HDOP</th>
+                            <th class="text-center">GNSS2 HDOP</th>
+
+                            <th class="text-center">GNSS1 Q</th>
+                            <th class="text-center">GNSS2 Q</th>
+
+                            <th class="text-center">Baro</th>
+                          </tr>
+                      </thead>
+                <tbody id="bbox-file-tbody">
+
+                </tbody>
+
+            </table>
+          </div>
+
+        </div><!--End of card-body-->
+        <div class="card-footer clearfix">
+            <button type = "button"
+                id="btn-recalc-all-bbox-stats"
+                class="btn btn-sm btn-warning shadow"
+                data-url="{% url 'rov:recalc_all_bbox_file_stats' project.id %}">
+                <i class="fa fa-sync me-2"></i> Recalc All BBOX Stats
+            </button>
+            <button type="button"
+                    class="btn btn-danger float-end me-2"
+                    id="deleteBboxFileBtn"
+                    data-delete-url="{% url 'delete_bbox_files' %}">
+                <i class="fas fa-trash-can me-2"></i> DELETE
+            </button>
+        </div>
+    </div>
+</div>

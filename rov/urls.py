@@ -1,0 +1,41 @@
+# baseproject/urls.py
+from django.urls import path
+from rov.eol.views import eol_generate_reports
+from .views import *
+urlpatterns = [
+    path("", rov_main_view, name="rov_main_view"),
+    path("load/drs", rov_upload_dsr,name="rov_upload_dsr"),
+    path("load/sm", rov_upload_survey_manager, name="rov_upload_survey_manager"),
+    path("load/bbox",rov_upload_black_box,name="rov_upload_black_box"),
+    path("load/rec_db",rov_upload_rec_db,name="rov_upload_rec_db"),
+    path('select/line',rov_dsr_line_click,name='rov_dsr_line_click'),
+    path('bbox_config/save',save_bbox_config,name='save_bbox_config'),
+    path('bbox_config/set_default',set_default_bbox_config,name='set_default_bbox_config'),
+    path('dsr/delete_line',delete_selected_dsr_lines,name="delete_selected_dsr_lines"),
+    path('delete/bbox',delete_bbox_files,name="delete_bbox_files"),
+    #path('bbox/file_selected',bbox_file_selected,name='bbox_file_selected'),
+    path("rov/bbox/configs/", bbox_configs_list, name="bbox_configs_list"),
+    path("rov/bbox/config/<int:config_id>/", bbox_config_detail, name="bbox_config_detail"),
+    path("rov/bbox/read-headers/",read_bbox_headers,name="csv_headers",),
+    path("export/sm/",dsr_export_sm,name="dsr_export_sm"),
+    path("dsr/rovs-for-timeframe/",dsr_rovs_for_timeframe,name="dsr_rovs_for_timeframe"),
+    path("dsr/production/day",select_prod_day,name="select_prod_day"),
+    path("dsr/export/sps",export_dsr_to_sps,name="export_dsr_to_sps"),
+    path("dsr/line.selected",dsr_line_onclick,name="dsr_line_onclick"),
+    path("dsr/battery_life/",load_battery_life_map,name="load_battery_life_map"),
+    path("dsr/battery_days_left",load_battery_rest_days_map,name="load_battery_rest_days_map"),
+    path("dsr/hist",load_dsr_historgram,name="load_dsr_historgram"),
+    path("dsr/line_qc_plot",load_min_max_line_qc,name="load_min_max_line_qc"),
+    path("bbox/plot/item/", bbox_plot_item, name="bbox_plot_item"),
+    path("project/rov/dsr/line/qc/plot-item/", dsr_line_qc_plot_item, name="dsr_line_qc_plot_item"),
+    path("bbox/config/delete/<int:config_id>/", bbox_config_delete, name="bbox_config_delete"),
+    path("bbox/config/export-all-json/", bbox_config_export_all_json, name="bbox_config_export_all_json"),
+    path("bbox/config/import-json/", bbox_config_import_json, name="bbox_config_import_json"),
+    #path("bbox/config/export-file/", bbox_config_export_to_file, name="bbox_config_export_file"),
+    path("bbox/config/import-file/", bbox_config_import_from_file, name="bbox_config_import_file"),
+    path("bbox/recalc_all/",recalc_all_bbox_file_stats,name="recalc_all_bbox_file_stats"),
+    path("bbox/filter/", bbox_file_filter, name="bbox_file_filter"),
+    path("eol/generate/", eol_generate_reports, name="eol_generate_reports"),
+
+
+]

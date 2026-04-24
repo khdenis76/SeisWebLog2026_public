@@ -1,0 +1,115 @@
+/* =========================================================
+   Shot Summary Table - Bootstrap Light/Dark compatible
+   ========================================================= */
+
+/* Wrapper height = 50vh with scroll */
+.shot-summary-wrap{
+  height: 50vh;
+  overflow: auto;                         /* vertical + horizontal scroll */
+  border: 1px solid var(--bs-border-color);
+  border-radius: .5rem;
+  background: var(--bs-body-bg);
+}
+
+/* Table basics */
+.shot-summary-table{
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  white-space: nowrap;
+  font-size: .85rem;
+  color: var(--bs-body-color);
+
+  /* fixed widths for sticky columns */
+  --col1: 18ch;   /* nav_line_code ~ 10-12 symbols */
+  --col2: 7ch;    /* nav_line ~ 5 */
+  --col3: 6ch;    /* attempt ~ 3 */
+}
+
+/* cells */
+.shot-summary-table th,
+.shot-summary-table td{
+  padding: .35rem .5rem;
+  border-right: 1px solid var(--bs-border-color-translucent);
+}
+.shot-summary-table tbody td{
+  border-bottom: 1px solid var(--bs-border-color-translucent);
+}
+
+/* Sticky header */
+.shot-summary-table thead th{
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--bs-tertiary-bg);      /* bootstrap-aware */
+  color: var(--bs-body-color);
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+/* Sticky footer (optional if you use <tfoot>) */
+.shot-summary-table tfoot th{
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
+  border-top: 1px solid var(--bs-border-color);
+}
+
+/* Hover */
+.shot-summary-table tbody tr:hover td{
+  background: var(--bs-table-hover-bg, rgba(0,0,0,.05));
+}
+
+/* ---------------------------------------------------------
+   Sticky first 3 columns
+   --------------------------------------------------------- */
+
+/* common sticky look */
+.shot-summary-table .sticky-col,
+.shot-summary-table .sticky-col-2,
+.shot-summary-table .sticky-col-3{
+  position: sticky;
+  z-index: 25;
+  background: var(--bs-body-bg);          /* match theme */
+  border-right: 1px solid var(--bs-border-color);
+}
+
+/* offsets */
+.shot-summary-table .sticky-col   { left: 0; }
+.shot-summary-table .sticky-col-2 { left: var(--col1); }
+.shot-summary-table .sticky-col-3 { left: calc(var(--col1) + var(--col2)); }
+
+/* widths */
+.shot-summary-table .sticky-col{   width: var(--col1); min-width: var(--col1); max-width: var(--col1); }
+.shot-summary-table .sticky-col-2{ width: var(--col2); min-width: var(--col2); max-width: var(--col2); }
+.shot-summary-table .sticky-col-3{ width: var(--col3); min-width: var(--col3); max-width: var(--col3); }
+
+/* keep sticky header cells above everything */
+.shot-summary-table thead .sticky-col,
+.shot-summary-table thead .sticky-col-2,
+.shot-summary-table thead .sticky-col-3{
+  z-index: 40;
+  background: var(--bs-tertiary-bg);
+}
+
+/* text truncation (nice for fixed widths) */
+.shot-summary-table .sticky-col,
+.shot-summary-table .sticky-col-2,
+.shot-summary-table .sticky-col-3{
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* numeric alignment helper */
+.text-end{ text-align: right; }
+
+/* scrollbar (webkit) */
+.shot-summary-wrap::-webkit-scrollbar{ height: 10px; width: 10px; }
+.shot-summary-wrap::-webkit-scrollbar-thumb{
+  background: rgba(var(--bs-body-color-rgb), .25);
+  border-radius: 10px;
+}
+.shot-summary-wrap::-webkit-scrollbar-track{
+  background: rgba(var(--bs-body-color-rgb), .08);
+}

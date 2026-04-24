@@ -1,0 +1,268 @@
+<div class="modal fade" id="svpConfigModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content border-0 shadow">
+
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="fa-solid fa-sliders me-2"></i>
+          SVP File Config Setup
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <form id="svpConfigForm">
+          {% csrf_token %}
+
+          <div class="row g-3">
+
+            <div class="col-12">
+              <div class="alert alert-secondary mb-0">
+                <div class="fw-semibold mb-1">How it works</div>
+                <div class="small">
+                  Load a sample file, detect header fields and data columns, map them, then save the config.
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Config Name</label>
+              <input type="text" class="form-control" name="config_name" placeholder="SVX2 Raw .000">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">File Extension</label>
+              <select class="form-select" name="file_ext" id="svpCfgFileExt">
+                <option value=".000">.000</option>
+                <option value=".svp">.svp</option>
+                <option value=".csv">.csv</option>
+                <option value=".txt">.txt</option>
+              </select>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Delimiter</label>
+              <select class="form-select" name="delimiter" id="svpCfgDelimiter">
+                <option value=",">Comma ,</option>
+                <option value=";">Semicolon ;</option>
+                <option value="&#9;">Tab</option>
+                <option value=" ">Space</option>
+              </select>
+            </div>
+
+            <div class="col-md-8">
+              <label class="form-label">Sample File</label>
+              <input
+                type="file"
+                class="form-control"
+                id="svpConfigSampleFile"
+                accept=".svp,.000,.csv,.txt"
+              >
+            </div>
+
+            <div class="col-md-4 d-flex align-items-end">
+              <div class="form-control bg-body-tertiary text-muted small">
+                Choose sample file, then click <span class="fw-semibold">Load Sample</span>.
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Header Line Count</label>
+              <input type="number" class="form-control" name="header_line_count" value="0" min="0">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Data Header Line Index</label>
+              <input type="number" class="form-control" name="data_header_line_index" value="0" min="0">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Data Start Line Index</label>
+              <input type="number" class="form-control" name="data_start_line_index" value="1" min="0">
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Saved Config</label>
+              <select class="form-select" id="svpSavedConfigSelect">
+                <option value="">-- select saved config --</option>
+              </select>
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Notes</label>
+              <input type="text" class="form-control" name="notes" placeholder="Optional notes">
+            </div>
+
+            <div class="col-12">
+              <div class="card border-0 bg-body-tertiary">
+                <div class="card-body py-2">
+                  <div class="d-flex flex-wrap gap-3 align-items-center">
+                    <div class="small">
+                      <span class="fw-semibold">Detected header fields:</span>
+                      <span id="svpDetectedMetaCount" class="badge text-bg-secondary ms-1">0</span>
+                    </div>
+                    <div class="small">
+                      <span class="fw-semibold">Detected columns:</span>
+                      <span id="svpDetectedColumnCount" class="badge text-bg-secondary ms-1">0</span>
+                    </div>
+                    <div class="small text-muted" id="svpDetectedFormatLabel">
+                      No sample loaded
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12"><hr class="my-1"></div>
+
+            <div class="col-12">
+              <div class="fw-semibold">Header Metadata Mapping</div>
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">Coordinates Key</label>
+              <select class="form-select" name="meta_coordinates_key"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Latitude Key</label>
+              <select class="form-select" name="meta_lat_key"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Longitude Key</label>
+              <select class="form-select" name="meta_lon_key"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">ROV Key</label>
+              <select class="form-select" name="meta_rov_key"><option value="">-- none --</option></select>
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">Timestamp Key</label>
+              <select class="form-select" name="meta_timestamp_key"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Name Key</label>
+              <select class="form-select" name="meta_name_key"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Location Key</label>
+              <select class="form-select" name="meta_location_key"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Serial Key</label>
+              <select class="form-select" name="meta_serial_key"><option value="">-- none --</option></select>
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Instrument Make Key</label>
+              <select class="form-select" name="meta_make_key"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Instrument Model Key</label>
+              <select class="form-select" name="meta_model_key"><option value="">-- none --</option></select>
+            </div>
+
+            <div class="col-12"><hr class="my-1"></div>
+
+            <div class="col-12">
+              <div class="fw-semibold">Data Column Mapping</div>
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">Timestamp Column</label>
+              <select class="form-select" name="col_timestamp"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Depth Column</label>
+              <select class="form-select" name="col_depth"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Velocity Column</label>
+              <select class="form-select" name="col_velocity"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Temperature Column</label>
+              <select class="form-select" name="col_temperature"><option value="">-- none --</option></select>
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Salinity Column</label>
+              <select class="form-select" name="col_salinity"><option value="">-- none --</option></select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Density Column</label>
+              <select class="form-select" name="col_density"><option value="">-- none --</option></select>
+            </div>
+
+            <div class="col-12"><hr class="my-1"></div>
+
+            <div class="col-md-3">
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" name="sort_by_depth" id="svpCfgSortByDepth" checked>
+                <label class="form-check-label" for="svpCfgSortByDepth">Sort by depth</label>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" name="clamp_negative_depth_to_zero" id="svpCfgClampDepth" checked>
+                <label class="form-check-label" for="svpCfgClampDepth">Clamp negative depth to zero</label>
+              </div>
+            </div>
+
+            <div class="col-md-5">
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" name="pressure_is_depth" id="svpCfgPressureIsDepth" checked>
+                <label class="form-check-label" for="svpCfgPressureIsDepth">Treat pressure column as depth</label>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Detected Header Fields Preview</label>
+              <div id="svpConfigMetaPreview" class="form-control bg-body-tertiary" style="height: 180px; overflow:auto; white-space: pre-wrap;">No sample loaded</div>
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Detected Data Columns Preview</label>
+              <div id="svpConfigColumnsPreview" class="form-control bg-body-tertiary" style="height: 180px; overflow:auto; white-space: pre-wrap;">No sample loaded</div>
+            </div>
+
+          </div>
+        </form>
+
+        <input type="file" id="svpConfigJsonFile" accept=".json" class="d-none">
+
+        <div id="svpConfigStatus" class="small mt-3 text-muted"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-primary" id="btnPreviewSVPConfig">
+          <i class="fa-solid fa-file-circle-check me-1"></i> Load Sample
+        </button>
+
+        <button type="button" class="btn btn-outline-secondary" id="btnSVPDetectConfig">
+          <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Auto Detect
+        </button>
+
+        <button type="button" class="btn btn-outline-success" id="btnImportSVPConfigJson">
+          <i class="fa-solid fa-file-import me-1"></i> Import JSON
+        </button>
+
+        <button type="button" class="btn btn-outline-warning" id="btnExportSVPConfigJson">
+          <i class="fa-solid fa-file-export me-1"></i> Export JSON
+        </button>
+
+        <button type="button" class="btn btn-outline-danger" id="btnDeleteSVPConfig">
+          <i class="fa-solid fa-trash me-1"></i> Delete Config
+        </button>
+
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+
+        <button type="button" class="btn btn-primary" id="btnSaveSVPConfig">
+          <i class="fa-solid fa-floppy-disk me-1"></i> Save Config
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>

@@ -1,0 +1,599 @@
+from pathlib import Path
+import sqlite3
+import pandas as pd
+import geopandas as gpd
+from pyproj import Transformer
+from core.projectdb import ProjectDB
+from bokeh.plotting import figure
+from bokeh.models import ColumnDataSource, HoverTool, LabelSet, Div
+from bokeh.core.properties import value
+from bokeh.models import Button, CustomJS
+from bokeh.layouts import column, row
+import xyzservices.providers as xyz
+
+
+class PreplotGraphics:
+    def __init__(self, db_path):
+        self.db_path = Path(db_path)
+        self.pdb = ProjectDB(db_path)
+    def _connect(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _error_div(msg: str, details: str | None = None, height: int = 160):
+        # Bootstrap-like alert styling (works even without Bootstrap)
+        html = f"""
+        <div style="
+            border:1px solid #f5c2c7;
+            background:#f8d7da;
+            color:#842029;
+            border-radius:8px;
+            padding:12px 14px;
+            font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial;
+            font-size:14px;
+        ">
+          <div style="font-weight:700; margin-bottom:6px;">Preplot map</div>
+          <div>{msg}</div>
+          {f'<pre style="margin:10px 0 0; white-space:pre-wrap; opacity:.9;">{details}</pre>' if details else ''}
+        </div>
+        """
+        return column(Div(text=html, sizing_mode="stretch_width"), sizing_mode="stretch_both", height=height)
+
+    # in baseproject/preplot_graphics.py
+
+
+
+    def preplot_map(
+            self,
+            rl_table: str = "RLPreplot",
+            sl_table: str = "SLPreplot",
+            src_epsg: int | None = None,
+            height: int = 650,
+            rl_line_width: int = 2,
+            sl_line_width: int = 2,
+            show_tiles: bool = True,
+            # NEW FLAGS:
+            show_shapes: bool = True,
+            show_layers: bool = True,  # CSV layers
+            show_scale_bar: bool = True,
+            max_csv_labels: int = 2000,
+    ):
+        def _load_segments(table_name: str):
+            with self._connect() as con:
+                df = pd.read_sql(f"""
+                    SELECT
+                        Line,
+                        TierLine,
+                        RealStartX,
+                        RealStartY,
+                        RealEndX,
+                        RealEndY,
+                        Points,
+                        RealLineLength,
+                        MinPoint, MaxPoint
+                    FROM {table_name}
+                    WHERE RealStartX IS NOT NULL
+                      AND RealStartY IS NOT NULL
+                      AND RealEndX   IS NOT NULL
+                      AND RealEndY   IS NOT NULL
+                """, con)
+
+            if df.empty:
+                return df
+
+            return df.rename(columns={
+                "RealStartX": "x0",
+                "RealStartY": "y0",
+                "RealEndX": "x1",
+                "RealEndY": "y1",
+            })
+
+        try:
+            rl_df = _load_segments(rl_table)
+            sl_df = _load_segments(sl_table)
+
+            # safe stats when empty
+            number_of_rl = int(len(rl_df))
+            number_of_sl = int(len(sl_df))
+            number_of_rp = int(rl_df["Points"].sum()) if not rl_df.empty else 0
+            number_of_sp = int(sl_df["Points"].sum()) if not sl_df.empty else 0
+
+            # IMPORTANT: if no RL and no SL -> return error DIV (no extra layers/buttons)
+            if rl_df.empty and sl_df.empty:
+                return self._error_div("No RLPreplot or SLPreplot data to plot.")
+
+            # CRS conversion (UTM → WebMercator) for RL/SL segments
+            if src_epsg:
+                transformer = Transformer.from_crs(
+                    f"EPSG:{src_epsg}", "EPSG:3857", always_xy=True
+                )
+                for df in (rl_df, sl_df):
+                    if df.empty:
+                        continue
+                    df["x0"], df["y0"] = transformer.transform(df["x0"].values, df["y0"].values)
+                    df["x1"], df["y1"] = transformer.transform(df["x1"].values, df["y1"].values)
+
+            p = figure(
+                x_axis_type="mercator" if show_tiles else "linear",
+                y_axis_type="mercator" if show_tiles else "linear",
+                sizing_mode="stretch_both",
+                height=height,
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+                title=f"PREPLOT MAP FOR {self.pdb.get_main().name} – RL + SL EPSG:{src_epsg}",
+            )
+
+            if show_tiles:
+                p.add_tile(xyz.CartoDB.Positron)
+
+            # --- RL ---
+            if not rl_df.empty:
+                rl_src = ColumnDataSource(rl_df)
+                rl_r = p.segment(
+                    x0="x0", y0="y0", x1="x1", y1="y1",
+                    source=rl_src,
+                    line_width=rl_line_width,
+                    alpha=0.9,
+                    legend_label=f"Receiver Lines {number_of_rl}/{number_of_rp}",
+                )
+                p.add_tools(HoverTool(
+                    renderers=[rl_r],
+                    tooltips=[
+                        ("Layer", "RL"),
+                        ("Line", "@Line"),
+                        ("TierLine", "@TierLine"),
+                        ("Length", "@RealLineLength"),
+                        ("Num of Points", "@Points"),
+                        ("FRP", "@MinPoint"),
+                        ("LRP", "@MaxPoint"),
+                    ]
+                ))
+
+            # --- SL ---
+            if not sl_df.empty:
+                sl_src = ColumnDataSource(sl_df)
+                sl_r = p.segment(
+                    x0="x0", y0="y0", x1="x1", y1="y1",
+                    source=sl_src,
+                    line_width=sl_line_width,
+                    alpha=0.9,
+                    color="red",
+                    legend_label=f"Source Lines {number_of_sl}/{number_of_sp}",
+                )
+                p.add_tools(HoverTool(
+                    renderers=[sl_r],
+                    tooltips=[
+                        ("Layer", "SL"),
+                        ("Line", "@Line"),
+                        ("TierLine", "@TierLine"),
+                        ("Total Nodes", "@Points"),
+                        ("Length", "@RealLineLength"),
+                        ("FRP", "@MinPoint"),
+                        ("LRP", "@MaxPoint"),
+                    ]
+                ))
+
+            # --- Auto zoom (only on available RL/SL) ---
+            dfs = [df for df in (rl_df, sl_df) if not df.empty]
+            xmin = min(df[["x0", "x1"]].min().min() for df in dfs)
+            xmax = max(df[["x0", "x1"]].max().max() for df in dfs)
+            ymin = min(df[["y0", "y1"]].min().min() for df in dfs)
+            ymax = max(df[["y0", "y1"]].max().max() for df in dfs)
+
+            pad = 2000 if show_tiles else 0
+            p.x_range.start, p.x_range.end = xmin - pad, xmax + pad
+            p.y_range.start, p.y_range.end = ymin - pad, ymax + pad
+
+            p.legend.location = "top_left"
+            p.legend.click_policy = "hide"
+
+            # --- Add extras ONLY if RL/SL exists (we are here => yes) ---
+            # Use project EPSG as fallback for shapefile/CSV if needed
+            default_epsg = src_epsg or self.pdb.get_main().epsg
+
+            if show_shapes:
+                self.add_project_shapes_layers(p, default_src_epsg=default_epsg)
+
+            if show_layers:
+                self.add_csv_layers_to_map(
+                    p,
+                    csv_epsg=default_epsg,
+                    show_tiles=show_tiles,
+                    max_labels=max_csv_labels,
+                )
+
+            if show_scale_bar and show_tiles:
+                # scale bar makes sense in mercator meters
+                self.add_scale_bar(p)
+
+            # --- Controls (legend) ---
+            # Guard: legend exists if RL/SL rendered with legend_label
+            if p.legend and len(p.legend) > 0:
+                toggle_legend_btn = Button(label="Hide legend", button_type="primary", width=120)
+                toggle_legend_btn.js_on_click(CustomJS(
+                    args=dict(legend=p.legend[0], btn=toggle_legend_btn),
+                    code="""
+                        legend.visible = !legend.visible;
+                        btn.label = legend.visible ? "Hide legend" : "Show legend";
+                    """
+                ))
+
+                cycle_legend_pos_btn = Button(label="Legend position", button_type="default", width=150)
+                cycle_legend_pos_btn.js_on_click(CustomJS(
+                    args=dict(legend=p.legend[0]),
+                    code="""
+                        const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
+                        const current = legend.location;
+                        const idx = positions.indexOf(current);
+                        legend.location = positions[(idx + 1) % positions.length];
+                    """
+                ))
+
+                controls = row(toggle_legend_btn, cycle_legend_pos_btn)
+                return column(controls, p, sizing_mode="stretch_both")
+
+            return column(p, sizing_mode="stretch_both")
+
+        except Exception as e:
+            return self._error_div("Failed to build preplot map.", details=f"{type(e).__name__}: {e}")
+
+    def add_scale_bar(self,
+            p,
+            length_m=1000,  # scale length in meters
+            location="bottom_left",
+            height_px=6,
+    ):
+        """
+        Add a simple scale bar to a WebMercator Bokeh map.
+        Assumes x/y are EPSG:3857 (meters).
+        """
+
+        # Estimate position from current ranges
+        x0 = p.x_range.start
+        x1 = p.x_range.end
+        y0 = p.y_range.start
+        y1 = p.y_range.end
+
+        pad_x = (x1 - x0) * 0.05
+        pad_y = (y1 - y0) * 0.05
+
+        if location == "bottom_left":
+            x = x0 + pad_x
+            y = y0 + pad_y
+        elif location == "bottom_right":
+            x = x1 - pad_x - length_m
+            y = y0 + pad_y
+        else:
+            raise ValueError("location must be 'bottom_left' or 'bottom_right'")
+
+        # Scale bar (rectangle)
+        p.rect(
+            x=x + length_m / 2,
+            y=y,
+            width=length_m,
+            height=(y1 - y0) * 0.002,
+            fill_color="black",
+            line_color="black",
+        )
+
+        # Label
+        label = f"{int(length_m / 1000)} km" if length_m >= 1000 else f"{length_m} m"
+
+        p.text(
+            x=[x + length_m / 2],
+            y=[y + (y1 - y0) * 0.01],
+            text=[label],
+            text_align="center",
+            text_baseline="bottom",
+            text_font_size="10pt",
+        )
+
+    def add_project_shapes_layers(
+            self,
+            p,
+            shapes_table: str = "project_shapes",
+            default_src_epsg: int | None = None,  # used only if shapefile has no CRS
+            fill_alpha: float = 0.25,
+            line_alpha: float = 0.95,
+            point_size: int = 6,
+    ):
+        """
+        Read all shapefiles from `project_shapes` and plot them on existing Bokeh figure `p`.
+
+        Table schema expected:
+          FullName (path), FileName, isFilled, FillColor, LineColor, LineWidth, LineStyle
+        """
+
+        def _bokeh_dash(style: str) -> str:
+            s = (style or "").strip().lower()
+            # Bokeh supports: 'solid', 'dashed', 'dotted', 'dotdash', 'dashdot'
+            mapping = {
+                "": "solid",
+                "solid": "solid",
+                "-": "solid",
+                "dashed": "dashed",
+                "--": "dashed",
+                "dash": "dashed",
+                "dotted": "dotted",
+                ":": "dotted",
+                "dotdash": "dotdash",
+                "-.": "dashdot",
+                "dashdot": "dashdot",
+            }
+            return mapping.get(s, "solid")
+
+        # 1) Read styles from DB
+        with self._connect() as con:
+            rows = con.execute(f"""
+                SELECT
+                    FullName,
+                    FileName,
+                    COALESCE(isFilled, 0) AS isFilled,
+                    COALESCE(FillColor, '#000000') AS FillColor,
+                    COALESCE(LineColor, '#000000') AS LineColor,
+                    COALESCE(LineWidth, 1) AS LineWidth,
+                    COALESCE(LineStyle, '') AS LineStyle,
+                    COALESCE(HatchPattern, '') AS HatchPattern
+                FROM {shapes_table}
+                ORDER BY FileName, FullName
+            """).fetchall()
+
+        if not rows:
+            return p  # nothing to add
+
+        # 2) Plot each shapefile
+        for r in rows:
+            shp_path = r["FullName"]
+            layer_name = (r["FileName"] or Path(shp_path).stem) if shp_path else "shape"
+
+            is_filled = int(r["isFilled"] or 0) == 1
+            fill_color = r["FillColor"] or "#000000"
+            line_color = r["LineColor"] or "#000000"
+            line_width = int(r["LineWidth"] or 1)
+            line_dash = _bokeh_dash(r["LineStyle"])
+            hatch_pattern = r["HatchPattern"]
+
+            if not shp_path or not Path(shp_path).exists():
+                # skip missing files
+                continue
+
+            # Load shapefile
+            gdf = gpd.read_file(shp_path)
+
+            # Ensure CRS
+            if gdf.crs is None:
+                if default_src_epsg is None:
+                    raise ValueError(f"SHP has no CRS: {shp_path}. Provide default_src_epsg (e.g. 4326 or 32634).")
+                gdf = gdf.set_crs(epsg=default_src_epsg)
+
+            # Reproject to WebMercator for tiled maps
+            gdf = gdf.to_crs(epsg=3857)
+
+            if gdf.empty:
+                continue
+
+            # explode multiparts into single features (important)
+            gdf = gdf.explode(index_parts=False)
+
+            gtypes = set(gdf.geometry.geom_type.unique().tolist())
+
+            # ---- Points / MultiPoints ----
+            if "Point" in gtypes or "MultiPoint" in gtypes:
+                pts = gdf[gdf.geometry.geom_type.isin(["Point", "MultiPoint"])].copy()
+                pts = pts.explode(index_parts=False)
+                pts["x"] = pts.geometry.x
+                pts["y"] = pts.geometry.y
+                src = ColumnDataSource(pts.drop(columns=["geometry"], errors="ignore"))
+                p.scatter(
+                    x="x", y="y",
+                    source=src,
+                    size=point_size,
+                    fill_color=line_color,
+                    line_color=line_color,
+                    alpha=line_alpha,
+                    legend_label=layer_name,
+                    level="glyph",
+                )
+
+            # ---- Lines / MultiLines ----
+            if "LineString" in gtypes or "MultiLineString" in gtypes:
+                lines = gdf[gdf.geometry.geom_type.isin(["LineString", "MultiLineString"])].copy()
+                lines = lines.explode(index_parts=False)
+
+                xs, ys = [], []
+                for geom in lines.geometry:
+                    if geom is None:
+                        continue
+                    x, y = geom.xy
+                    xs.append(list(x))
+                    ys.append(list(y))
+
+                if xs:
+                    src = ColumnDataSource({"xs": xs, "ys": ys})
+                    p.multi_line(
+                        xs="xs", ys="ys",
+                        source=src,
+                        line_color=line_color,
+                        line_width=line_width,
+                        line_dash=line_dash,
+                        line_alpha=line_alpha,
+                        legend_label=layer_name,
+                        level="glyph",
+                    )
+
+            # ---- Polygons / MultiPolygons (exterior only) ----
+            if "Polygon" in gtypes or "MultiPolygon" in gtypes:
+                polys = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].copy()
+                polys = polys.explode(index_parts=False)
+
+                xs, ys = [], []
+                for geom in polys.geometry:
+                    if geom is None:
+                        continue
+                    # exterior ring only (holes ignored)
+                    x, y = geom.exterior.xy
+                    xs.append(list(x))
+                    ys.append(list(y))
+
+                if xs:
+                    src = ColumnDataSource({"xs": xs, "ys": ys})
+                    hatch = None if hatch_pattern == "" else hatch_pattern
+                    p.patches(
+                        xs="xs", ys="ys",
+                        source=src,
+                        fill_color=(fill_color if is_filled else None),
+                        fill_alpha=(fill_alpha if is_filled else 0.0),
+                        hatch_pattern=hatch,
+                        hatch_color=line_color,
+                        line_color=line_color,
+                        line_width=line_width,
+                        line_dash=line_dash,
+                        line_alpha=line_alpha,
+                        legend_label=layer_name,
+                        level="glyph",
+                    )
+
+        # click legend to hide/show layers
+        if p.legend:
+            p.legend.click_policy = "hide"
+
+        return p
+
+    def add_csv_layers_to_map(
+            self,
+            p,  # bokeh figure
+            csv_epsg: int | None = None,
+            show_tiles: bool = True,
+            max_labels: int = 2000,  # safety: labels can be heavy
+    ):
+        """
+        Add CSVLayers/CSVpoints on top of existing figure `p`.
+
+        Legend label: CSVLayers.Name
+        Marker style/size/color: CSVLayers.PointStyle/PointSize/PointColor
+        Point text label: CSVpoints.Point (LabelSet)
+        """
+
+        def _bokeh_marker(marker: str | None) -> str:
+            m = (marker or "").strip().lower()
+            allowed = {
+                "circle", "square", "triangle", "diamond",
+                "inverted_triangle", "asterisk",
+                "cross", "x", "star", "hex",
+            }
+            return m if m in allowed else "circle"
+
+        # ---- load layers + points ----
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT
+                    ID, Name, PointStyle, PointColor, PointSize
+                FROM CSVLayers
+                ORDER BY ID DESC
+            """)
+            layers = [dict(r) for r in cur.fetchall()]
+
+            if not layers:
+                return p
+
+            # Prepare transformer if needed (to WebMercator for tiles)
+            transformer = None
+            if show_tiles and csv_epsg:
+                transformer = Transformer.from_crs(f"EPSG:{csv_epsg}", "EPSG:3857", always_xy=True)
+
+
+
+            for layer in layers:
+                layer_id = layer["ID"]
+                layer_name = layer.get("Name") or f"Layer {layer_id}"
+                marker = _bokeh_marker(layer.get("PointStyle"))
+                color = layer.get("PointColor") or "#000000"
+                size = int(layer.get("PointSize") or 4)
+
+                cur.execute("""
+                    SELECT Point, X, Y, Z, Attr1, Attr2, Attr3
+                    FROM CSVpoints
+                    WHERE Layer_FK = ?
+                """, (layer_id,))
+                pts = [dict(r) for r in cur.fetchall()]
+                if not pts:
+                    continue
+
+                # Build columns
+                xs = [row.get("X") for row in pts]
+                ys = [row.get("Y") for row in pts]
+                names = [str(row.get("Point") or "") for row in pts]
+
+                # Convert CRS if needed
+                if transformer:
+                    xs, ys = transformer.transform(xs, ys)
+
+                src = ColumnDataSource(data=dict(
+                    x=xs,
+                    y=ys,
+                    Point=names,
+                    Z=[row.get("Z") for row in pts],
+                    Attr1=[row.get("Attr1") for row in pts],
+                    Attr2=[row.get("Attr2") for row in pts],
+                    Attr3=[row.get("Attr3") for row in pts],
+                ))
+
+                # Draw points (scatter)
+                r = p.scatter(
+                    "x", "y",
+                    source=src,
+                    marker=marker,
+                    size=size,
+                    fill_color=value(color),  # constant color
+                    line_color=None,
+                    fill_alpha=0.9,
+                    legend_label=layer_name,
+                )
+
+                # Hover for this layer
+                p.add_tools(HoverTool(
+                    renderers=[r],
+                    tooltips=[
+                        ("Layer", layer_name),
+                        ("Point", "@Point"),
+                        ("X", "@x{0,0.00}"),
+                        ("Y", "@y{0,0.00}"),
+                        ("Z", "@Z"),
+                        ("Attr1", "@Attr1"),
+                        ("Attr2", "@Attr2"),
+                        ("Attr3", "@Attr3"),
+                    ]
+                ))
+
+                # Text labels near symbols (LabelSet)
+                # NOTE: labels can be heavy; limit for performance
+                if max_labels and len(xs) > max_labels:
+                    # label only first max_labels points
+                    label_src = ColumnDataSource(data=dict(
+                        x=xs[:max_labels],
+                        y=ys[:max_labels],
+                        Point=names[:max_labels],
+                    ))
+                else:
+                    label_src = src
+
+                r_text = p.text(
+                    x="x",
+                    y="y",
+                    text="Point",
+                    source=label_src,
+                    x_offset=6,
+                    y_offset=6,
+                    text_font_size="9pt",
+                    text_alpha=0.9,
+                    legend_label=layer_name,  # ✅ same legend label
+                )
+
+        return p
+
+

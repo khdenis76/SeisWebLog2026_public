@@ -1,0 +1,169 @@
+<div class="card shadow">
+    <div class="card-header bg-danger text-white fw-bold">
+        <h5><i class="fas fa-bomb me-2"></i> SOURCE PRODUCTION</h5>
+    </div>
+    <div class="card-body">
+        <div class="container-fluid mt-3">
+
+    <!-- Nav Tabs -->
+    <ul class="nav nav-tabs" id="sourceTab" role="tablist">
+
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active"
+                    id="shots-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#shots-pane"
+                    type="button"
+                    role="tab">
+                <i class="fas fa-crosshairs me-1"></i>
+                   SOURCE SPS
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link"
+                    id="summary-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#summary-pane"
+                    type="button"
+                    role="tab">
+                <i class="fas fa-table me-1"></i>
+                <i class="fas fa-gun me-2"></i> SHOT TABLE
+            </button>
+        </li>
+
+
+
+        <li class="nav-item" role="presentation">
+            <button class="nav-link"
+                    id="stats-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#stats-pane"
+                    type="button"
+                    role="tab">
+                <i class="fas fa-chart-line me-1"></i>
+                Statistics
+            </button>
+        </li>
+
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content mt-3" id="sourceTabContent">
+
+        <!-- SHOT-TABLE TAB -->
+        <div class="tab-pane fade"
+             id="summary-pane"
+             role="tabpanel">
+
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div>
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-primary"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#shotSummaryFilterModal">
+                                    <i class="fa fa-filter me-1"></i> Filters
+                                </button>
+                                 <button type="button"
+                                         class="btn btn-sm btn-outline-primary"
+                                         data-bs-toggle="modal"
+                                         data-bs-target="#shotSortModal">
+                                   <i class="fas fa-sort me-1"></i> Sort
+                                 </button>
+                                 <span class="small text-muted" id="shot-summary-filter-status">
+                                   Showing {{ shot_line_summary_count|default:0 }} rows
+                                 </span>
+                         </div>
+                                <span class="small text-muted" id="shot-table-file-name">
+                                    Last uploaded ST:
+                                    {% if st_file_name %}
+                                        {{ st_file_name }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </span>
+
+                    </div>
+                    <div id="shot-summary-container">
+                        {% include "source/partials/shot_line_summary_table.html" %}
+                    </div>
+                </div>
+                <div class="card-footer d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                        <div class="small text-muted">
+                            Selected lines: <span id="shot-summary-selected-count">0</span>
+                        </div>
+                        <button type="button" id="btn-recalc-lines"
+                                class="btn btn btn-warning shadow" disabled>
+                              <i class="fa fa-sync me-2"></i> Recalc Selected
+                        </button>
+                        <button type="button"
+                                id="shot-summary-delete-button"
+                                class="btn btn-danger shadow"
+                                disabled>
+                            <i class="fas fa-trash-can me-2"></i>DELETE SELECTED LINES
+                        </button>
+                </div>
+            </div>
+
+        </div>
+
+        <!--SOURCE SPS TAB -->
+        <div class="tab-pane fade show active" id="shots-pane" role="tabpanel">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5>Shot Data</h5>
+
+                    <button type="button"
+                             class="btn btn-outline-info btn-sm position-relative"
+                             data-bs-toggle="modal"
+                             data-bs-target="#spsFilterModal"
+                             id="sps-filter-button">
+
+                         <i class="fa-solid fa-filter me-1"></i>
+                         Filter
+                     
+                         <span id="sps-filter-badge"
+                               class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">
+                             0
+                         </span>
+                     </button>
+                    <!--<button type="button"
+                            class="btn btn-outline-info btn-sm me-2"
+                            data-bs-toggle="modal"
+                            data-bs-target="#spsSortModal"
+                            id="sps-sort-open">
+                      <i class="fas fa-sort me-1"></i> Sort
+                    </button>-->
+                    {% include "source/partials/sps_table.html" %}
+                </div>
+                <div class="card-footer">
+                  <button type="button"
+                       id="sps-delete-button"
+                       class="btn btn-danger shadow"
+                       data-url="{% url 'sps_delete_selected' %}">
+                            <i class="fas fa-trash-can me-2"></i>DELETE SPS
+                  </button>
+                  <span class="small text-muted" id="sps-sort-label"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- STATISTICS TAB -->
+        <div class="tab-pane fade" id="stats-pane" role="tabpanel">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5>Shot Statistics</h5>
+                    <div id="shot-stats-container">
+                        {{ project_summary|safe }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+    </div>
+
+</div>

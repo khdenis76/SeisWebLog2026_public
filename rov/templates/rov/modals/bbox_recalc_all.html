@@ -1,0 +1,26 @@
+<div class="modal fade" id="recalcAllBBoxStatsModal" tabindex="-1" aria-labelledby="recalcAllBBoxStatsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg">
+      <div class="modal-header bg-warning-subtle">
+        <h5 class="modal-title" id="recalcAllBBoxStatsModalLabel">
+          <i class="fa fa-triangle-exclamation me-2"></i>
+          Recalculate BlackBox File Stats
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        Recalculate <strong>all</strong> rows in <code>BlackBox_FileStats</code>?
+        <div class="small text-muted mt-2">
+          This will process all BBOX files one by one and refresh the file summary table.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning" id="confirm-recalc-all-bbox-stats">
+          <i class="fa fa-sync me-2"></i>Recalculate
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+

@@ -1,0 +1,20 @@
+{% for shp in shp_list %}
+  {% if shp.is_indb == 0 %}
+  <tr>
+    <td>{{ forloop.counter }}</td>
+    <td>
+      <input type="checkbox"
+             class="shape-checkbox"
+             data-fullname="{{ shp.full_name }}">
+    </td>
+    <td>{{ shp.file_name }}</td>
+    <td>{{ shp.file_size|floatformat:1 }}</td>
+  </tr>
+  {% endif %}
+{% empty %}
+  <tr>
+    <td colspan="4" class="text-muted text-center">
+      No shapes found
+    </td>
+  </tr>
+{% endfor %}

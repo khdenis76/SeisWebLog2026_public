@@ -1,0 +1,170 @@
+{% for row in rows %}
+<tr
+    class="bbox-file-row"
+    data-file-id="{{ row.ID }}"
+    data-file-name="{{ row.FileName }}"
+>
+    <td class="sticky-check text-center align-middle">
+        <div class="form-check d-flex justify-content-center mb-0">
+            <input
+                class="form-check-input bbox-file-checkbox"
+                type="checkbox"
+                value="{{ row.ID }}"
+                aria-label="Select file {{ row.FileName }}"
+            >
+        </div>
+    </td>
+
+    <td class="align-middle">{{ row.ID }}</td>
+
+    <td class="align-middle">
+        <button
+            type="button"
+            class="btn btn-link btn-sm p-0 text-decoration-none bbox-file-open fw-semibold"
+            data-file-id="{{ row.ID }}"
+            data-file-name="{{ row.FileName }}"
+            title="Load plots for this file"
+        >
+            {{ row.FileName }}
+        </button>
+    </td>
+
+    <td class="align-middle">{{ row.ConfigName|default:"-" }}</td>
+    <td class="align-middle">{{ row.UploadedAt|default:"-" }}</td>
+    <td class="align-middle">{{ row.StartTime|default:"-" }}</td>
+    <td class="align-middle">{{ row.EndTime|default:"-" }}</td>
+    <td class="align-middle">{{ row.DurationText|default:"-" }}</td>
+    <td class="align-middle">{{ row.RowCount|default:"-" }}</td>
+
+    <td class="align-middle
+        {% if row.MaxTimeGapSec and row.MaxTimeGapSec > 10 %}text-danger fw-semibold
+        {% elif row.MaxTimeGapSec and row.MaxTimeGapSec > 2 %}text-warning fw-semibold
+        {% elif row.MaxTimeGapSec %}text-success
+        {% endif %}
+    ">
+        {% if row.MaxTimeGapSec is not None %}
+            {{ row.MaxTimeGapSec|floatformat:1 }}
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle">
+        {% if row.ROV1_Depth_Min is not None %}
+            {{ row.ROV1_Depth_Min|floatformat:1 }} / {{ row.ROV1_Depth_Max|floatformat:1 }}
+            <div class="small text-muted">
+                d1: {{ row.ROV1_Depth1_Min|floatformat:1 }} / {{ row.ROV1_Depth1_Max|floatformat:1 }}
+            </div>
+            <div class="small text-muted">
+                d2: {{ row.ROV1_Depth2_Min|floatformat:1 }} / {{ row.ROV1_Depth2_Max|floatformat:1 }}
+            </div>
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle">
+        {% if row.ROV2_Depth_Min is not None %}
+            {{ row.ROV2_Depth_Min|floatformat:1 }} / {{ row.ROV2_Depth_Max|floatformat:1 }}
+            <div class="small text-muted">
+                d1: {{ row.ROV2_Depth1_Min|floatformat:1 }} / {{ row.ROV2_Depth1_Max|floatformat:1 }}
+            </div>
+            <div class="small text-muted">
+                d2: {{ row.ROV2_Depth2_Min|floatformat:1 }} / {{ row.ROV2_Depth2_Max|floatformat:1 }}
+            </div>
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle">
+        {% if row.ROV1_SOG_Min is not None %}
+            {{ row.ROV1_SOG_Min|floatformat:1 }} / {{ row.ROV1_SOG_Max|floatformat:1 }}
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle">
+        {% if row.ROV2_SOG_Min is not None %}
+            {{ row.ROV2_SOG_Min|floatformat:1 }} / {{ row.ROV2_SOG_Max|floatformat:1 }}
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle
+        {% if row.ROV1_PosDiff_Max and row.ROV1_PosDiff_Max > 3 %}text-danger fw-semibold
+        {% elif row.ROV1_PosDiff_Max and row.ROV1_PosDiff_Max > 1 %}text-warning fw-semibold
+        {% elif row.ROV1_PosDiff_Max %}text-success
+        {% endif %}
+    ">
+        {% if row.ROV1_PosDiff_Max is not None %}
+            max: {{ row.ROV1_PosDiff_Max|floatformat:2 }}
+            <div class="small text-muted">
+                avg: {{ row.ROV1_PosDiff_Avg|floatformat:2 }}
+            </div>
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle
+        {% if row.ROV2_PosDiff_Max and row.ROV2_PosDiff_Max > 3 %}text-danger fw-semibold
+        {% elif row.ROV2_PosDiff_Max and row.ROV2_PosDiff_Max > 1 %}text-warning fw-semibold
+        {% elif row.ROV2_PosDiff_Max %}text-success
+        {% endif %}
+    ">
+        {% if row.ROV2_PosDiff_Max is not None %}
+            max: {{ row.ROV2_PosDiff_Max|floatformat:2 }}
+            <div class="small text-muted">
+                avg: {{ row.ROV2_PosDiff_Avg|floatformat:2 }}
+            </div>
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle {% if row.GNSS1_HDOP_Max and row.GNSS1_HDOP_Max > 2 %}text-danger fw-semibold{% endif %}">
+        {% if row.GNSS1_HDOP_Min is not None %}
+            {{ row.GNSS1_HDOP_Min|floatformat:1 }} / {{ row.GNSS1_HDOP_Max|floatformat:1 }}
+            <div class="small text-muted">
+                Q: {{ row.GNSS1_FixQuality_Min|default:"-" }} / {{ row.GNSS1_FixQuality_Max|default:"-" }}
+            </div>
+            <div class="small text-muted">
+                NOS: {{ row.GNSS1_NOS_Min|default:"-" }} / {{ row.GNSS1_NOS_Max|default:"-" }}
+            </div>
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle {% if row.GNSS2_HDOP_Max and row.GNSS2_HDOP_Max > 2 %}text-danger fw-semibold{% endif %}">
+        {% if row.GNSS2_HDOP_Min is not None %}
+            {{ row.GNSS2_HDOP_Min|floatformat:1 }} / {{ row.GNSS2_HDOP_Max|floatformat:1 }}
+            <div class="small text-muted">
+                Q: {{ row.GNSS2_FixQuality_Min|default:"-" }} / {{ row.GNSS2_FixQuality_Max|default:"-" }}
+            </div>
+            <div class="small text-muted">
+                NOS: {{ row.GNSS2_NOS_Min|default:"-" }} / {{ row.GNSS2_NOS_Max|default:"-" }}
+            </div>
+        {% else %}
+            -
+        {% endif %}
+    </td>
+
+    <td class="align-middle">
+        {% if row.Barometer_Min is not None %}
+            {{ row.Barometer_Min|floatformat:1 }} / {{ row.Barometer_Max|floatformat:1 }}
+        {% else %}
+            -
+        {% endif %}
+    </td>
+</tr>
+{% empty %}
+<tr>
+    <td colspan="17" class="text-center text-muted py-4">
+        No BBOX files found.
+    </td>
+</tr>
+{% endfor %}

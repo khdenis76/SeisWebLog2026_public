@@ -1,0 +1,118 @@
+<!-- Source QC Tabs -->
+<ul class="nav nav-tabs" id="sourceQcTabs" role="tablist">
+
+  <!-- Progress Map -->
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active"
+        id="progress-map-tab"
+        data-bs-toggle="tab"
+        data-bs-target="#progress-map"
+        type="button" role="tab">
+          Progress Map
+    </button>
+  </li>
+
+  <!-- Statistics -->
+  <li class="nav-item" role="presentation">
+    <button class="nav-link"
+            id="statistics-tab"
+            data-bs-toggle="tab"
+            data-bs-target="#statistics"
+            type="button"
+            role="tab">
+        <i class="fa-solid fa-chart-column me-1"></i> Statistics
+    </button>
+  </li>
+
+
+  <li class="nav-item" role="presentation">
+    <button
+             class="nav-link"
+             id="source-production-tab"
+             data-bs-toggle="tab"
+             data-bs-target="#source-production-pane"
+             data-url="{% url 'source_daybyday_production_json' %}"
+             type="button"
+             role="tab"
+             aria-controls="source-production-pane"
+             aria-selected="false">
+            <i class="fas fa-calendar"></i>  Daily Production
+    </button>
+  </li>
+
+  <!-- Line Summary -->
+  <li class="nav-item" role="presentation">
+    <button class="nav-link"
+            id="line-summary-tab"
+            data-bs-toggle="tab"
+            data-bs-target="#line-summary"
+            type="button"
+            role="tab">
+        <i class="fa-solid fa-table me-1"></i> Line Summary
+    </button>
+  </li>
+
+</ul>
+
+
+<!-- Tab Content -->
+<div class="tab-content mt-3" id="sourceQcTabsContent">
+
+  <!-- Progress Map -->
+<div class="tab-pane fade show active" id="progress-map" role="tabpanel">
+  <div class="card">
+    <div class="card-body">
+
+      <!-- loading / error area -->
+      <div id="source-map-msg" class="small text-muted mb-2"></div>
+
+      <!-- bokeh will be injected here -->
+      <div id="source-progress-map"
+           class="border rounded"
+           style="height: 100vh">
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+  <!-- Statistics -->
+<div class="tab-pane fade" id="statistics" role="tabpanel">
+  <div class="card">
+    <div class="card-body">
+
+      <div id="source-stats-msg" class="small text-muted mb-2"></div>
+
+      <div id="source-sunburst"
+           class="border rounded"
+           style="height: 70vh; min-height: 420px;">
+      </div>
+
+    </div>
+  </div>
+</div>
+  <!--Day by Day Production -->
+<div class="tab-pane fade" id="source-production-pane" role="tabpanel" aria-labelledby="source-production-tab">
+      <div class="card">
+              <div class="card-body">
+                    <div id="source-stats-msg" class="small text-muted mb-2"></div>
+                    <div id="daily-production"
+                        class="border rounded w-100"
+                        style="height: 50vh;">
+                   </div>
+
+    </div>
+  </div>
+
+</div>
+
+  <!-- Line Summary -->
+  <div class="tab-pane fade"
+       id="line-summary"
+       role="tabpanel">
+       {% include "source/partials/source_line_qc_tab.html" %}
+
+  </div>
+
+</div>

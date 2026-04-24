@@ -1,0 +1,158 @@
+<div class="modal fade"
+     id="shotSummaryFilterModal"
+     tabindex="-1"
+     aria-labelledby="shotSummaryFilterModalLabel"
+     aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow-lg">
+
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title" id="shotSummaryFilterModalLabel">
+                    <i class="fa fa-filter me-2"></i>SHOT Line Summary Filters
+                </h5>
+                <button type="button"
+                        class="btn-close btn-close-white"
+                        data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+            </div>
+
+            <div class="modal-body">
+                <div class="container-fluid">
+                    <div class="row g-3">
+
+                        <div class="col-md-4">
+                            <label for="filterShotNavLineCode" class="form-label fw-semibold">Line Code</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="filterShotNavLineCode"
+                                   placeholder="e.g. 17753 or 17753R0204">
+                        </div>
+
+                        <div class="col-md-2">
+                            <label for="filterShotLine" class="form-label fw-semibold">Line</label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="filterShotLine"
+                                   placeholder="e.g. 17753">
+                        </div>
+
+                        <div class="col-md-2">
+                            <label for="filterShotAttempt" class="form-label fw-semibold">Attempt</label>
+                            <select class="form-select" id="filterShotAttempt">
+                                <option value="">Any</option>
+                                {% for a in shot_filter_options.attempts %}
+                                    <option value="{{ a }}">{{ a }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="col-md-2">
+                            <label for="filterShotSeqFrom" class="form-label fw-semibold">Seq From</label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="filterShotSeqFrom"
+                                   placeholder="{{ shot_filter_options.seq_range.min_seq|default_if_none:'' }}">
+                        </div>
+
+                        <div class="col-md-2">
+                            <label for="filterShotSeqTo" class="form-label fw-semibold">Seq To</label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="filterShotSeqTo"
+                                   placeholder="{{ shot_filter_options.seq_range.max_seq|default_if_none:'' }}">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label for="filterShotPurposeId" class="form-label fw-semibold">Purpose</label>
+                            <select class="form-select" id="filterShotPurposeId">
+                                <option value="">Any</option>
+                                {% for p in shot_filter_options.purposes %}
+                                    <option value="{{ p.purpose_id }}">{{ p.purpose }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label for="filterShotVesselId" class="form-label fw-semibold">Vessel</label>
+                            <select class="form-select" id="filterShotVesselId">
+                                <option value="">Any</option>
+                                {% for v in shot_filter_options.vessels %}
+                                    <option value="{{ v.vessel_id }}">{{ v.vessel_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label for="filterShotInSL" class="form-label fw-semibold">In SL Solution</label>
+                            <select class="form-select" id="filterShotInSL">
+                                <option value="">Any</option>
+                                <option value="1">Yes</option>
+                                <option value="0">No</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label for="filterShotQcAll" class="form-label fw-semibold">QC All Match</label>
+                            <select class="form-select" id="filterShotQcAll">
+                                <option value="">Any</option>
+                                <option value="1">Yes</option>
+                                <option value="0">No</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label for="filterShotQcAny" class="form-label fw-semibold">QC Any Match</label>
+                            <select class="form-select" id="filterShotQcAny">
+                                <option value="">Any</option>
+                                <option value="1">Yes</option>
+                                <option value="0">No</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label for="filterShotDiffsum" class="form-label fw-semibold">Difference Status</label>
+                            <select class="form-select" id="filterShotDiffsum">
+                                <option value="">Any</option>
+                                <option value="Ok">Ok</option>
+                                <option value="Error">Error</option>
+                            </select>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer d-flex justify-content-between">
+                <div class="small text-muted">
+                    Filters are applied in backend from <strong>SHOT_LineSummary</strong>
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button"
+                            class="btn btn-outline-secondary"
+                            id="btnResetShotSummaryFilters">
+                        <span class="shot-reset-btn-label">
+                            <i class="fa fa-rotate-left me-1"></i>Reset
+                        </span>
+                        <span class="shot-reset-btn-loading d-none">
+                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                            Resetting...
+                        </span>
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-primary"
+                            id="btnApplyShotSummaryFilters">
+                        <span class="shot-filter-btn-label">
+                            <i class="fa fa-check me-1"></i>Apply Filters
+                        </span>
+                        <span class="shot-filter-btn-loading d-none">
+                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                            Filtering...
+                        </span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>

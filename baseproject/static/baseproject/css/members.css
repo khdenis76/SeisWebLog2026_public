@@ -1,0 +1,58 @@
+/* ================================
+   SeisWebLog Project Users Style
+   ================================ */
+
+.swl-hero {
+  border-radius: 16px;
+  padding: 18px;
+  color: #fff;
+  background: linear-gradient(110deg, #0d6efd 0%, #6f42c1 45%, #20c997 100%);
+  box-shadow: 0 10px 24px rgba(0,0,0,.10);
+}
+
+.swl-hero .sub {
+  opacity: .92;
+  font-size: .95rem;
+}
+
+.swl-card {
+  border: 0;
+  border-radius: 16px;
+  box-shadow: 0 10px 22px rgba(0,0,0,.06);
+  overflow: hidden;
+}
+
+.swl-card-h {
+  background: rgba(13,110,253,.06);
+  border-bottom: 1px solid rgba(0,0,0,.06);
+}
+
+.swl-pill {
+  border-radius: 999px;
+  padding: .22rem .6rem;
+  font-weight: 600;
+  font-size: .78rem;
+  letter-spacing: .2px;
+}
+
+.swl-pill-view { background: rgba(13,110,253,.12); color: #0d6efd; }
+.swl-pill-edit { background: rgba(32,201,151,.14); color: #198754; }
+.swl-pill-off  { background: rgba(255,193,7,.18); color: #b58100; }
+.swl-pill-on   { background: rgba(32,201,151,.14); color: #198754; }
+
+.swl-table thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  border-bottom: 2px solid rgba(0,0,0,.06);
+  z-index: 2;
+}
+
+.swl-table tbody tr:hover {
+  background: rgba(13,110,253,.045);
+}
+
+.swl-btn {
+  border-radius: 12px;
+  font-weight: 600;
+}

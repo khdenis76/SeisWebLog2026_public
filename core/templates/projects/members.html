@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Members of {{ project.name }}{% endblock %}
+{% block content %}
+<div class="card shadow-sm rounded-4 mb-3">
+  <div class="card-body">
+    <h2 class="h5 mb-3">
+      <i class="fa-solid fa-users me-2"></i>Members – {{ project.name }}
+    </h2>
+
+    <form method="post" class="row g-2">
+      {% csrf_token %}
+      <div class="col-md-5">
+        {{ form.user.label_tag }}
+        {{ form.user }}
+      </div>
+      <div class="col-md-3">
+        {{ form.role.label_tag }}
+        {{ form.role }}
+      </div>
+      <div class="col-md-4 d-flex align-items-end">
+        <button class="btn btn-primary">
+          <i class="fa-solid fa-user-plus me-2"></i>Add member
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card shadow-sm rounded-4">
+  <div class="card-body">
+    <h3 class="h6 mb-3">Current members</h3>
+    <ul class="list-group">
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <span>
+          <strong>{{ project.owner.username }}</strong> (Owner)
+        </span>
+      </li>
+      {% for m in members %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <span>{{ m.user.username }}</span>
+        <span class="badge bg-secondary text-uppercase">{{ m.get_role_display }}</span>
+      </li>
+      {% empty %}
+      <li class="list-group-item text-muted">No additional members.</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

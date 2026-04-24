@@ -1,0 +1,1 @@
+(function(){function resizePlotlyFigures(){if(!window.Plotly)return;document.querySelectorAll('.js-plotly-plot').forEach((el)=>{try{window.Plotly.Plots.resize(el)}catch(err){}})}window.addEventListener('load',resizePlotlyFigures);window.addEventListener('resize',resizePlotlyFigures);document.addEventListener('shown.bs.tab',resizePlotlyFigures)})();

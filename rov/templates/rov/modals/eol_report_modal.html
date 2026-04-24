@@ -1,0 +1,489 @@
+<div
+  class="modal fade"
+  id="eolReportModal"
+  tabindex="-1"
+  aria-labelledby="eolReportModalLabel"
+  aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content shadow-sm">
+      <div class="modal-header">
+        <h5 class="modal-title" id="eolReportModalLabel">End Of Line Report Settings</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <form id="eol-report-form">
+          {% csrf_token %}
+
+          <input type="hidden" id="eol-lines-json" name="lines_json" value="[]">
+
+          <div class="row g-4">
+            <div class="col-12 col-lg-5">
+              <div class="card h-100 border-0 bg-body-tertiary">
+                <div class="card-body">
+                  <h6 class="text-uppercase fw-bold mb-3">General</h6>
+
+                  <div class="mb-3">
+                    <label for="eol-prepared-by" class="form-label">Prepared By</label>
+                    <input
+                      type="text"
+                      class="form-control"
+                      id="eol-prepared-by"
+                      name="prepared_by"
+                      placeholder="QC Engineer">
+                    <div class="form-text">
+                      Project name and client name will be taken from ProjectDB.
+                    </div>
+                  </div>
+
+                  <div class="mb-3">
+                    <label for="eol-comments-text" class="form-label">Comments</label>
+                    <textarea
+                      class="form-control"
+                      id="eol-comments-text"
+                      name="comments_text"
+                      rows="6"
+                      placeholder="Optional report comments"></textarea>
+                  </div>
+
+                  <div class="row g-3">
+                    <div class="col-12 col-md-6">
+                      <label class="form-label d-block">Output Mode</label>
+                      <div class="btn-group w-100" role="group" aria-label="Output mode">
+                        <input
+                          type="radio"
+                          class="btn-check"
+                          name="output_mode"
+                          id="eol-output-auto"
+                          value="auto"
+                          >
+                        <label class="btn btn-outline-primary" for="eol-output-auto">Auto</label>
+
+                        <input
+                          type="radio"
+                          class="btn-check"
+                          name="output_mode"
+                          id="eol-output-pdf"
+                          value="single_pdf"
+                          checked>
+                        <label class="btn btn-outline-primary" for="eol-output-pdf">Single PDF</label>
+
+                        <input
+                          type="radio"
+                          class="btn-check"
+                          name="output_mode"
+                          id="eol-output-zip"
+                          value="zip">
+                        <label class="btn btn-outline-primary" for="eol-output-zip">ZIP</label>
+                      </div>
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                      <label class="form-label d-block">Page Size</label>
+                      <div class="btn-group w-100" role="group" aria-label="Page size">
+                        <input
+                          type="radio"
+                          class="btn-check"
+                          name="page_size"
+                          id="eol-page-a4"
+                          value="A4"
+                          checked>
+                        <label class="btn btn-outline-secondary" for="eol-page-a4">A4</label>
+
+                        <input
+                          type="radio"
+                          class="btn-check"
+                          name="page_size"
+                          id="eol-page-letter"
+                          value="Letter">
+                        <label class="btn btn-outline-secondary" for="eol-page-letter">Letter</label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <hr class="my-4">
+
+                  <div class="d-flex flex-column gap-2">
+                    <div class="form-check form-switch">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="eol-include-tgs-logo"
+                        name="include_tgs_logo"
+                        checked>
+                      <label class="form-check-label" for="eol-include-tgs-logo">
+                        Include TGS logo
+                      </label>
+                    </div>
+
+                    <div class="form-check form-switch">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="eol-include-page-numbers"
+                        name="include_page_numbers"
+                        checked>
+                      <label class="form-check-label" for="eol-include-page-numbers">
+                        Include page numbers
+                      </label>
+                    </div>
+
+                    <div class="form-check form-switch">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="eol-auto-orientation"
+                        name="auto_orientation"
+                        checked>
+                      <label class="form-check-label" for="eol-auto-orientation">
+                        Auto portrait / landscape
+                      </label>
+                    </div>
+                  </div>
+
+                  <hr class="my-4">
+
+                  <h6 class="text-uppercase fw-bold mb-3">Paging</h6>
+
+                  <div class="row g-3">
+                    <div class="col-12">
+                      <label for="eol-bbox-hours-per-page" class="form-label">
+                        BBox QC: hours per page
+                      </label>
+                      <input
+                        type="number"
+                        class="form-control"
+                        id="eol-bbox-hours-per-page"
+                        name="bbox_hours_per_page"
+                        min="1"
+                        step="1"
+                        value="24">
+                    </div>
+                  </div>
+
+                  <div class="form-text mt-2">
+                    Front Page and Table of Contents are always included. Single Node Maps use a fixed 6 stations per page. BBox page count should be calculated from total line time divided by selected hours per page.
+                  </div>
+
+                  <hr class="my-4">
+
+                  <div class="small text-muted">
+                    Selected lines: <span id="eol-selected-lines-count">0</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12 col-lg-7">
+              <div class="card h-100 border-0 bg-body-tertiary">
+                <div class="card-body">
+                  <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                      <h6 class="text-uppercase fw-bold mb-0">Report Chapters</h6>
+                      <div class="small text-muted">
+                        Front Page and Table of Contents will be added automatically.
+                      </div>
+                    </div>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Section helpers">
+                      <button type="button" class="btn btn-outline-secondary" id="eol-select-all-sections">
+                        Select all
+                      </button>
+                      <button type="button" class="btn btn-outline-secondary" id="eol-clear-all-sections">
+                        Clear all
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="eol-sections">
+
+                    <div class="form-check mb-2">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        value="line_summary"
+                        id="eol-sec-line-summary"
+                        name="sections"
+                        checked>
+                      <label class="form-check-label fw-semibold" for="eol-sec-line-summary">
+                        1. Line Summary
+                      </label>
+                    </div>
+
+                    <div class="form-check mb-2">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        value="project_map"
+                        id="eol-sec-project-map"
+                        name="sections"
+                        checked>
+                      <label class="form-check-label fw-semibold" for="eol-sec-project-map">
+                        2. Project Map
+                      </label>
+                    </div>
+
+                    <div class="form-check mb-3">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        value="dsr_info_table"
+                        id="eol-sec-dsr-info"
+                        name="sections"
+                        checked>
+                      <label class="form-check-label fw-semibold" for="eol-sec-dsr-info">
+                        3. Info Table from DSR
+                      </label>
+                    </div>
+
+                    <div class="form-check mb-2">
+                      <input
+                        class="form-check-input eol-parent"
+                        type="checkbox"
+                        value="deployment"
+                        id="eol-sec-deployment"
+                        name="sections"
+                        checked
+                        data-children=".eol-child-deployment">
+                      <label class="form-check-label fw-semibold" for="eol-sec-deployment">
+                        4. Deployment
+                      </label>
+                    </div>
+
+                    <div class="ms-4 mb-3 d-flex flex-column gap-2">
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-deployment"
+                          type="checkbox"
+                          value="deployment_summary_statistic"
+                          id="eol-sec-deploy-summary"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-deploy-summary">
+                          4.1 Summary Statistic
+                        </label>
+                      </div>
+
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-deployment"
+                          type="checkbox"
+                          value="deployment_primary_secondary"
+                          id="eol-sec-deploy-ps"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-deploy-ps">
+                          4.2 Primary vs Secondary
+                        </label>
+                      </div>
+
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-deployment"
+                          type="checkbox"
+                          value="deployment_preplot"
+                          id="eol-sec-deploy-preplot"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-deploy-preplot">
+                          4.3 Primary and Secondary vs Preplot
+                        </label>
+                      </div>
+
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-deployment"
+                          type="checkbox"
+                          value="deployment_single_node_map"
+                          id="eol-sec-deploy-single-node-map"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-deploy-single-node-map">
+                          4.4 Single Node Maps (pages = stations / 6)
+                        </label>
+                      </div>
+
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-deployment"
+                          type="checkbox"
+                          value="deployment_water_depth"
+                          id="eol-sec-deploy-water"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-deploy-water">
+                          4.5 Water Depth QC
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="form-check mb-2">
+                      <input
+                        class="form-check-input eol-parent"
+                        type="checkbox"
+                        value="bbox_qc"
+                        id="eol-sec-bbox"
+                        name="sections"
+                        checked
+                        data-children=".eol-child-bbox">
+                      <label class="form-check-label fw-semibold" for="eol-sec-bbox">
+                        5. Black Box QC
+                      </label>
+                    </div>
+
+                    <div class="ms-4 mb-3 d-flex flex-column gap-2">
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-bbox"
+                          type="checkbox"
+                          value="bbox_qc_gnss"
+                          id="eol-sec-bbox-gnss"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-bbox-gnss">
+                          5.1 GNSS QC (pages = total line time / BBox hours per page)
+                        </label>
+                      </div>
+
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-bbox"
+                          type="checkbox"
+                          value="bbox_qc_motion"
+                          id="eol-sec-bbox-motion"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-bbox-motion">
+                          5.2 Motion QC (pages = total line time / BBox hours per page)
+                        </label>
+                      </div>
+
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-bbox"
+                          type="checkbox"
+                          value="deployment_vs_bbox"
+                          id="eol-sec-deploy-vs-bbox"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-deploy-vs-bbox">
+                          5.3 Deployment vs BBox
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="form-check mb-2">
+                      <input
+                        class="form-check-input eol-parent"
+                        type="checkbox"
+                        value="source"
+                        id="eol-sec-source"
+                        name="sections"
+                        checked
+                        data-children=".eol-child-source">
+                      <label class="form-check-label fw-semibold" for="eol-sec-source">
+                        6. Source
+                      </label>
+                    </div>
+
+                    <div class="ms-4 mb-3 d-flex flex-column gap-2">
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-source"
+                          type="checkbox"
+                          value="source_summary"
+                          id="eol-sec-source-summary"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-source-summary">
+                          6.1 Source Summary
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="form-check mb-2">
+                      <input
+                        class="form-check-input eol-parent"
+                        type="checkbox"
+                        value="recovery"
+                        id="eol-sec-recovery"
+                        name="sections"
+                        checked
+                        data-children=".eol-child-recovery">
+                      <label class="form-check-label fw-semibold" for="eol-sec-recovery">
+                        7. Recovery
+                      </label>
+                    </div>
+
+                    <div class="ms-4 mb-3 d-flex flex-column gap-2">
+                      <div class="form-check">
+                        <input
+                          class="form-check-input eol-child-recovery"
+                          type="checkbox"
+                          value="recovery_qc_package"
+                          id="eol-sec-recovery-package"
+                          name="sections"
+                          checked>
+                        <label class="form-check-label" for="eol-sec-recovery-package">
+                          7.1 Recovery QC package
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="form-check mb-2">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        value="final_comparison"
+                        id="eol-sec-final-comparison"
+                        name="sections"
+                        checked>
+                      <label class="form-check-label fw-semibold" for="eol-sec-final-comparison">
+                        8. Final Comparison
+                      </label>
+                    </div>
+
+                    <div class="form-check">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        value="comments"
+                        id="eol-sec-comments"
+                        name="sections"
+                        checked>
+                      <label class="form-check-label fw-semibold" for="eol-sec-comments">
+                        9. Comments
+                      </label>
+                    </div>
+
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-outline-secondary"
+          data-bs-dismiss="modal">
+          Close
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          id="btn-run-eol-report">
+          Generate Report
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

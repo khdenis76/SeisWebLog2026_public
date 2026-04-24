@@ -1,0 +1,65 @@
+<div class="modal fade" id="svpUploadModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-0 shadow">
+
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="fa-solid fa-upload me-2"></i>
+          Load SVP
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <form id="svpUploadForm">
+          {% csrf_token %}
+
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Profile Name</label>
+              <input type="text" class="form-control" name="name" placeholder="Optional custom name">
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Config</label>
+              <select class="form-select" name="config_id" id="svpUploadConfigSelect" required>
+                <option value="">-- select config --</option>
+              </select>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">Notes</label>
+              <textarea class="form-control" name="notes" rows="3" placeholder="Optional notes"></textarea>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">File</label>
+              <input
+                type="file"
+                class="form-control"
+                name="file"
+                id="svpUploadFile"
+                accept=".svp,.000,.csv,.txt"
+                required
+              >
+              <div class="form-text">
+                Supported: .svp, .000, .csv, .txt
+              </div>
+            </div>
+          </div>
+        </form>
+
+        <div id="svpUploadStatus" class="small mt-3 text-muted"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="btnSubmitSVP">
+          <i class="fa-solid fa-check me-1"></i>
+          Upload
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>

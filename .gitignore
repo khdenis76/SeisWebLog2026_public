@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Django
+*.log
+local_settings.py
+.env
+.env.*
+
+# Database
+db.sqlite3
+*.sqlite3
+*.zip
+
+# Virtualenv
+myenv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+pytest.ini
+/tests/
+/ftpsync/ftp_sync_config.json
+# HTML
+rov/*.html
+#Tests
+rov/*_test.py
+
+
+
+

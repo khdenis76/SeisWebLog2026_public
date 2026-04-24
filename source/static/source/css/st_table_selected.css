@@ -1,0 +1,51 @@
+/* выделенная строка ST */
+tr.st-selected {
+    background-color: rgba(13, 110, 253, 0.15) !important; /* bootstrap primary soft */
+}
+
+tr.st-selected td {
+    border-top: 1px solid #0d6efd;
+    border-bottom: 1px solid #0d6efd;
+}
+
+/* чуть подсветим hover */
+#shot-summary-tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.08);
+    cursor: pointer;
+}
+tr.st-selected td:first-child {
+    position: relative;
+}
+
+tr.st-selected td:first-child::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: #0d6efd;
+}
+/* выбранная линия */
+#shot-summary-tbody tr.st-selected {
+    background-color: rgba(13, 110, 253, 0.15) !important;
+}
+
+/* hover эффект */
+#shot-summary-tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.08);
+    cursor: pointer;
+}
+#shot-summary-tbody tr.st-selected td:first-child {
+    position: relative;
+}
+
+#shot-summary-tbody tr.st-selected td:first-child::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: #0d6efd;
+}

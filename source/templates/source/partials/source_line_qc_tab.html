@@ -1,0 +1,148 @@
+<ul class="nav nav-tabs mb-3" id="lineTabs" role="tablist">
+
+  <li class="nav-item" role="presentation">
+    <button
+      class="nav-link active"
+      id="gun-water-tab"
+      data-bs-toggle="tab"
+      data-bs-target="#gun-water-pane"
+      type="button"
+      role="tab"
+      aria-controls="gun-water-pane"
+      aria-selected="true">
+      <i class="fas fa-water me-1"></i> Gun & Water Depth
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button
+      class="nav-link"
+      id="line-map-tab"
+      data-bs-toggle="tab"
+      data-bs-target="#line-map-pane"
+      type="button"
+      role="tab"
+      aria-controls="line-map-pane"
+      aria-selected="false">
+      <i class="fas fa-map me-1"></i> Line Map
+    </button>
+  </li>
+
+  <li class="nav-item" role="presentation">
+    <button
+      class="nav-link"
+      id="line-info-tab"
+      data-bs-toggle="tab"
+      data-bs-target="#line-info-pane"
+      type="button"
+      role="tab"
+      aria-controls="line-info-pane"
+      aria-selected="false">
+      <i class="fas fa-circle-info me-1"></i> Line Info
+    </button>
+  </li>
+   <li class="nav-item" role="presentation">
+    <button
+      class="nav-link"
+      id="st-compare-tab"
+      data-bs-toggle="tab"
+      data-bs-target="#st-compare-pane"
+      type="button"
+      role="tab"
+      aria-controls="st-compare-pane"
+      aria-selected="false">
+      <i class="fas fa-code-compare me-1"></i> ST Compare
+    </button>
+  </li>
+
+</ul>
+
+
+<div class="tab-content" id="lineTabsContent">
+
+  <!-- Gun & Water Depth -->
+  <div
+    class="tab-pane fade show active"
+    id="gun-water-pane"
+    role="tabpanel"
+    aria-labelledby="gun-water-tab">
+
+    <div id="gun-depth-plot" class="w-100" style="height:50vh;"></div>
+    <div id="water-depth-plot" class="w-100" style="height:50vh;"></div>
+
+  </div>
+
+
+  <!-- Line Map -->
+  <div
+    class="tab-pane fade"
+    id="line-map-pane"
+    role="tabpanel"
+    aria-labelledby="line-map-tab">
+
+    <div id="source-line-map-plot" class="w-100" style="height:80vh;" data-url="{% url 'source_sp_solution_vs_preplot_json' %}" ></div>
+
+  </div>
+
+
+  <!-- Line Info -->
+  <div
+    class="tab-pane fade"
+    id="line-info-pane"
+    role="tabpanel"
+    aria-labelledby="line-info-tab">
+
+    <div id="line-info-content" class="w-100" style="min-height:65vh;"></div>
+
+  </div>
+  <!-- Shot Table Comparison -->
+  <div
+    class="tab-pane fade"
+    id="st-compare-pane"
+    role="tabpanel"
+    aria-labelledby="st-compare-tab">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+
+  <!-- SailLine label -->
+  <div class="fw-semibold">
+    SailLine:
+    <span id="selected-sail-line" class="text-primary">
+      —
+    </span>
+  </div>
+
+  <!-- Spacer -->
+  <div class="ms-auto d-flex align-items-center gap-2">
+
+    <!-- Toggle -->
+    <div class="btn-group btn-group-sm" role="group">
+      <input type="radio"
+             class="btn-check"
+             name="compareMode"
+             id="compareAll"
+             autocomplete="off"
+             checked>
+
+      <label class="btn btn-outline-primary" for="compareAll">
+        All
+      </label>
+
+      <input type="radio"
+             class="btn-check"
+             name="compareMode"
+             id="compareMismatch"
+             autocomplete="off">
+
+      <label class="btn btn-outline-danger" for="compareMismatch">
+        Mismatch only
+      </label>
+    </div>
+
+  </div>
+</div>
+
+{% include "source/partials/sps_shot_compare_table.html" %}
+
+  </div>
+
+</div>

@@ -1,0 +1,60 @@
+<div class="modal fade" id="shotSortModal" tabindex="-1" aria-labelledby="shotSortModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title" id="shotSortModalLabel">
+          <i class="fas fa-sort me-2"></i> Sort shot line summary
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <div class="mb-3">
+          <label class="form-label">Sort by</label>
+          <select class="form-select" id="shot-sort-key">
+            <option value="line_code">Line code (nav_line_code)</option>
+            <option value="line">Line (nav_line)</option>
+            <option value="attempt">Attempt</option>
+            <option value="seq">Seq</option>
+            <option value="shotcount">ShotCount</option>
+            <option value="diffsum">SumDiff (worst first)</option>
+            <option value="in_sl">IsInSLSolution</option>
+            <option value="qc_all">QC_AllMatch</option>
+            <option value="qc_any">QC_AnyMatch</option>
+          </select>
+          <div class="form-text">
+            Tip: use <b>SumDiff</b> to see the biggest problems on top.
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <label class="form-label">Direction</label>
+          <div class="d-flex gap-2">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="shot-sort-dir" id="shot-sort-asc" value="asc" checked>
+              <label class="form-check-label" for="shot-sort-asc">Ascending</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="shot-sort-dir" id="shot-sort-desc" value="desc">
+              <label class="form-check-label" for="shot-sort-desc">Descending</label>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="shot-sort-reset">
+          <i class="fas fa-rotate-left me-1"></i> Reset
+        </button>
+
+        <button type="button" class="btn btn-primary" id="shot-sort-apply">
+          <i class="fas fa-check me-1"></i> Apply
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>

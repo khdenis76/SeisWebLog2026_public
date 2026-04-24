@@ -1,0 +1,124 @@
+{% if rows and rows|length %}
+  {% for r in rows %}
+    {% if r and r.nav_line_code %}
+    <tr id="shot-line-{{ r.nav_line_code }}"
+        data-line-code="{{ r.nav_line_code }}"
+        data-line="{{ r.nav_line|default_if_none:0 }}"
+        data-attempt="{{ r.attempt|default_if_none:0 }}"
+        data-seq="{{ r.seq|default_if_none:0 }}"
+        data-in-sl="{{ r.IsInSLSolution|default_if_none:0 }}"
+        data-shotcount="{{ r.ShotCount|default_if_none:0 }}"
+        data-prod="{{ r.ProdShots|default_if_none:0 }}"
+        data-nonprod="{{ r.NonProdShots|default_if_none:0 }}"
+        data-kill="{{ r.KillShots|default_if_none:0 }}"
+        data-vessel="{{ r.vessel_name }}"
+        data-prupose="{{ r.purpose }}"
+        data-fsp="{{ r.FSP|default_if_none:0 }}"
+        data-lsp="{{ r.LSP|default_if_none:0 }}"
+        data-fgsp="{{ r.FGSP|default_if_none:0 }}"
+        data-lgsp="{{ r.LGSP|default_if_none:0 }}"
+        data-station="{{ r.Sum_shot_station|default_if_none:0 }}"
+        data-index="{{ r.Sum_shot_index|default_if_none:0 }}"
+        data-status="{{ r.Sum_shot_status|default_if_none:0 }}"
+        data-ppc="{{ r.Sum_post_point_code|default_if_none:0 }}"
+        data-fire="{{ r.Sum_fire_code|default_if_none:0 }}"
+        data-gd="{{ r.Sum_gun_depth|default_if_none:0 }}"
+        data-wd="{{ r.Sum_water_depth|default_if_none:0 }}"
+        data-x="{{ r.Sum_shot_x|default_if_none:0 }}"
+        data-y="{{ r.Sum_shot_y|default_if_none:0 }}"
+        data-day="{{ r.Sum_shot_day|default_if_none:0 }}"
+        data-hour="{{ r.Sum_shot_hour|default_if_none:0 }}"
+        data-minute="{{ r.Sum_shot_minute|default_if_none:0 }}"
+        data-second="{{ r.Sum_shot_second|default_if_none:0 }}"
+        data-microsecond="{{ r.Sum_shot_microsecond|default_if_none:0 }}"
+        data-year="{{ r.Sum_shot_year|default_if_none:0 }}"
+        data-array="{{ r.Sum_array_id|default_if_none:0 }}"
+        data-source="{{ r.Sum_source_id|default_if_none:0 }}"
+        data-navstation="{{ r.Sum_nav_station|default_if_none:0 }}"
+        data-group="{{ r.Sum_shot_group_id|default_if_none:0 }}"
+        data-elev="{{ r.Sum_elevation|default_if_none:0 }}"
+        data-diff_Attempt="{{ r.diff_Attempt }}"
+        data-diff_Seq="{{ r.diff_Seq }}"
+        data-diff_Point="{{ r.diff_Point }}"
+        data-diff_PointCode="{{ r.diff_PointCode }}"
+        data-diff_FireCode="{{ r.diff_FireCode }}"
+        data-diff_ArrayCode="{{ r.diff_ArrayCode }}"
+        data-diff_WaterDepth="{{ r.diff_WaterDepth }}"
+        data-diff_Easting="{{ r.diff_Easting }}"
+        data-diff_Northing="{{ r.diff_Northing }}"
+        data-diff_Elevation="{{ r.diff_Elevation }}"
+        data-diff_JDay="{{ r.diff_JDay }}"
+        data-diff_Hour="{{ r.diff_Hour }}"
+        data-diff_Minute="{{ r.diff_Minute }}"
+        data-diff_Second="{{ r.diff_Second }}"
+        data-diff_Microsecond="{{ r.diff_Microsecond }}"
+        data-QC_AllMatch="{{ r.QC_AllMatch }}"
+        data-QC_AnyMatch="{{ r.QC_AnyMatch }}"
+        data-diffsum="{% if r.SumDiff != 0 %}Erorr{% else %}Ok{% endif %}">
+
+      <td class="sticky-check text-center align-middle">
+        <div class="form-check d-flex justify-content-center mb-0">
+          <input
+            class="form-check-input shot-line-check"
+            type="checkbox"
+            value="{{ r.nav_line_code }}"
+            data-line-code="{{ r.nav_line_code }}">
+        </div>
+      </td>
+
+      <td class="sticky-col">
+        {% if r.IsInSLSolution == 1 %}<i class="fas fa-check text-success"></i> {% endif %}
+        {% if r.SumDiff != 0 %}
+          <i class="fas fa-triangle-exclamation text-danger" title="There is difference between SHOT_TABLE and SPS File"></i>
+        {% else %}
+          <i class="fas fa-thumbs-up text-success" title="Good match SPS->ST"></i>
+        {% endif %}
+        {{ r.nav_line_code }}
+      </td>
+
+      <td class="sticky-col-2 text-end">{{ r.seq|default_if_none:"" }}</td>
+      <td class="sticky-col-3 text-end">{{ r.attempt|default_if_none:0 }}</td>
+
+      <td class="text-end">
+        {% if r.IsInSLSolution %}
+          <span class="badge bg-success">1</span>
+        {% else %}
+          <span class="badge bg-secondary">0</span>
+        {% endif %}
+      </td>
+
+      <td class="text-end">{{ r.ShotCount|default_if_none:0 }}</td>
+      <td class="text-end">{{ r.ProdShots|default_if_none:0 }}</td>
+      <td class="text-end">{{ r.NonProdShots|default_if_none:0 }}</td>
+      <td class="text-end">{{ r.KillShots|default_if_none:0 }}</td>
+
+      <td class="text-end">{{ r.FSP|default_if_none:"" }}</td>
+      <td class="text-end">{{ r.LSP|default_if_none:"" }}</td>
+      <td class="text-end">{{ r.FGSP|default_if_none:"" }}</td>
+      <td class="text-end">{{ r.LGSP|default_if_none:"" }}</td>
+
+      <td class="text-end">{% if r.diff_Attempt and r.diff_Attempt != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Seq and r.diff_Seq != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Point and r.diff_Point != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_PointCode and r.diff_PointCode != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_FireCode and r.diff_FireCode != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_WaterDepth and r.diff_WaterDepth != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Easting and r.diff_Easting != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Northing and r.diff_Northing != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Elevation and r.diff_Elevation != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_JDay and r.diff_JDay != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Hour and r.diff_Hour != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Minute and r.diff_Minute != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Second and r.diff_Second != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+      <td class="text-end">{% if r.diff_Microsecond and r.diff_Microsecond != 0 %}<i class="fas fa-triangle-exclamation text-danger me-1"></i>{% else %}<i class="fas fa-thumbs-up text-success me-1"></i>{% endif %}</td>
+
+      <td class="text-end">{{ r.QC_AllMatch|default_if_none:"" }}</td>
+      <td class="text-end">{{ r.QC_AnyMatch|default_if_none:"" }}</td>
+    </tr>
+    {% endif %}
+  {% endfor %}
+{% else %}
+  <tr>
+    <td colspan="999" class="text-center text-muted py-4">No data</td>
+  </tr>
+{% endif %}

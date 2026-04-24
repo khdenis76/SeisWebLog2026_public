@@ -1,0 +1,141 @@
+/* keep table clean and readable */
+#sps-table{
+  width: 100%;
+  border-collapse: separate;   /* IMPORTANT for sticky borders */
+  border-spacing: 0;
+}
+
+/* header */
+#sps-table-thead th{
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: linear-gradient(135deg, rgba(13,110,253,.18), rgba(102,16,242,.14));
+  backdrop-filter: blur(10px);
+  color: var(--bs-body-color);
+  font-weight: 800;
+  border-bottom: 1px solid rgba(255,255,255,.12);
+  padding: .65rem .75rem;
+  white-space: nowrap;
+}
+
+/* body cells */
+#sps-table tbody td{
+  padding: .55rem .75rem;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  vertical-align: middle;
+}
+
+/* zebra rows */
+#sps-table tbody tr:nth-child(odd){
+  background: rgba(255,255,255,.02);
+}
+
+/* hover row */
+#sps-table tbody tr:hover{
+  background: rgba(13,110,253,.08);
+}
+
+/* active row (your selection) */
+#sps-table tbody tr.is-active{
+  background: rgba(13,110,253,.14) !important;
+}
+#sps-table tbody tr.is-active > td{
+  background: rgba(13,110,253,.14) !important;
+}
+
+/* ----------------------------
+   Sticky columns
+   ---------------------------- */
+
+/* sticky base */
+#sps-table .sticky-col{
+  position: sticky;
+  background: var(--bs-body-bg);
+  z-index: 10; /* above normal cells */
+  box-shadow: 1px 0 0 rgba(0,0,0,.10);
+}
+/* widths */
+#sps-table .sticky-col-0{
+  left: 0;
+  width: 4ch;
+  min-width: 4ch;
+  text-align: center;
+}
+#sps-table .sticky-col-1{
+  left: 4ch;
+  width: 12ch;
+  min-width: 12ch;
+  text-align: center;
+  padding: 0;
+}
+
+#sps-table .sticky-col-2{
+  left: 16ch;
+  min-width: 8ch;
+  font-weight: 900;
+}
+#sps-table .sticky-col-3{
+  left: 24ch;
+  min-width: 5ch;
+  font-weight: 900;
+}
+
+/* sticky header cells must be above everything */
+#sps-table-thead th.sticky-col{
+  z-index: 30;
+  background: linear-gradient(135deg, rgba(13,110,253,.30), rgba(102,16,242,.22));
+}
+
+/* sticky cells should also highlight on hover/active */
+#sps-table tbody tr:hover td.sticky-col{
+  background: rgba(13,110,253,.08);
+}
+#sps-table tbody tr.is-active td.sticky-col{
+  background: rgba(13,110,253,.14) !important;
+}
+
+/* nice divider after sticky cols */
+#sps-table .sticky-col-2{
+  box-shadow: 2px 0 0 rgba(0,0,0,.12);
+}
+
+/* ----------------------------
+   Datetime no-wrap
+   ---------------------------- */
+.sps-datetime,
+#sps-table td[data-type="dt"]{
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* optional: tighter, nicer numbers */
+.sps-num{
+  font-variant-numeric: tabular-nums;
+}
+
+/* optional: make checkbox nicer aligned */
+#sps-table input[type="checkbox"]{
+  transform: scale(1.05);
+}
+.sps-sticky-0,
+.sps-sticky-1,
+.sps-sticky-2,
+.sps-sticky-3{
+  position: sticky;
+  z-index: 6;
+  background: var(--dsr-sticky-bg) !important;  /* opaque */
+  background-clip: padding-box;
+}
+
+/* positions (adjust to match your sticky column widths) */
+.sps-sticky-0{ left: 0; }
+.sps-sticky-1{ left: 4ch; }
+.sps-sticky-2{ left: 16ch; }
+.sps-sticky-3{ left: 22ch; }
+
+/* widths for sticky columns */
+.w-col1{min-width: 4ch}
+.w-seq{min-width: 5ch}
+.w-sailline{min-width: 12ch}
+.w-sline{ min-width: 6ch; }

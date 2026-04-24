@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 11pt; color: #111; }
+    h1, h2, h3 { margin: 0 0 8px 0; }
+    .section { margin-bottom: 18px; page-break-inside: avoid; }
+    .kpis { display: table; width: 100%; margin-bottom: 12px; }
+    .kpi { display: table-cell; border: 1px solid #bbb; padding: 10px; width: 20%; }
+    .img { width: 100%; margin-top: 8px; }
+    .small { color: #666; }
+  </style>
+</head>
+<body>
+  <div class="section">
+    <h1>{{ report_title }}</h1>
+    <div class="small">{{ report.start_date }} → {{ report.end_date }}</div>
+  </div>
+  <div class="section kpis">
+    <div class="kpi"><strong>Deployed</strong><br>{{ payload.metrics.summary.deployed_nodes }}</div>
+    <div class="kpi"><strong>Recovered</strong><br>{{ payload.metrics.summary.recovered_nodes }}</div>
+    <div class="kpi"><strong>Shots</strong><br>{{ payload.metrics.summary.shot_count }}</div>
+    <div class="kpi"><strong>Total Nodes</strong><br>{{ payload.metrics.summary.total_nodes }}</div>
+    <div class="kpi"><strong>Active Lines</strong><br>{{ payload.metrics.summary.active_lines }}</div>
+  </div>
+  <div class="section">
+    <h2>Charts</h2>
+    {% for key, chart in payload.charts.items %}
+      {% if chart.image_path %}
+        <h3>{{ chart.title }}</h3>
+        <img class="img" src="file://{{ chart.image_path }}" alt="{{ chart.title }}">
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% if payload.narrative %}
+  <div class="section"><h2>Narrative</h2><div>{{ payload.narrative }}</div></div>
+  {% endif %}
+</body>
+</html>

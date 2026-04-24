@@ -1,0 +1,32 @@
+<table id="rp-table-list" class="table table-hover">
+    <thead>
+       <th><input type="checkbox" id="mainRPCheckBox" data-line-fk = "{line_id}"></th>
+       <th>Line</th>
+       <th>Point</th>
+       <th>Point Idx.</th>
+       <th>Point Code</th>
+       <th>Easting</th>
+       <th>Northing</th>
+       <th>Elevation</th>
+   </thead>
+    <tbody>
+       {% if point_list %}
+            {% for l in point_list %}
+                <tr data-point-id="{{ l.ID }}">
+                   <td><input type="checkbox" class="rp_checkbox" data-point-id="{{ l.ID }}"> </td>
+                   <td>{{ l.Line }}</td>
+                   <td>{{ l.Point }}</td>
+                   <td>{{ l.PointIndex }}</td>
+                   <td>{{ l.PointCode }}</td>
+                   <td>{{ l.X }}</td>
+                   <td>{{ l.Y }}</td>
+                   <td>{{ l.Z }}</td>
+                </tr>
+            {% endfor %}
+       {% else %}
+           <tr class="table-warning">
+               <td colspan="8"> No data </td>
+           </tr>
+       {% endif %}
+    </tbody>
+</table>

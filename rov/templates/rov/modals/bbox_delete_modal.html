@@ -1,0 +1,22 @@
+<div class="modal fade" id="deleteBBoxFilesModal" tabindex="-1" aria-labelledby="deleteBBoxFilesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-danger-subtle">
+                <h5 class="modal-title" id="deleteBBoxFilesModalLabel">
+                    <i class="fa fa-triangle-exclamation me-2"></i>Delete BBOX files
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                Delete selected BBOX file(s)?
+                <div class="small text-muted mt-2" id="delete-bbox-files-count-text"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-bbox-files">
+                    <i class="fa fa-trash me-2"></i>Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

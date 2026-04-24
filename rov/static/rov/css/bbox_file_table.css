@@ -1,0 +1,20 @@
+.bbox-file-table-container {
+    max-height: 50vh;
+    overflow: auto;
+}
+
+#bbox-file-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+#bbox-file-table th,
+#bbox-file-table td {
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#bbox-file-table td {
+    padding: 4px 6px;
+}

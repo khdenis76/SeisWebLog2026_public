@@ -1,0 +1,40 @@
+<div class="modal fade seis-modal" id="confirmDeleteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="confirmDeleteTitle">
+          <span class="seis-chip"><i class="fa-solid fa-trash-can"></i> Remove</span>
+          Delete selected lines
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="seis-section">
+          <div class="seis-section-head">
+            <h6 class="seis-section-title"><span class="seis-dot"></span> Deletion summary</h6>
+          </div>
+          <div class="seis-section-body">
+            <div class="d-flex align-items-start gap-3">
+              <div class="seis-confirm-icon flex-shrink-0"><i class="fa-solid fa-triangle-exclamation"></i></div>
+              <div>
+                <div class="fw-semibold mb-1">Selected rows will be removed from the project database.</div>
+                <div id="deleteSummary" class="small text-muted mb-2"></div>
+                <div class="small text-muted">Use this only when you are sure the selected RL or SL rows are no longer needed.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary seis-btn-soft" data-bs-dismiss="modal">Cancel</button>
+        <button id="btnConfirmDelete" type="button" class="btn seis-btn-danger">Yes, delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  window.RL_DELETE_URL = "{% url 'delete_selected_receiver_lines' %}";
+  window.SL_DELETE_URL = "{% url 'delete_selected_source_lines' %}";
+</script>

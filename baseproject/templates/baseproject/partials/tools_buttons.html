@@ -1,0 +1,48 @@
+<div class="row mb-2" >
+                <button id="point-type-switch"
+                        class="btn btn-primary w-100"
+                        type="button" data-point-type="R">
+                      <i class="fas fa-sailboat me-1"></i>  RECEIVERS
+                </button>
+            </div>
+     <div class="row" >
+                <div class="col-12 d-grid gap-2">
+                   <button class="btn btn-primary tool-btn"
+                           type="button" data-point-type="R"
+                           data-post-url="{%   url 'export_sol_eol_to_csv' %}">
+                           Export REC SOL/EOL to CSV File
+                   </button>
+                   <button class="btn btn-primary tool-btn"
+                           type="button"
+                           data-point-type="R"
+                           data-post-url = "{% url 'export_splited_csv' %}">
+                       Export lines to CSV (split by lines)
+                   </button>
+                   <button class="btn btn-primary tool-btn"
+                           type="button"
+                           data-point-type="R"
+                           data-post-url = "{% url 'export_to_csv' %}">
+                           Export lines to CSV (one file for all)
+                   </button>
+                   <button class="btn btn-primary tool-btn"
+                           type="button"
+                           data-point-type="R"
+                           data-post-url = "{% url 'export_gpkg' %}" disabled>
+                       Export lines to GPKG
+                   </button>
+                   <button class="btn btn-primary tool-btn"
+                           type="button"
+                           data-point-type="R"
+                           data-post-url = "{% url 'export_to_shapes' %}">
+                       Export lines to shape(shp)
+                   </button>
+
+                   <button class="btn btn-primary tool-btn"
+                           type="button"
+                           data-point-type="R"
+                           data-post-url = "{% url 'export_to_sps' %}">
+                       Export lines to SPS (split by lines)
+                   </button>
+
+                </div>
+     </div>

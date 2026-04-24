@@ -1,0 +1,112 @@
+{% for r in rows %}
+<tr class="{% if r.diff_total %}row-mismatch{% endif %}">
+
+    <!-- SailLine -->
+    <td class="col-sps">{{ r.sps_SailLine }}</td>
+    <td class="col-shot">{{ r.shot_nav_line_code }}</td>
+
+    <!-- Line -->
+    <td class="col-sps {% if r.diff_Line %}diff-cell{% endif %}">{{ r.sps_Line }}</td>
+    <td class="col-shot {% if r.diff_Line %}diff-cell{% endif %}">{{ r.shot_nav_line }}</td>
+
+    <!-- Attempt -->
+    <td class="col-sps {% if r.diff_Attempt %}diff-cell{% endif %}">{{ r.sps_Attempt }}</td>
+    <td class="col-shot {% if r.diff_Attempt %}diff-cell{% endif %}">{{ r.shot_attempt }}</td>
+
+    <!-- Seq -->
+    <td class="col-sps {% if r.diff_Seq %}diff-cell{% endif %}">{{ r.sps_Seq }}</td>
+    <td class="col-shot {% if r.diff_Seq %}diff-cell{% endif %}">{{ r.shot_seq }}</td>
+
+    <!-- Point -->
+    <td class="col-sps {% if r.diff_Point %}diff-cell{% endif %}">{{ r.sps_Point }}</td>
+    <td class="col-shot {% if r.diff_Point %}diff-cell{% endif %}">{{ r.shot_nav_station }}</td>
+
+    <!-- PointCode -->
+    <td class="col-sps {% if r.diff_PointCode %}diff-cell{% endif %}">{{ r.sps_PointCode }}</td>
+    <td class="col-shot {% if r.diff_PointCode %}diff-cell{% endif %}">{{ r.shot_post_point_code }}</td>
+
+    <!-- FireCode -->
+    <td class="col-sps {% if r.diff_FireCode %}diff-cell{% endif %}">{{ r.sps_FireCode }}</td>
+    <td class="col-shot {% if r.diff_FireCode %}diff-cell{% endif %}">{{ r.shot_fire_code }}</td>
+
+    <!-- ArrayCode -->
+    <td class="col-sps {% if r.diff_ArrayCode %}diff-cell{% endif %}">{{ r.sps_ArrayCode }}</td>
+    <td class="col-shot {% if r.diff_ArrayCode %}diff-cell{% endif %}">{{ r.shot_source_id }}</td>
+
+    <!-- PointDepth -->
+    <td class="col-sps num {% if r.diff_PointDepth %}diff-cell{% endif %}">
+        {{ r.sps_PointDepth|default_if_none:"" }}
+    </td>
+    <td class="col-shot num {% if r.diff_PointDepth %}diff-cell{% endif %}">
+        {{ r.shot_gun_depth|default_if_none:"" }}
+    </td>
+
+    <!-- WaterDepth -->
+    <td class="col-sps num {% if r.diff_WaterDepth %}diff-cell{% endif %}">
+        {{ r.sps_WaterDepth|default_if_none:"" }}
+    </td>
+    <td class="col-shot num {% if r.diff_WaterDepth %}diff-cell{% endif %}">
+        {{ r.shot_water_depth|default_if_none:"" }}
+    </td>
+
+    <!-- Easting -->
+    <td class="col-sps num {% if r.diff_Easting %}diff-cell{% endif %}">
+        {{ r.sps_Easting|default_if_none:"" }}
+    </td>
+    <td class="col-shot num {% if r.diff_Easting %}diff-cell{% endif %}">
+        {{ r.shot_x|default_if_none:"" }}
+    </td>
+
+    <!-- Northing -->
+    <td class="col-sps num {% if r.diff_Northing %}diff-cell{% endif %}">
+        {{ r.sps_Northing|default_if_none:"" }}
+    </td>
+    <td class="col-shot num {% if r.diff_Northing %}diff-cell{% endif %}">
+        {{ r.shot_y|default_if_none:"" }}
+    </td>
+
+    <!-- Elevation -->
+    <td class="col-sps num {% if r.diff_Elevation %}diff-cell{% endif %}">
+        {{ r.sps_Elevation|default_if_none:"" }}
+    </td>
+    <td class="col-shot num {% if r.diff_Elevation %}diff-cell{% endif %}">
+        {{ r.shot_elevation|default_if_none:"" }}
+    </td>
+
+    <!-- Day -->
+    <td class="col-sps {% if r.diff_Day %}diff-cell{% endif %}">{{ r.sps_Day }}</td>
+    <td class="col-shot {% if r.diff_Day %}diff-cell{% endif %}">{{ r.shot_day }}</td>
+
+    <!-- Hour -->
+    <td class="col-sps {% if r.diff_Hour %}diff-cell{% endif %}">{{ r.sps_Hour }}</td>
+    <td class="col-shot {% if r.diff_Hour %}diff-cell{% endif %}">{{ r.shot_hour }}</td>
+
+    <!-- Minute -->
+    <td class="col-sps {% if r.diff_Minute %}diff-cell{% endif %}">{{ r.sps_Minute }}</td>
+    <td class="col-shot {% if r.diff_Minute %}diff-cell{% endif %}">{{ r.shot_minute }}</td>
+
+    <!-- Second -->
+    <td class="col-sps {% if r.diff_Second %}diff-cell{% endif %}">{{ r.sps_Second }}</td>
+    <td class="col-shot {% if r.diff_Second %}diff-cell{% endif %}">{{ r.shot_second }}</td>
+
+    <!-- Microsecond -->
+    <td class="col-sps {% if r.diff_Microsecond %}diff-cell{% endif %}">{{ r.sps_Microsecond }}</td>
+    <td class="col-shot {% if r.diff_Microsecond %}diff-cell{% endif %}">{{ r.shot_microsecond }}</td>
+
+    <!-- Year -->
+    <td class="col-sps {% if r.diff_Year %}diff-cell{% endif %}">{{ r.sps_Year }}</td>
+    <td class="col-shot {% if r.diff_Year %}diff-cell{% endif %}">{{ r.shot_year }}</td>
+
+    <!-- TOTAL -->
+    <td class="diff-total">
+        {{ r.diff_total|default:0 }}
+    </td>
+
+</tr>
+{% empty %}
+<tr>
+    <td colspan="200" class="text-center text-muted py-4">
+        No rows found.
+    </td>
+</tr>
+{% endfor %}

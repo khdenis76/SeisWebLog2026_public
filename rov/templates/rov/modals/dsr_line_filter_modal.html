@@ -1,0 +1,248 @@
+<!-- dsr_line_filter_modal.html -->
+<div class="modal fade" id="dsrFilterModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+
+      <!-- Header -->
+      <div class="modal-header dsr-modal-header">
+        <div class="w-100">
+          <div class="d-flex align-items-center justify-content-between">
+            <h5 class="modal-title fw-semibold mb-0">
+              <i class="fas fa-filter me-2"></i>Filter DSR Lines
+            </h5>
+
+            <span class="dsr-chip">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Smart Filters
+            </span>
+          </div>
+
+          <small class="opacity-75 d-block mt-1">
+            Combine status + day + time + line range + vessel (all filters work together).
+          </small>
+        </div>
+
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <!-- Section: Status -->
+        <div class="dsr-section">
+          <div class="dsr-section-head">
+            <span class="dsr-badge">
+              <span class="dsr-dot"></span>Status filters
+            </span>
+            <span class="text-muted small">Any / Yes / No</span>
+          </div>
+
+          <div class="dsr-section-body">
+
+            <div class="row g-2">
+              <div class="col-md-6">
+                <div class="dsr-status-card">
+                  <div class="dsr-status-title">
+                    <span class="dsr-ico dsr-ico-blue"><i class="fa-solid fa-flag-checkered"></i></span>
+                    Completely Deployed
+                  </div>
+
+                  <div class="btn-group w-100 dsr-tri" role="group" data-filter="deployed">
+                    <input type="radio" class="btn-check" name="dsrFilterDeployed" id="dsrFilterDeployedAny" value="any" checked>
+                    <label class="btn btn-sm dsr-any" for="dsrFilterDeployedAny">Any</label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterDeployed" id="dsrFilterDeployedYes" value="1">
+                    <label class="btn btn-sm dsr-yes" for="dsrFilterDeployedYes">
+                      <i class="fa-solid fa-check me-1"></i>Yes
+                    </label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterDeployed" id="dsrFilterDeployedNo" value="0">
+                    <label class="btn btn-sm dsr-no" for="dsrFilterDeployedNo">
+                      <i class="fa-solid fa-xmark me-1"></i>No
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="dsr-status-card">
+                  <div class="dsr-status-title">
+                    <span class="dsr-ico dsr-ico-green"><i class="fa-solid fa-anchor"></i></span>
+                    Completely Recovered
+                  </div>
+
+                  <div class="btn-group w-100 dsr-tri" role="group" data-filter="recovered">
+                    <input type="radio" class="btn-check" name="dsrFilterRecovered" id="dsrFilterRecoveredAny" value="any" checked>
+                    <label class="btn btn-sm dsr-any" for="dsrFilterRecoveredAny">Any</label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterRecovered" id="dsrFilterRecoveredYes" value="1">
+                    <label class="btn btn-sm dsr-yes" for="dsrFilterRecoveredYes">
+                      <i class="fa-solid fa-check me-1"></i>Yes
+                    </label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterRecovered" id="dsrFilterRecoveredNo" value="0">
+                    <label class="btn btn-sm dsr-no" for="dsrFilterRecoveredNo">
+                      <i class="fa-solid fa-xmark me-1"></i>No
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="dsr-status-card">
+                  <div class="dsr-status-title">
+                    <span class="dsr-ico dsr-ico-amber"><i class="fa-solid fa-box"></i></span>
+                    SM Loaded (Deploy)
+                  </div>
+
+                  <div class="btn-group w-100 dsr-tri" role="group" data-filter="sm">
+                    <input type="radio" class="btn-check" name="dsrFilterSm" id="dsrFilterSmAny" value="any" checked>
+                    <label class="btn btn-sm dsr-any" for="dsrFilterSmAny">Any</label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterSm" id="dsrFilterSmYes" value="1">
+                    <label class="btn btn-sm dsr-yes" for="dsrFilterSmYes">
+                      <i class="fa-solid fa-check me-1"></i>Yes
+                    </label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterSm" id="dsrFilterSmNo" value="0">
+                    <label class="btn btn-sm dsr-no" for="dsrFilterSmNo">
+                      <i class="fa-solid fa-xmark me-1"></i>No
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="dsr-status-card">
+                  <div class="dsr-status-title">
+                    <span class="dsr-ico dsr-ico-purple"><i class="fa-solid fa-box-open"></i></span>
+                    SM Loaded (Recovery)
+                  </div>
+
+                  <div class="btn-group w-100 dsr-tri" role="group" data-filter="smr">
+                    <input type="radio" class="btn-check" name="dsrFilterSmr" id="dsrFilterSmrAny" value="any" checked>
+                    <label class="btn btn-sm dsr-any" for="dsrFilterSmrAny">Any</label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterSmr" id="dsrFilterSmrYes" value="1">
+                    <label class="btn btn-sm dsr-yes" for="dsrFilterSmrYes">
+                      <i class="fa-solid fa-check me-1"></i>Yes
+                    </label>
+
+                    <input type="radio" class="btn-check" name="dsrFilterSmr" id="dsrFilterSmrNo" value="0">
+                    <label class="btn btn-sm dsr-no" for="dsrFilterSmrNo">
+                      <i class="fa-solid fa-xmark me-1"></i>No
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-text mt-2">
+              Example: Recovered = <b>No</b> and Deployed = <b>Yes</b> → lines deployed but not fully recovered.
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Date & Time -->
+        <div class="dsr-section">
+          <div class="dsr-section-head">
+            <span class="dsr-badge">
+              <span class="dsr-dot" style="background:linear-gradient(135deg,#60a5fa,#3b82f6); box-shadow:0 0 0 4px rgba(59,130,246,.18);"></span>
+              Date & Time
+            </span>
+            <span class="text-muted small">optional</span>
+          </div>
+
+          <div class="dsr-section-body">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Day</label>
+              <input type="date" class="form-control" id="dsrFilterDay">
+              <div class="form-text">Matches <code>data-day</code> (FirstDeployTime date)</div>
+            </div>
+
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label fw-semibold">Time from</label>
+                <input type="time" class="form-control" id="dsrFilterTimeFrom">
+              </div>
+              <div class="col-6">
+                <label class="form-label fw-semibold">Time to</label>
+                <input type="time" class="form-control" id="dsrFilterTimeTo">
+              </div>
+              <div class="form-text">Filters by FirstDeployTime time-of-day (<code>data-depstart</code>)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Line range -->
+        <div class="dsr-section">
+          <div class="dsr-section-head">
+            <span class="dsr-badge">
+              <span class="dsr-dot" style="background:linear-gradient(135deg,#ffc107,#fd7e14); box-shadow:0 0 0 4px rgba(255,193,7,.18);"></span>
+              Line range
+            </span>
+            <span class="text-muted small">select or type</span>
+          </div>
+
+          <div class="dsr-section-body">
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label fw-semibold">Line min</label>
+                <div class="input-group">
+                  <select class="form-select" id="dsrFilterLineMinSelect">
+                    <option value="">— select —</option>
+                  </select>
+                  <input type="number" class="form-control" id="dsrFilterLineMin" placeholder="or type">
+                </div>
+                <div class="form-text">Select from list or type manually</div>
+              </div>
+
+              <div class="col-6">
+                <label class="form-label fw-semibold">Line max</label>
+                <div class="input-group">
+                  <select class="form-select" id="dsrFilterLineMaxSelect">
+                    <option value="">— select —</option>
+                  </select>
+                  <input type="number" class="form-control" id="dsrFilterLineMax" placeholder="or type">
+                </div>
+                <div class="form-text">Select from list or type manually</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Vessel -->
+        <div class="dsr-section">
+          <div class="dsr-section-head">
+            <span class="dsr-badge">
+              <span class="dsr-dot"
+                    style="background:linear-gradient(135deg,#198754,#20c997);
+                           box-shadow:0 0 0 4px rgba(25,135,84,.18);"></span>
+              Vessel
+            </span>
+            <span class="text-muted small">optional</span>
+          </div>
+
+          <div class="dsr-section-body">
+            <label class="form-label fw-semibold">Select Vessel</label>
+            <select class="form-select" id="dsrFilterVessel">
+              <option value="">— any vessel —</option>
+            </select>
+            <div class="form-text">Matches <code>data-vessel</code></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer dsr-modal-footer">
+        <button class="btn btn-outline-secondary btn-dsr-cancel" type="button" id="dsrFilterResetBtn">
+          <i class="fa-solid fa-rotate-left me-2"></i>Reset
+        </button>
+
+        <button class="btn btn-dsr-apply" type="button" id="dsrFilterApplyBtn">
+          <i class="fa-solid fa-check me-2"></i>Apply
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>

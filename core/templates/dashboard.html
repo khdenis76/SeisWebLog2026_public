@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Welcome to new Seisweblog{% endblock %}
+{% block content %}
+    <h2>Active project: {{ project.name }}</h2>
+<p>
+    Path: {{ project.root_path }} / {{ project.folder_name }}<br>
+    Note: {{ project.note }}
+</p>
+
+{% endblock %}

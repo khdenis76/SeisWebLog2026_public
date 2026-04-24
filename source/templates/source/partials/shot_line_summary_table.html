@@ -1,0 +1,57 @@
+<div class="shot-summary-wrap" style="--col0: 52px; --col1: 190px; --col2: 110px;">
+  <table
+      class="shot-summary-table"
+      id="st-sailline-summary-table"
+      data-url="{% url 'source_sps_shot_compare_tbody' %}"
+      data-delete-url="{% url 'shot_delete_selected_lines' %}"
+      data-recalc-url="{% url 'recalc_selected_lines' %}">
+    <thead>
+      <tr>
+        <th class="sticky-check text-center align-middle">
+          <div class="form-check d-flex justify-content-center mb-0">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="shot-summary-check-all"
+              title="Select all visible rows">
+          </div>
+        </th>
+
+        <th class="sticky-col">nav_line_code</th>
+        <th class="sticky-col-2 text-end">Seq</th>
+        <th class="sticky-col-3 text-end">Att.</th>
+
+        <th class="text-end">In SL</th>
+        <th class="text-end">ShotCount</th>
+        <th class="text-end">Prod</th>
+        <th class="text-end">NonProd</th>
+        <th class="text-end">Kill</th>
+
+        <th class="text-end">FSP</th>
+        <th class="text-end">LSP</th>
+        <th class="text-end">FGSP</th>
+        <th class="text-end">LGSP</th>
+        <th class="text-end">diff_Attempt</th>
+        <th class="text-end">diff_Seq</th>
+        <th class="text-end">diff_Point</th>
+        <th class="text-end">diff_PointCode</th>
+        <th class="text-end">diff_FireCode</th>
+        <th class="text-end">diff_WaterDepth</th>
+        <th class="text-end">diff_Easting</th>
+        <th class="text-end">diff_Northing</th>
+        <th class="text-end">diff_Elevation</th>
+        <th class="text-end">diff_JDay</th>
+        <th class="text-end">diff_Hour</th>
+        <th class="text-end">diff_Minute</th>
+        <th class="text-end">diff_Second</th>
+        <th class="text-end">diff_Microsecond</th>
+        <th class="text-end">QC_AllMatch</th>
+        <th class="text-end">QC_AnyMatch</th>
+      </tr>
+    </thead>
+
+    <tbody id="shot-summary-tbody" data-url="{% url 'source_shot_line_summary_tbody' %}">
+      {{ shot_line_summary|safe }}
+    </tbody>
+  </table>
+</div>

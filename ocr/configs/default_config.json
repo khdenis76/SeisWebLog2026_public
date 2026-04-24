@@ -1,0 +1,103 @@
+{
+  "comment": "Default OCR config",
+  "filename_pattern": "{role}_{linestation}_{index}.png",
+  "output_pattern": "{role}_{LLLLL}{SSSSS}_{index}.png",
+  "rename_mode": "off",
+  "single_config_only": true,
+  "skip_checked": true,
+  "main_config": {
+    "config_name": "main",
+    "file_masks": [
+      "*_*_*.png"
+    ],
+    "include_subfolders": true,
+    "expected_width": 1920,
+    "expected_height": 1080,
+    "deploy_images": 3,
+    "recovery_images": 3,
+    "delta_warning": 1.5,
+    "delta_error": 2.0,
+    "use_easyocr_first": true,
+    "roi_fields": [
+      {
+        "name": "rov",
+        "field_type": "text",
+        "x": 11,
+        "y": 1020,
+        "w": 134,
+        "h": 35
+      },
+      {
+        "name": "line",
+        "field_type": "int",
+        "x": 225,
+        "y": 1020,
+        "w": 105,
+        "h": 35
+      },
+      {
+        "name": "station",
+        "field_type": "int",
+        "x": 555,
+        "y": 1020,
+        "w": 98,
+        "h": 35
+      },
+      {
+        "name": "dive",
+        "field_type": "int",
+        "x": 887,
+        "y": 1020,
+        "w": 87,
+        "h": 35
+      },
+      {
+        "name": "east",
+        "field_type": "float",
+        "x": 1027,
+        "y": 1020,
+        "w": 160,
+        "h": 35
+      },
+      {
+        "name": "north",
+        "field_type": "float",
+        "x": 1280,
+        "y": 1020,
+        "w": 177,
+        "h": 35
+      },
+      {
+        "name": "date",
+        "field_type": "date",
+        "x": 1515,
+        "y": 1020,
+        "w": 188,
+        "h": 35
+      },
+      {
+        "name": "time",
+        "field_type": "time",
+        "x": 1745,
+        "y": 1020,
+        "w": 135,
+        "h": 35
+      }
+    ]
+  },
+  "alt_config": {
+    "config_name": "alt",
+    "file_masks": [
+      "*_*_*.png"
+    ],
+    "include_subfolders": true,
+    "expected_width": 1,
+    "expected_height": 0,
+    "deploy_images": 2,
+    "recovery_images": 2,
+    "delta_warning": 1.5,
+    "delta_error": 2.0,
+    "use_easyocr_first": true,
+    "roi_fields": []
+  }
+}
