@@ -35,6 +35,7 @@ rov/*.html
 #Tests
 rov/*_test.py
 *test*.py
+*test*.html
 
 
 

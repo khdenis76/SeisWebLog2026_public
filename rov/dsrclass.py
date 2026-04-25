@@ -1384,24 +1384,18 @@ class DSRDB:
 
     def load_fb_from_file(self, file_obj_or_path, *, chunk_rows: int = 50000, file_fk: int | None = None) -> dict:
         """
-        FB/RECDB whitespace-delimited loader.
-        UPSERT into REC_DB by UNIQUE(REC_ID, DEPLOY, RPI).
+        FB / REC_DB whitespace-delimited loader.
 
-        Required columns in file:
-          - REC_ID
-          - RPI
-          - DEPLOY
-
-        Extra:
-          - FINPITCH/FINROLL/FINYAW -> PITCHFIN/ROLLFIN/YAWFIN
-          - Preplot_FK (FK -> RLPreplot.ID) is filled by mapping:
-                REC_DB.Line = RLPreplot.Line
-            (no MIN/MAX; we just take an ID returned by the query)
+        Fixes:
+          - Correct Line / Point parsing from REC_ID using rl_mask counts.
+            Example with rl_mask='LLLLLPPPP':
+                REC_ID = 153351476
+                Line   = 15335
+                Point  = 1476
+          - Returns changed_lines for refreshing DSR_LineSummary after upload.
+          - UPSERT into REC_DB by UNIQUE(REC_ID, DEPLOY, RPI).
         """
 
-        # -------------------------
-        # helper: read upload as text
-        # -------------------------
         def _read_uploaded_as_text(fobj) -> str:
             try:
                 fobj.seek(0)
@@ -1413,30 +1407,24 @@ class DSRDB:
                 return raw
             if not raw:
                 return ""
+
             try:
                 return raw.decode("utf-8-sig")
             except UnicodeDecodeError:
                 return raw.decode("cp1252", errors="ignore")
 
-        # -------------------------
-        # helper: fetch mapping Line -> RLPreplot.ID (no MIN/MAX)
-        # If duplicates exist, we keep the first ID we see for that Line.
-        # -------------------------
         def _fetch_preplot_id_by_line(conn, line_values) -> dict:
-            BATCH = 900  # keep under SQLite variable limit
+            BATCH = 900
             out = {}
-            if not line_values:
-                return out
 
-            lines = [l for l in set(line_values) if l is not None]
+            lines = [int(l) for l in set(line_values) if l is not None]
             if not lines:
                 return out
 
             for i in range(0, len(lines), BATCH):
-                batch = lines[i: i + BATCH]
+                batch = lines[i:i + BATCH]
                 ph = ",".join(["?"] * len(batch))
 
-                # Deterministic ordering, but no aggregation:
                 sql = (
                     'SELECT "Line" AS line, "ID" AS id '
                     f'FROM RLPreplot WHERE "Line" IN ({ph}) '
@@ -1448,59 +1436,58 @@ class DSRDB:
                     ln = int(r["line"])
                     if ln not in out:
                         out[ln] = int(r["id"])
+
             return out
 
-        # -------------------------
-        # scalers from rl_mask (all return int)
-        # -------------------------
+        # --------------------------------------------------
+        # scalers / mask
+        # --------------------------------------------------
+        geom = self.pdb.get_geometry()
+        mask = getattr(geom, "rl_mask", "") or ""
+
+        if not mask or "L" not in mask or "P" not in mask:
+            return {"error": "rl_mask missing or invalid"}
+
+        num_line_digits = mask.count("L")
+        num_point_digits = mask.count("P")
+        expected_len = num_line_digits + num_point_digits
+
         line_s = self.linescaler
         lp_s = self.linepointscaler
         lpi_s = self.linepointidxscaler()
 
         if not line_s or not lp_s or not lpi_s:
-            return {"error": "Invalid rl_mask scalers"}
+            return {
+                "error": f"Invalid rl_mask scalers. rl_mask={mask}, "
+                         f"line_s={line_s}, lp_s={lp_s}, lpi_s={lpi_s}"
+            }
 
-        # -------------------------
-        # mask positions for parsing Line / Point from REC_ID
-        # -------------------------
-        geom = self.pdb.get_geometry()
-        mask = getattr(geom, "rl_mask", "") or ""
-        if not mask or "L" not in mask or "P" not in mask:
-            return {"error": "rl_mask missing or invalid"}
+        scalar_point = 10 ** num_point_digits
 
-        line_pos0 = mask.index("L")
-        line_pos1 = mask.rfind("L")
-        point_pos0 = mask.index("P")
-        point_pos1 = mask.rfind("P")
-
-        num_point_digits = point_pos1 - point_pos0 + 1
-        scalar_point = int("1" + ("0" * num_point_digits))
-
-        # -------------------------
-        # FIN* rename map (file -> DB)
-        # -------------------------
         fin_rename = {
             "FINPITCH": "PITCHFIN",
             "FINROLL": "ROLLFIN",
             "FINYAW": "YAWFIN",
         }
 
-        # -------------------------
-        # read REC_DB schema once
-        # -------------------------
+        # --------------------------------------------------
+        # read REC_DB schema
+        # --------------------------------------------------
         with self._connect() as conn:
             rec_info = conn.execute("PRAGMA table_info(REC_DB)").fetchall()
             rec_cols = {r["name"].lower(): r["name"] for r in rec_info}
 
         conflict_cols = ["REC_ID", "DEPLOY", "RPI"]
+
         for req in ("rec_id", "deploy", "rpi"):
             if req not in rec_cols:
                 return {"error": f'REC_DB table missing required column "{req.upper()}"'}
+
         db_conflict = [rec_cols[c.lower()] for c in conflict_cols]
 
-        # -------------------------
-        # build reader (whitespace)
-        # -------------------------
+        # --------------------------------------------------
+        # build pandas reader
+        # --------------------------------------------------
         is_path = isinstance(file_obj_or_path, (str, Path))
 
         if is_path:
@@ -1520,10 +1507,10 @@ class DSRDB:
                 sep=r"\s+",
                 encoding=enc,
                 chunksize=chunk_rows,
-                low_memory=False,
                 engine="python",
             )
             src_name = str(p)
+
         else:
             text = _read_uploaded_as_text(file_obj_or_path)
             if not text.strip():
@@ -1533,93 +1520,128 @@ class DSRDB:
                 io.StringIO(text),
                 sep=r"\s+",
                 chunksize=chunk_rows,
-                low_memory=False,
-                engine="c",
+                engine="python",
             )
             src_name = getattr(file_obj_or_path, "name", "uploaded_file")
 
-        # -------------------------
+        # --------------------------------------------------
         # process chunks
-        # -------------------------
+        # --------------------------------------------------
         total_rows = 0
         total_upserts = 0
         total_preplot_linked = 0
+        changed_lines = set()
 
         with self._connect() as conn:
+            conn.execute("PRAGMA busy_timeout = 120000")
             conn.execute("BEGIN IMMEDIATE")
+
             try:
                 for df in reader:
                     if df is None or df.empty:
                         continue
 
-                    total_rows += len(df)
+                    total_rows += int(len(df))
 
                     # normalize headers
                     df.columns = [re.sub(r"\W", "", str(c)).strip() for c in df.columns]
 
-                    # apply FIN* renames
+                    # rename old FIN columns
                     for old, new in fin_rename.items():
                         if old in df.columns:
                             df.rename(columns={old: new}, inplace=True)
 
-                    # REQUIRED columns
-                    if ("REC_ID" not in df.columns) or ("RPI" not in df.columns) or ("DEPLOY" not in df.columns):
-                        raise ValueError("REC_DB file must contain REC_ID, RPI and DEPLOY")
+                    if "REC_ID" not in df.columns or "RPI" not in df.columns or "DEPLOY" not in df.columns:
+                        raise ValueError(
+                            f"REC_DB file must contain REC_ID, RPI and DEPLOY. "
+                            f"Columns found: {list(df.columns)}"
+                        )
 
                     # numeric safety
                     df["RPI"] = pd.to_numeric(df["RPI"], errors="coerce").fillna(0).astype("int64")
                     df["DEPLOY"] = pd.to_numeric(df["DEPLOY"], errors="coerce").fillna(0).astype("int64")
 
-                    # parse Line/Point from REC_ID
-                    rec_str = df["REC_ID"].astype(str)
+                    # --------------------------------------------------
+                    # FIXED REC_ID parsing
+                    # --------------------------------------------------
+                    rec_str = (
+                        df["REC_ID"]
+                        .astype(str)
+                        .str.replace(r"\.0$", "", regex=True)
+                        .str.replace(r"\D", "", regex=True)
+                        .str.strip()
+                    )
 
-                    line_str = rec_str.str.slice(line_pos0, line_pos1 + 1)
-                    point_str = rec_str.str.slice(point_pos0, point_pos1 + 1)
+                    rec_core = rec_str.str.slice(0, expected_len)
 
-                    line_val = pd.to_numeric(line_str, errors="coerce").fillna(0).astype("int64")
-                    point_val = pd.to_numeric(point_str, errors="coerce").fillna(0).astype("int64")
+                    line_str = rec_core.str.slice(0, num_line_digits)
+                    point_str = rec_core.str.slice(num_line_digits, expected_len)
 
-                    df["Line"] = line_val
-                    df["Point"] = point_val
-                    df["LinePoint"] = (line_val * scalar_point + point_val).astype("int64")
+                    line_val = pd.to_numeric(line_str, errors="coerce")
+                    point_val = pd.to_numeric(point_str, errors="coerce")
 
-                    # LinePointIdx = LinePoint * 10 + max(RPI, DEPLOY)   (you said both are <= 9)
+                    valid_mask = line_val.notna() & point_val.notna()
+                    df = df.loc[valid_mask].copy()
+
+                    if df.empty:
+                        continue
+
+                    line_val = line_val.loc[valid_mask].astype("int64")
+                    point_val = point_val.loc[valid_mask].astype("int64")
+
+                    df["Line"] = line_val.values
+                    df["Point"] = point_val.values
+
+                    df["LinePoint"] = (
+                            df["Line"].astype("int64") * scalar_point
+                            + df["Point"].astype("int64")
+                    ).astype("int64")
+
                     suffix_val = df[["RPI", "DEPLOY"]].max(axis=1).astype("int64")
                     df["LinePointIdx"] = (df["LinePoint"] * 10 + suffix_val).astype("int64")
 
-                    # Tier calculations (use rl_mask scalers, and add original values)
+                    changed_lines.update(
+                        int(x) for x in df["Line"].dropna().unique().tolist()
+                    )
+
+                    # --------------------------------------------------
+                    # Tier calculations
+                    # --------------------------------------------------
                     if "TIER" not in df.columns:
                         df["TIER"] = 1
+
                     tier_val = pd.to_numeric(df["TIER"], errors="coerce").fillna(1).astype("int64")
 
                     df["TierLine"] = (tier_val * line_s + df["Line"]).astype("int64")
                     df["TierLinePoint"] = (tier_val * lp_s + df["LinePoint"]).astype("int64")
                     df["TierLinePointIdx"] = (tier_val * lpi_s + df["LinePointIdx"]).astype("int64")
 
-                    # inject File_FK if requested and column exists in REC_DB
+                    # File_FK
                     if file_fk is not None and "file_fk" in rec_cols:
                         df["File_FK"] = int(file_fk)
 
-                    # Preplot_FK lookup from RLPreplot by Line (no MIN/MAX)
+                    # Preplot_FK
                     if "preplot_fk" in rec_cols:
                         lines = df["Line"].dropna().astype("int64").unique().tolist()
                         preplot_map = _fetch_preplot_id_by_line(conn, lines)
                         df["Preplot_FK"] = df["Line"].map(preplot_map)
                         total_preplot_linked += int(pd.notnull(df["Preplot_FK"]).sum())
 
-                    # keep only REC_DB columns (exclude ID)
-                    keep_cols = [c for c in df.columns if c.lower() in rec_cols and c.lower() != "id"]
+                    # keep only REC_DB columns, exclude ID
+                    keep_cols = [
+                        c for c in df.columns
+                        if c.lower() in rec_cols and c.lower() != "id"
+                    ]
 
-                    # ensure conflict cols are present
                     for cc in conflict_cols:
-                        if cc not in keep_cols:
+                        if cc in df.columns and cc not in keep_cols:
                             keep_cols.append(cc)
 
-                    # rename to DB exact case
                     rename_to_db = {c: rec_cols[c.lower()] for c in keep_cols}
                     df.rename(columns=rename_to_db, inplace=True)
 
                     db_cols = [rename_to_db[c] for c in keep_cols]
+
                     update_cols = [c for c in db_cols if c not in db_conflict]
 
                     col_sql = ", ".join(f'"{c}"' for c in db_cols)
@@ -1627,7 +1649,11 @@ class DSRDB:
                     conflict_sql = ", ".join(f'"{c}"' for c in db_conflict)
 
                     if update_cols:
-                        update_sql = ", ".join(f'"{c}"=excluded."{c}"' for c in update_cols)
+                        update_sql = ", ".join(
+                            f'"{c}"=excluded."{c}"'
+                            for c in update_cols
+                        )
+
                         sql = (
                             f'INSERT INTO REC_DB ({col_sql}) VALUES ({val_sql}) '
                             f'ON CONFLICT ({conflict_sql}) DO UPDATE SET {update_sql}'
@@ -1638,7 +1664,7 @@ class DSRDB:
                             f'ON CONFLICT ({conflict_sql}) DO NOTHING'
                         )
 
-                    sub = df[db_cols].where(pd.notnull(df), None)
+                    sub = df[db_cols].where(pd.notnull(df[db_cols]), None)
                     values = list(sub.itertuples(index=False, name=None))
 
                     if values:
@@ -1649,14 +1675,27 @@ class DSRDB:
 
             except Exception as e:
                 conn.rollback()
-                return {"error": f"load_fb_from_file error: {e}", "file": src_name}
+                return {
+                    "error": f"load_fb_from_file error: {e}",
+                    "file": src_name,
+                    "rl_mask": mask,
+                    "num_line_digits": num_line_digits,
+                    "num_point_digits": num_point_digits,
+                }
 
         return {
             "success": f"File {src_name} processed",
             "rows_read": int(total_rows),
             "upserts_attempted": int(total_upserts),
             "preplot_fk_linked": int(total_preplot_linked),
-            "preplot_fk_rule": "Preplot_FK = RLPreplot.ID where RLPreplot.Line = REC_DB.Line (first ID picked if duplicates)",
+            "changed_lines": sorted(changed_lines),
+            "rl_mask": mask,
+            "num_line_digits": int(num_line_digits),
+            "num_point_digits": int(num_point_digits),
+            "preplot_fk_rule": (
+                "Preplot_FK = RLPreplot.ID where RLPreplot.Line = REC_DB.Line "
+                "(first ID picked if duplicates)"
+            ),
         }
 
     def export_dsr_to_csv(

@@ -1663,14 +1663,18 @@ class DSRLineGraphicsMatplotlib:
             show_all_dsr=True,
             show_selected_line_nodes=True,
             show_station_labels=False,
-            show_preplot_points=False,
+            show_preplot_points=True,
+            show_all_preplot=True,
             preplot_color="#d0d0d0",
             preplot_selected_color="#4a4a4a",
             dsr_other_color="#d9d9d9",
             selected_line_width=1.8,
             other_line_width=0.6,
             point_size=10,
-            selected_point_size=14,
+            selected_point_size=18,
+            label_step=50,
+            selected_preplot_by_rov=True,
+            line_label_along_line=True,
             # scalebar
             scale_bar_length=None,
             scale_bar_units="m",
@@ -1691,7 +1695,8 @@ class DSRLineGraphicsMatplotlib:
             zebra_color="#efefef",
             zebra_alpha=0.35,
             # output
-            figsize=(12, 12),
+            figsize=None,
+            orientation=None,  # None | "portrait" | "landscape"
             save_dir=".",
             file_name=None,
             suffix="project_map",
@@ -1701,16 +1706,9 @@ class DSRLineGraphicsMatplotlib:
             close=False,
     ):
         """
-        Project map with highlighted selected line.
-
-        Requirements:
-          - helpers already exist in class:
-              _transform_xy_dataframe
-              _add_zebra_frame
-              add_csv_layers_to_map_matplotlib
-              add_project_shapes_layers_matplotlib
+        Project map with RPPreplot plotted as points and selected line highlighted.
+        Selected RP points can be filled by matching DSR ROV color.
         """
-
 
         def _safe_float(v):
             try:
@@ -1790,6 +1788,56 @@ class DSRLineGraphicsMatplotlib:
                 bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="none", alpha=0.75),
                 zorder=51,
             )
+
+        def _line_label_position_and_angle(df_, x_col="_plot_x", y_col="_plot_y"):
+            if df_ is None or df_.empty or len(df_) < 2:
+                return None, None, 0
+
+            d = df_.copy().dropna(subset=[x_col, y_col]).reset_index(drop=True)
+            if len(d) < 2:
+                return None, None, 0
+
+            xs = d[x_col].astype(float).to_numpy()
+            ys = d[y_col].astype(float).to_numpy()
+
+            dx = np.diff(xs)
+            dy = np.diff(ys)
+            dist = np.sqrt(dx * dx + dy * dy)
+
+            total = dist.sum()
+            if total <= 0:
+                return xs[len(xs) // 2], ys[len(ys) // 2], 0
+
+            cum = np.insert(np.cumsum(dist), 0, 0.0)
+            mid_dist = total / 2.0
+            mid_i = int(np.searchsorted(cum, mid_dist))
+
+            mid_i = max(1, min(mid_i, len(xs) - 1))
+
+            x1, y1 = xs[mid_i - 1], ys[mid_i - 1]
+            x2, y2 = xs[mid_i], ys[mid_i]
+
+            if x2 == x1 and y2 == y1:
+                angle = 0
+            else:
+                angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
+
+            if angle > 90:
+                angle -= 180
+            elif angle < -90:
+                angle += 180
+
+            # interpolate exact center along line
+            seg_len = dist[mid_i - 1]
+            if seg_len > 0:
+                t = (mid_dist - cum[mid_i - 1]) / seg_len
+                xmid = x1 + t * (x2 - x1)
+                ymid = y1 + t * (y2 - y1)
+            else:
+                xmid = xs[mid_i]
+                ymid = ys[mid_i]
+
+            return xmid, ymid, angle
 
         # -------------------------------------------------
         # input checks
@@ -1876,8 +1924,16 @@ class DSRLineGraphicsMatplotlib:
         selected_line_num = _safe_float(selected_line)
 
         # -------------------------------------------------
-        # figure
+        # figure size / orientation
         # -------------------------------------------------
+        if figsize is None:
+            if orientation == "landscape":
+                figsize = (16, 9)
+            elif orientation == "portrait":
+                figsize = (9, 16)
+            else:
+                figsize = (12, 12)
+
         fig, ax = plt.subplots(figsize=figsize)
 
         # -------------------------------------------------
@@ -1895,8 +1951,37 @@ class DSRLineGraphicsMatplotlib:
                 pass
 
         # -------------------------------------------------
-        # RP lines
+        # ROV color map from selected DSR
         # -------------------------------------------------
+        rov_color_map = {}
+        rov_marker_map = {}
+        marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "*", "h", "8"]
+        color_cycle = list(plt.cm.tab10.colors) + list(plt.cm.Set2.colors) + list(plt.cm.Dark2.colors)
+
+        dsr_sel_for_colors = pd.DataFrame()
+        if not dsr.empty:
+            dsr_sel_for_colors = dsr.copy()
+            if selected_line_num is not None and dsr_line_col in dsr_sel_for_colors.columns:
+                dsr_sel_for_colors = dsr_sel_for_colors[
+                    pd.to_numeric(dsr_sel_for_colors[dsr_line_col], errors="coerce") == selected_line_num
+                    ].copy()
+
+            rov_values = sorted([
+                v for v in dsr_sel_for_colors[dsr_rov_col].dropna().astype(str).unique().tolist()
+                if str(v).strip() != ""
+            ])
+
+            if not rov_values:
+                rov_values = ["N/A"]
+
+            rov_color_map = {rov: color_cycle[i % len(color_cycle)] for i, rov in enumerate(rov_values)}
+            rov_marker_map = {rov: marker_cycle[i % len(marker_cycle)] for i, rov in enumerate(rov_values)}
+
+        # -------------------------------------------------
+        # RP PREPLOT POINTS
+        # -------------------------------------------------
+        rp_selected_for_label = pd.DataFrame()
+
         if rp_line_col in rp.columns:
             for line_value, grp in rp.groupby(rp_line_col, dropna=True):
                 grp = grp.sort_values(rp_point_col) if rp_point_col in grp.columns else grp
@@ -1908,31 +1993,98 @@ class DSRLineGraphicsMatplotlib:
                         and line_num == selected_line_num
                 )
 
-                ax.plot(
-                    grp["_plot_x"],
-                    grp["_plot_y"],
-                    color=preplot_selected_color if is_selected else preplot_color,
-                    linewidth=selected_line_width if is_selected else other_line_width,
-                    alpha=0.95 if is_selected else 0.75,
-                    zorder=10 if is_selected else 5,
-                )
+                if is_selected:
+                    rp_selected_for_label = grp.copy()
 
-                if is_selected and show_preplot_points:
+                if not is_selected:
+                    if not show_all_preplot:
+                        continue
+
                     ax.scatter(
                         grp["_plot_x"],
                         grp["_plot_y"],
-                        s=4,
-                        color=preplot_selected_color,
-                        alpha=0.8,
-                        zorder=11,
+                        s=point_size,
+                        color=preplot_color,
+                        alpha=0.18,
+                        edgecolors="none",
+                        linewidths=0.0,
+                        zorder=5,
                     )
+                    continue
+
+                # Selected RP points filled by matching DSR ROV color
+                plotted_selected_by_rov = False
+
+                if (
+                        selected_preplot_by_rov
+                        and not dsr_sel_for_colors.empty
+                        and rp_point_col in grp.columns
+                        and dsr_station_col in dsr_sel_for_colors.columns
+                        and dsr_rov_col in dsr_sel_for_colors.columns
+                ):
+                    rov_lookup = (
+                        dsr_sel_for_colors[[dsr_station_col, dsr_rov_col]]
+                        .dropna(subset=[dsr_station_col])
+                        .copy()
+                    )
+
+                    rov_lookup["_station_key"] = pd.to_numeric(
+                        rov_lookup[dsr_station_col],
+                        errors="coerce"
+                    ).round(0).astype("Int64")
+
+                    grp2 = grp.copy()
+                    grp2["_station_key"] = pd.to_numeric(
+                        grp2[rp_point_col],
+                        errors="coerce"
+                    ).round(0).astype("Int64")
+
+                    grp2 = grp2.merge(
+                        rov_lookup[["_station_key", dsr_rov_col]],
+                        on="_station_key",
+                        how="left",
+                    )
+
+                    grp2[dsr_rov_col] = grp2[dsr_rov_col].fillna("Preplot").astype(str).str.strip()
+
+                    for rov, rg in grp2.groupby(dsr_rov_col, dropna=False):
+                        rov_key = str(rov).strip() if pd.notna(rov) and str(rov).strip() else "Preplot"
+                        color = rov_color_map.get(rov_key, preplot_selected_color)
+
+                        ax.scatter(
+                            rg["_plot_x"],
+                            rg["_plot_y"],
+                            s=selected_point_size,
+                            marker="o",
+                            color=color,
+                            alpha=0.95,
+                            edgecolors="black",
+                            linewidths=0.25,
+                            zorder=12,
+                        )
+
+                    plotted_selected_by_rov = True
+
+                if not plotted_selected_by_rov:
+                    ax.scatter(
+                        grp["_plot_x"],
+                        grp["_plot_y"],
+                        s=selected_point_size,
+                        color=preplot_selected_color,
+                        alpha=0.95,
+                        edgecolors="black",
+                        linewidths=0.25,
+                        zorder=12,
+                    )
+
         else:
-            ax.plot(
+            ax.scatter(
                 rp["_plot_x"],
                 rp["_plot_y"],
+                s=point_size,
                 color=preplot_selected_color,
-                linewidth=selected_line_width,
-                alpha=0.9,
+                alpha=0.75,
+                edgecolors="none",
                 zorder=10,
             )
 
@@ -1963,9 +2115,6 @@ class DSRLineGraphicsMatplotlib:
         # -------------------------------------------------
         legend_handles = []
 
-        marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "*", "h", "8"]
-        color_cycle = list(plt.cm.tab10.colors) + list(plt.cm.Set2.colors) + list(plt.cm.Dark2.colors)
-
         if show_selected_line_nodes and not dsr.empty:
             dsr_sel = dsr.copy()
 
@@ -1975,17 +2124,6 @@ class DSRLineGraphicsMatplotlib:
                     ].copy()
 
             if not dsr_sel.empty:
-                rov_values = sorted([
-                    v for v in dsr_sel[dsr_rov_col].dropna().astype(str).unique().tolist()
-                    if str(v).strip() != ""
-                ])
-
-                if not rov_values:
-                    rov_values = ["N/A"]
-
-                rov_marker_map = {rov: marker_cycle[i % len(marker_cycle)] for i, rov in enumerate(rov_values)}
-                rov_color_map = {rov: color_cycle[i % len(color_cycle)] for i, rov in enumerate(rov_values)}
-
                 for rov, grp in dsr_sel.groupby(dsr_rov_col, dropna=False):
                     rov_key = str(rov).strip() if pd.notna(rov) and str(rov).strip() else "N/A"
                     marker = rov_marker_map.get(rov_key, "o")
@@ -2017,7 +2155,12 @@ class DSRLineGraphicsMatplotlib:
                     )
 
                     if show_station_labels and dsr_station_col in grp.columns:
-                        for _, r in grp.iterrows():
+                        grp_label = grp.sort_values(dsr_station_col)
+
+                        for i, (_, r) in enumerate(grp_label.iterrows()):
+                            if label_step and i % label_step != 0:
+                                continue
+
                             st = r.get(dsr_station_col, "")
                             if pd.notna(st):
                                 try:
@@ -2030,7 +2173,7 @@ class DSRLineGraphicsMatplotlib:
                                     (r["_plot_x"], r["_plot_y"]),
                                     xytext=(3, 2),
                                     textcoords="offset points",
-                                    fontsize=6,
+                                    fontsize=5,
                                     alpha=0.85,
                                     zorder=31,
                                 )
@@ -2050,13 +2193,12 @@ class DSRLineGraphicsMatplotlib:
                 pass
 
         # -------------------------------------------------
-        # selected line label
+        # selected line label along line
         # -------------------------------------------------
-        if selected_line_num is not None and rp_line_col in rp.columns:
-            rp_sel = rp[pd.to_numeric(rp[rp_line_col], errors="coerce") == selected_line_num].copy()
-            if not rp_sel.empty:
-                xmid = rp_sel["_plot_x"].median()
-                ymid = rp_sel["_plot_y"].median()
+        if selected_line_num is not None and not rp_selected_for_label.empty:
+            xmid, ymid, angle = _line_label_position_and_angle(rp_selected_for_label)
+
+            if xmid is not None:
                 ax.text(
                     xmid,
                     ymid,
@@ -2064,9 +2206,11 @@ class DSRLineGraphicsMatplotlib:
                     fontsize=10,
                     weight="bold",
                     ha="center",
-                    va="bottom",
-                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="0.4", alpha=0.85),
-                    zorder=40,
+                    va="center",
+                    rotation=angle if line_label_along_line else 0,
+                    rotation_mode="anchor",
+                    bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="0.4", alpha=0.85),
+                    zorder=45,
                 )
 
         # -------------------------------------------------
@@ -2094,17 +2238,60 @@ class DSRLineGraphicsMatplotlib:
             except Exception:
                 pass
 
-        # redraw selected line above zebra if needed
-        if zebra_frame and rp_line_col in rp.columns and selected_line_num is not None:
-            rp_sel = rp[pd.to_numeric(rp[rp_line_col], errors="coerce") == selected_line_num].copy()
-            if not rp_sel.empty:
-                rp_sel = rp_sel.sort_values(rp_point_col) if rp_point_col in rp_sel.columns else rp_sel
-                ax.plot(
-                    rp_sel["_plot_x"],
-                    rp_sel["_plot_y"],
+        # -------------------------------------------------
+        # redraw selected RP points above zebra
+        # -------------------------------------------------
+        if zebra_frame and not rp_selected_for_label.empty:
+            if selected_preplot_by_rov and not dsr_sel_for_colors.empty and rp_point_col in rp_selected_for_label.columns:
+                rov_lookup = (
+                    dsr_sel_for_colors[[dsr_station_col, dsr_rov_col]]
+                    .dropna(subset=[dsr_station_col])
+                    .copy()
+                )
+
+                rov_lookup["_station_key"] = pd.to_numeric(
+                    rov_lookup[dsr_station_col],
+                    errors="coerce"
+                ).round(0).astype("Int64")
+
+                rp_redraw = rp_selected_for_label.copy()
+                rp_redraw["_station_key"] = pd.to_numeric(
+                    rp_redraw[rp_point_col],
+                    errors="coerce"
+                ).round(0).astype("Int64")
+
+                rp_redraw = rp_redraw.merge(
+                    rov_lookup[["_station_key", dsr_rov_col]],
+                    on="_station_key",
+                    how="left",
+                )
+
+                rp_redraw[dsr_rov_col] = rp_redraw[dsr_rov_col].fillna("Preplot").astype(str).str.strip()
+
+                for rov, rg in rp_redraw.groupby(dsr_rov_col, dropna=False):
+                    rov_key = str(rov).strip() if pd.notna(rov) and str(rov).strip() else "Preplot"
+                    color = rov_color_map.get(rov_key, preplot_selected_color)
+
+                    ax.scatter(
+                        rg["_plot_x"],
+                        rg["_plot_y"],
+                        s=selected_point_size,
+                        marker="o",
+                        color=color,
+                        alpha=0.98,
+                        edgecolors="black",
+                        linewidths=0.25,
+                        zorder=41,
+                    )
+            else:
+                ax.scatter(
+                    rp_selected_for_label["_plot_x"],
+                    rp_selected_for_label["_plot_y"],
+                    s=selected_point_size,
                     color=preplot_selected_color,
-                    linewidth=selected_line_width,
                     alpha=0.98,
+                    edgecolors="black",
+                    linewidths=0.25,
                     zorder=41,
                 )
 
@@ -2119,7 +2306,7 @@ class DSRLineGraphicsMatplotlib:
         )
 
         # -------------------------------------------------
-        # legend: only ROV + optional other matplotlib layers already added
+        # legend: only ROV
         # -------------------------------------------------
         if legend_handles:
             seen = set()
@@ -2138,7 +2325,16 @@ class DSRLineGraphicsMatplotlib:
                 framealpha=0.95,
             )
 
-        fig.tight_layout()
+        # -------------------------------------------------
+        # exact output size: figsize × dpi
+        # -------------------------------------------------
+        fig.set_size_inches(figsize, forward=True)
+        fig.subplots_adjust(
+            left=0.08,
+            right=0.98,
+            bottom=0.08,
+            top=0.92,
+        )
 
         out_path = self._build_output_path(
             dsr if dsr is not None and not dsr.empty else rp,
@@ -2147,6 +2343,7 @@ class DSRLineGraphicsMatplotlib:
             file_name,
             ext,
         )
+
         self._save_figure(fig, out_path, dpi=dpi, close=False)
 
         if is_show:

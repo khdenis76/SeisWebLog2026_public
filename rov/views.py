@@ -475,22 +475,19 @@ def rov_upload_black_box(request):
 @login_required
 @log_action("upload_recdb", object_type="REC_DB")
 def rov_upload_rec_db(request):
-    """
-    Upload FB/REC_DB (whitespace-delimited) files using the SAME modal logic:
-      - JS sends: FormData { file_type, files[] }
-    This view reads uploaded files directly (no temp files) and updates DSR via DSRDB.load_fb_from_file().
-    """
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+
     if not project:
-        return JsonResponse({"error": "No active project"}, status=400)
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
     if not project.can_edit(request.user):
         raise PermissionDenied
+
     files = request.FILES.getlist("files")
     if not files:
-        return JsonResponse({"error": "No files uploaded"}, status=400)
+        return JsonResponse({"ok": False, "error": "No files uploaded"}, status=400)
 
-    # optional chunk size from UI (not required)
     chunk_rows = request.POST.get("chunk_rows")
     try:
         chunk_rows = int(chunk_rows) if chunk_rows else 50000
@@ -501,44 +498,70 @@ def rov_upload_rec_db(request):
 
     results = []
     total_rows_read = 0
-    total_updates_attempted = 0
+    total_upserts = 0
+    changed_lines = set()
 
     for f in files:
         res = dsrdb.load_fb_from_file(f, chunk_rows=chunk_rows)
         res["original_name"] = getattr(f, "name", "")
         results.append(res)
 
-        if "rows_read" in res:
-            total_rows_read += int(res["rows_read"])
-        if "updates_attempted" in res:
-            total_updates_attempted += int(res["updates_attempted"])
+        if res.get("error"):
+            continue
 
-    errors = [r for r in results if "error" in r]
+        total_rows_read += int(res.get("rows_read", 0))
+        total_upserts += int(res.get("upserts_attempted", 0))
+
+        for ln in res.get("changed_lines", []):
+            try:
+                changed_lines.add(int(ln))
+            except Exception:
+                pass
+
+    errors = [r for r in results if r.get("error")]
     if errors:
-        return JsonResponse(
-            {
-                "error": "Some files failed",
-                "results": results,
-                "rows_read_total": total_rows_read,
-                "updates_attempted_total": total_updates_attempted,
-            },
-            status=400,
-        )
-
-    # If you want to refresh the DSR line summary table after upload:
-    # (your JS can inject this HTML into the table body)
-    dsr_line_body_html = dsrdb.render_dsr_line_summary_body(request=request)
-    dsr_statistics_table = dsrdb.get_dsr_html_stat()
-    return JsonResponse(
-        {
-            "success": f"REC_DB uploaded: {len(results)} file(s)",
+        return JsonResponse({
+            "ok": False,
+            "error": "Some files failed",
             "results": results,
             "rows_read_total": total_rows_read,
-            "updates_attempted_total": total_updates_attempted,
-            "dsr_line_body_html": dsr_line_body_html,
-            "dsr_statistics_table": dsr_statistics_table,
-        }
-    )
+            "upserts_attempted_total": total_upserts,
+        }, status=400)
+
+    # IMPORTANT: refresh summary AFTER REC_DB upload
+    try:
+        if changed_lines:
+            refreshed_count = dsrdb.refresh_dsr_line_summary_lines(lines=sorted(changed_lines))
+        else:
+            # fallback because old load_fb_from_file does not return changed_lines
+            dsrdb.ensure_dsr_line_summary_ready()
+            refreshed_count = 0
+    except Exception as e:
+        return JsonResponse({
+            "ok": False,
+            "error": f"REC_DB uploaded, but summary refresh failed: {e}",
+            "results": results,
+        }, status=500)
+
+    dsr_lines_body = dsrdb.render_dsr_line_summary_body(request=request)
+    dsr_statistics_table = dsrdb.get_dsr_html_stat()
+
+    return JsonResponse({
+        "ok": True,
+        "success": f"REC_DB uploaded: {len(results)} file(s)",
+        "toast": {
+            "title": "REC_DB upload",
+            "message": f"Rows read: {total_rows_read}. Upserts: {total_upserts}.",
+            "type": "success",
+        },
+        "results": results,
+        "rows_read_total": total_rows_read,
+        "upserts_attempted_total": total_upserts,
+        "refreshed_lines": sorted(changed_lines),
+        "dsr_lines_body": dsr_lines_body,
+        "dsr_line_body_html": dsr_lines_body,  # keep old JS compatibility
+        "dsr_statistics_table": dsr_statistics_table,
+    })
 
 
 @require_POST
@@ -662,96 +685,88 @@ def set_default_bbox_config(request):
 def delete_selected_dsr_lines(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+
     if not project:
-        return JsonResponse({"error": "No active project"}, status=400)
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
     if not project.can_edit(request.user):
         raise PermissionDenied
+
     try:
         payload = json.loads(request.body.decode("utf-8"))
         lines = payload.get("lines", [])
         mode = payload.get("mode", "all")
+        lines = [int(x) for x in lines if str(x).strip()]
     except Exception:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
 
     if not lines:
-        return JsonResponse({"error": "No lines selected"}, status=400)
+        return JsonResponse({"ok": False, "error": "No lines selected"}, status=400)
+
+    if mode not in ("all", "recdb", "sm"):
+        return JsonResponse({"ok": False, "error": f"Invalid delete mode: {mode}"}, status=400)
 
     dsrdb = DSRDB(project.db_path)
     placeholders = ",".join("?" for _ in lines)
 
-    with dsrdb._connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
+    try:
+        with dsrdb._connect() as conn:
+            conn.execute("PRAGMA busy_timeout = 120000")
+            conn.execute("BEGIN IMMEDIATE")
 
-            # --------------------------------------------------
-            # DELETE → ALL (hard delete)
-            # --------------------------------------------------
             if mode == "all":
-                conn.execute(
-                    f"DELETE FROM DSR WHERE Line IN ({placeholders})",
-                    lines,
-                )
+                conn.execute(f"DELETE FROM DSR WHERE Line IN ({placeholders})", lines)
+                conn.execute(f"DELETE FROM REC_DB WHERE Line IN ({placeholders})", lines)
 
-            # --------------------------------------------------
-            # DELETE → REC DB (RESET fields)
-            # --------------------------------------------------
             elif mode == "recdb":
-                conn.execute(
-                    f"DELETE FROM REC_DB WHERE Line IN ({placeholders})",
-                    lines,
-                )
-            # --------------------------------------------------
-            # DELETE → SM (RESET fields)
-            # --------------------------------------------------
+                conn.execute(f"DELETE FROM REC_DB WHERE Line IN ({placeholders})", lines)
+
             elif mode == "sm":
                 SM_NULL_COLS = [
-                    "Area", "RemoteUnit", "AUQRCode", "AURFID",
-                    "CUSerialNumber", "Status", "DeploymentType",
-
-                    "StartTimeEpoch", "StartTimeUTC",
-                    "DeployTimeEpoch", "DeployTimeUTC",
-                    "PickupTimeEpoch", "PickupTimeUTC",
-                    "StopTimeEpoch", "StopTimeUTC",
-
-                    "SPSX", "SPSY", "SPSZ",
-                    "ActualX", "ActualY", "ActualZ",
-
-                    "Deployed", "PickedUp", "Archived",
-                    "DeviceID", "BinID",
-
-                    "ExpectedTraces", "CollectedTraces",
-                    "DownloadedDatainMB", "ExpectedDatainMB",
+                    "Area", "RemoteUnit", "AUQRCode", "AURFID", "CUSerialNumber",
+                    "Status", "DeploymentType", "StartTimeEpoch", "StartTimeUTC",
+                    "DeployTimeEpoch", "DeployTimeUTC", "PickupTimeEpoch",
+                    "PickupTimeUTC", "StopTimeEpoch", "StopTimeUTC", "SPSX", "SPSY",
+                    "SPSZ", "ActualX", "ActualY", "ActualZ", "Deployed", "PickedUp",
+                    "Archived", "DeviceID", "BinID", "ExpectedTraces",
+                    "CollectedTraces", "DownloadedDatainMB", "ExpectedDatainMB",
                     "DownloadError",
                 ]
-
-                set_null = ", ".join(f"{c}=NULL" for c in SM_NULL_COLS)
-
-                conn.execute(
-                    f"""
-                    UPDATE DSR
-                    SET {set_null}
-                    WHERE Line IN ({placeholders})
-                    """,
-                    lines,
-                )
+                existing_cols = {
+                    r["name"] for r in conn.execute("PRAGMA table_info(DSR)").fetchall()
+                }
+                cols = [c for c in SM_NULL_COLS if c in existing_cols]
+                if cols:
+                    set_null = ", ".join(f"{c}=NULL" for c in cols)
+                    conn.execute(f"UPDATE DSR SET {set_null} WHERE Line IN ({placeholders})", lines)
 
             conn.commit()
 
-        except Exception as e:
-            conn.rollback()
-            return JsonResponse({"error": str(e)}, status=500)
+        # refresh summaries after delete
+        try:
+            dsrdb.refresh_dsr_line_summary_lines(lines=lines)
+        except Exception:
+            dsrdb.ensure_dsr_line_summary_ready()
 
-    return JsonResponse({
-        "ok": True,
-        "success": f"'{mode}' operation applied to {len(lines)} line(s)",
-        "toast": {
-            "title": "Delete DSR lines",
-            "message": f"Mode '{mode}' applied to {len(lines)} line(s).",
-            "type": "success",
-        },
-        "lines": lines,
-        "mode": mode,
-    })
+        dsr_lines_body = dsrdb.render_dsr_line_summary_body()
+        dsr_statistics_table = dsrdb.get_dsr_html_stat()
+
+        return JsonResponse({
+            "ok": True,
+            "success": f"Mode '{mode}' applied to {len(lines)} line(s).",
+            "toast": {
+                "title": "Delete DSR lines",
+                "message": f"Mode '{mode}' applied to {len(lines)} line(s).",
+                "type": "success",
+            },
+            "lines": lines,
+            "mode": mode,
+            "dsr_lines_body": dsr_lines_body,
+            "dsr_statistics_table": dsr_statistics_table,
+        })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
 @login_required
 @require_POST
 @log_action("delete_bbox", object_type="BBOX")

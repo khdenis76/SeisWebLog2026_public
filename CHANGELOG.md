@@ -111,6 +111,15 @@ Change shot_table loader. loading more fast but database should be isolated
 ### Changed
   BBOX File statistics changed 
   Update loader changed 
+## [2026.1.02.02] - 2026-04-25
+### Added
+   
+ 
+### Fixed
+REC_DB optional fixed. 
+### Changed
+  
+
   
 
 
