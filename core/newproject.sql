@@ -1622,12 +1622,12 @@ SELECT
     MAX(CAST(NULLIF(Station,'') AS REAL)) AS LRP,
     COUNT(*)                        AS TotalNodes
 FROM DSR
-WHERE TimeStamp IS NOT NULL
-  AND TRIM(TimeStamp) <> ''
+WHERE TimeStamp1 IS NOT NULL
+  AND TRIM(TimeStamp1) <> ''
   AND ROV1 IS NOT NULL
   AND TRIM(ROV1) <> ''
 GROUP BY
-    DATE(TimeStamp),
+    DATE(TimeStamp1),
     TRIM(Line),
     TRIM(ROV1);
 DROP VIEW IF EXISTS V_SHOT_TABLE_SUMMARY;

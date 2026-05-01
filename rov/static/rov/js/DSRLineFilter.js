@@ -172,7 +172,8 @@ export function initDSRLineFilters() {
       const vessel = (tr.dataset.vessel || "").trim().toLowerCase();
 
       const isDeployed = (tr.dataset.completelyDeployed || "").trim().toLowerCase();
-      const isRecovered = (tr.dataset.completelyRecovered || "").trim().toLowerCase();
+      const retrievedCount = Number(tr.dataset.retrievedCount || 0);
+      const isRecovered = retrievedCount > 0 ? "1" : "0";
       const isSmLoaded = (tr.dataset.smLoaded || "").trim().toLowerCase();
       const isSmrLoaded = (tr.dataset.smrLoaded || "").trim().toLowerCase();
 

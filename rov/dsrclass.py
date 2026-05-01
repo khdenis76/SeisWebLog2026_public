@@ -475,6 +475,30 @@ class DSRDB:
 
             conn.commit()
             return cfg_id
+    def ensure_recover_daily_view_schema(self):
+        sql="""
+                  DROP VIEW IF EXISTS Daily_Recovery;
+                        CREATE VIEW IF NOT EXISTS Daily_Recovery AS
+                        SELECT
+                            DATE(TimeStamp1)                AS ProdDate,
+                            TRIM(Line)                      AS Line,
+                            TRIM(ROV1)                      AS ROV,
+                            MIN(CAST(NULLIF(Station,'') AS REAL)) AS FRP,
+                            MAX(CAST(NULLIF(Station,'') AS REAL)) AS LRP,
+                            COUNT(*)                        AS TotalNodes
+                        FROM DSR
+                        WHERE TimeStamp1 IS NOT NULL
+                          AND TRIM(TimeStamp1) <> ''
+                          AND ROV1 IS NOT NULL
+                          AND TRIM(ROV1) <> ''
+                        GROUP BY
+                            DATE(TimeStamp1),
+                            TRIM(Line),
+                            TRIM(ROV1);
+        """
+        with self._connect() as conn:
+            conn.executescript(sql)
+            conn.commit()
 
     def ensure_bbox_config_schema(self):
         """

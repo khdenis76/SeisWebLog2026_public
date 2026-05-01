@@ -4,7 +4,7 @@
   "output_pattern": "{role}_{LLLLL}{SSSSS}_{index}.png",
   "rename_mode": "off",
   "single_config_only": true,
-  "skip_checked": true,
+  "skip_checked": false,
   "main_config": {
     "config_name": "main",
     "file_masks": [
@@ -14,10 +14,10 @@
     "expected_width": 1920,
     "expected_height": 1080,
     "deploy_images": 3,
-    "recovery_images": 3,
-    "delta_warning": 1.5,
-    "delta_error": 2.0,
-    "use_easyocr_first": true,
+    "recovery_images": 1,
+    "delta_warning": 10.0,
+    "delta_error": 15.0,
+    "use_easyocr_first": false,
     "roi_fields": [
       {
         "name": "rov",
@@ -95,9 +95,9 @@
     "expected_height": 0,
     "deploy_images": 2,
     "recovery_images": 2,
-    "delta_warning": 1.5,
-    "delta_error": 2.0,
-    "use_easyocr_first": true,
+    "delta_warning": 10.0,
+    "delta_error": 15.0,
+    "use_easyocr_first": false,
     "roi_fields": []
   }
 }

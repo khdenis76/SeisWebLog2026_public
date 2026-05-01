@@ -41,3 +41,8 @@ The tool reads coordinates from:
 
 ## Current scope
 This v3 package is a working structured implementation and a solid base for deeper SeisWebLog integration. The OCR engine is intentionally generic so it can work across multiple projects. You will likely want to tune ROI positions and filename regex for each project overlay.
+
+
+## OCR v5 notes
+
+This package preserves the v3 interface and workflow, including menus, toolbar/icons, project DB autoload, ROI editor, config dialog, filters, exports, visit/check workflow, and station map. v5 adds quick filters, better table sorting, summary cards, multi-select station/image rows, database delete/reset tools, and map image-count labels next to DSR points. Run with `python ocr/run_ocr_v5.py` or keep using `python ocr/run_ocr_v3.py`.

@@ -1,0 +1,67 @@
+/* ===== NOAR LAYOUT (same as ROV style) ===== */
+
+.noar-wrapper {
+    height: calc(100vh - 60px);
+    overflow: hidden;
+}
+
+/* LEFT PANEL */
+.noar-left {
+    width: 280px;   /* 🔧 adjust if needed */
+    min-width: 280px;
+    max-width: 280px;
+    overflow-y: auto;
+    border-right: 1px solid #dee2e6;
+    background: #f8f9fa;
+}
+
+/* RIGHT PANEL */
+.noar-right {
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.noar-right-body {
+    height: calc(100vh - 140px);
+    overflow: auto;
+}
+
+/* TABLE SCROLL */
+.noar-table-scroll {
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+}
+
+/* SELECTED ROW */
+.noar-line-row {
+    cursor: pointer;
+}
+
+.noar-line-row.active {
+    background: #0d6efd !important;
+    color: white;
+    font-weight: 600;
+}
+
+/* PLACEHOLDER */
+.noar-placeholder {
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #6c757d;
+}
+.noar-left-table-scroll {
+    max-height: calc(100vh - 230px);
+    overflow-y: auto;
+}
+
+.noar-line-row {
+    cursor: pointer;
+}
+
+.noar-line-row.active {
+    background-color: #0d6efd !important;
+    color: white;
+    font-weight: 600;
+}

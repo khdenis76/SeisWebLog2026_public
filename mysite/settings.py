@@ -27,7 +27,8 @@ INSTALLED_APPS = [
     'source.apps.SourceConfig',
     'fleet.apps.FleetConfig',
     'reports.apps.ReportsConfig',
-    "svp.apps.SvpConfig"
+    "svp.apps.SvpConfig",
+    'noar.apps.NoarConfig'
 ]
 
 MIDDLEWARE = [

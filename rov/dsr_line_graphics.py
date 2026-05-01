@@ -4,9 +4,12 @@ from datetime import datetime
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import os
 from bokeh.embed import json_item
-from bokeh.io import show
-
+from bokeh.io import output_file, save, show
+from bokeh.embed import file_html
+from bokeh.resources import CDN, INLINE
+from django.shortcuts import render
 
 from bokeh.layouts import column, gridplot, row, Spacer
 from bokeh.models import (
@@ -15,10 +18,12 @@ from bokeh.models import (
     NumeralTickFormatter, PrintfTickFormatter, Rect, MultiSelect, Ray,
     ColorBar, LabelSet, Label, Arrow, OpenHead
 )
+from bokeh.models import Range1d
 from bokeh.plotting import figure
 from bokeh.transform import linear_cmap, factor_cmap, dodge, transform
 from bokeh.palettes import Viridis256, Category10, Category20, Turbo256, Paired
-from django.shortcuts import render
+
+
 
 
 class DSRLineGraphics(object):
@@ -3490,6 +3495,7 @@ class DSRLineGraphics(object):
             isShow=False,
             point_size=5,
             rov_size=5,
+            html_path=None,
     ):
         colors = Paired[10]
 
@@ -3512,6 +3518,231 @@ class DSRLineGraphics(object):
             rov1_name = str(cfg_row.get("rov1_name") or "ROV1")
             rov2_name = str(cfg_row.get("rov2_name") or "ROV2")
 
+        dsr_point_renderers = []
+        radius_renderers = []
+
+        def _to_num(d, cols):
+            if d is None or d.empty:
+                return d
+            for c in cols:
+                if c in d.columns:
+                    d[c] = pd.to_numeric(d[c], errors="coerce")
+            return d
+
+        def _valid_xy(d, x_col, y_col):
+            if d is None or d.empty:
+                return pd.DataFrame()
+            if not {x_col, y_col}.issubset(d.columns):
+                return pd.DataFrame()
+
+            out = d.copy()
+            out = _to_num(out, [x_col, y_col])
+            out = out[
+                out[x_col].notna()
+                & out[y_col].notna()
+                & (out[x_col] != 0)
+                & (out[y_col] != 0)
+                ].copy()
+            return out
+
+        def _ensure_cols(d, cols):
+            for c in cols:
+                if c not in d.columns:
+                    d[c] = ""
+            return d
+
+        def _add_distance_line(
+                plot,
+                data,
+                x0,
+                y0,
+                x1,
+                y1,
+                label_prefix,
+                line_color,
+                legend_label,
+                station_col="Station",
+                node_col="Node",
+                rov_col="ROV",
+                time_col="TimeStamp",
+                line_dash="dashed",
+        ):
+            needed = {x0, y0, x1, y1}
+            if data is None or data.empty or not needed.issubset(data.columns):
+                return
+
+            d = data.copy()
+            d = _ensure_cols(d, [station_col, node_col, rov_col, time_col])
+            d = _to_num(d, [x0, y0, x1, y1])
+
+            d = d[
+                d[x0].notna()
+                & d[y0].notna()
+                & d[x1].notna()
+                & d[y1].notna()
+                & (d[x0] != 0)
+                & (d[y0] != 0)
+                & (d[x1] != 0)
+                & (d[y1] != 0)
+                ].copy()
+
+            if d.empty:
+                return
+
+            d["DIST_MID_X"] = (d[x0] + d[x1]) / 2.0
+            d["DIST_MID_Y"] = (d[y0] + d[y1]) / 2.0
+            d["DIST_VALUE"] = np.sqrt((d[x0] - d[x1]) ** 2 + (d[y0] - d[y1]) ** 2)
+            d["DIST_LABEL"] = d["DIST_VALUE"].map(lambda v: f"{v:.1f} m")
+
+            src = ColumnDataSource(d)
+
+            seg = plot.segment(
+                x0=x0,
+                y0=y0,
+                x1=x1,
+                y1=y1,
+                source=src,
+                line_color=line_color,
+                line_width=2,
+                line_alpha=0.75,
+                line_dash=line_dash,
+                legend_label=legend_label,
+            )
+
+            plot.text(
+                x="DIST_MID_X",
+                y="DIST_MID_Y",
+                text="DIST_LABEL",
+                source=src,
+                text_font_size="8pt",
+                text_color=line_color,
+                text_align="center",
+                text_baseline="middle",
+                x_offset=8,
+                y_offset=8,
+            )
+
+            plot.add_tools(
+                HoverTool(
+                    renderers=[seg],
+                    tooltips=[
+                        ("Type", label_prefix),
+                        ("Station", f"@{station_col}"),
+                        ("Node", f"@{node_col}"),
+                        ("ROV", f"@{rov_col}"),
+                        ("From E", f"@{x0}{{0.0}}"),
+                        ("From N", f"@{y0}{{0.0}}"),
+                        ("To E", f"@{x1}{{0.0}}"),
+                        ("To N", f"@{y1}{{0.0}}"),
+                        ("Distance", "@DIST_LABEL"),
+                        ("Time", f"@{time_col}"),
+                    ],
+                )
+            )
+
+        def _read_recdb_points_for_line(line_value):
+            try:
+                with self._connect() as conn:
+                    table_ok = conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='REC_DB' LIMIT 1"
+                    ).fetchone()
+
+                    if not table_ok:
+                        return pd.DataFrame()
+
+                    cols_info = conn.execute("PRAGMA table_info(REC_DB)").fetchall()
+                    cols = [r["name"] if isinstance(r, sqlite3.Row) else r[1] for r in cols_info]
+                    cols_lut = {c.lower(): c for c in cols}
+
+                    if "rec_x" not in cols_lut or "rec_y" not in cols_lut:
+                        return pd.DataFrame()
+
+                    line_col = None
+                    for cand in ["Line", "line", "LINE"]:
+                        if cand.lower() in cols_lut:
+                            line_col = cols_lut[cand.lower()]
+                            break
+
+                    keep_cols = []
+                    for cand in [
+                        line_col,
+                        cols_lut.get("station"),
+                        cols_lut.get("point"),
+                        cols_lut.get("node"),
+                        cols_lut.get("node_id"),
+                        cols_lut.get("rec_id"),
+                        cols_lut.get("rec_x"),
+                        cols_lut.get("rec_y"),
+                        cols_lut.get("prep_x"),
+                        cols_lut.get("prep_y"),
+                    ]:
+                        if cand and cand not in keep_cols:
+                            keep_cols.append(cand)
+
+                    select_cols = ", ".join([f'"{c}"' for c in keep_cols])
+
+                    if line_col:
+                        sql = f"""
+                            SELECT {select_cols}
+                            FROM REC_DB
+                            WHERE CAST("{line_col}" AS INTEGER) = ?
+                        """
+                        rec = pd.read_sql_query(sql, conn, params=(int(line_value),))
+                    else:
+                        rec = pd.read_sql_query(f"SELECT {select_cols} FROM REC_DB", conn)
+
+                    rec = rec.rename(
+                        columns={
+                            cols_lut.get("rec_x", "REC_X"): "REC_X",
+                            cols_lut.get("rec_y", "REC_Y"): "REC_Y",
+                            cols_lut.get("prep_x", "PREP_X"): "PREP_X",
+                            cols_lut.get("prep_y", "PREP_Y"): "PREP_Y",
+                        }
+                    )
+
+                    if "Station" not in rec.columns:
+                        for cand in ["Station", "station", "Point", "POINT", "point"]:
+                            if cand in rec.columns:
+                                rec["Station"] = rec[cand]
+                                break
+
+                    if "Node" not in rec.columns:
+                        for cand in ["NODE_ID", "Node", "node", "REC_ID", "rec_id"]:
+                            if cand in rec.columns:
+                                rec["Node"] = rec[cand]
+                                break
+
+                    rec = _ensure_cols(rec, ["Station", "Node", "PREP_X", "PREP_Y"])
+                    rec = _to_num(rec, ["REC_X", "REC_Y", "PREP_X", "PREP_Y"])
+
+                    rec["REC_DB_DistToPreplot"] = np.nan
+                    rec["REC_DB_DistLabel"] = ""
+
+                    good_prep = (
+                            rec["REC_X"].notna()
+                            & rec["REC_Y"].notna()
+                            & rec["PREP_X"].notna()
+                            & rec["PREP_Y"].notna()
+                            & (rec["PREP_X"] != 0)
+                            & (rec["PREP_Y"] != 0)
+                    )
+
+                    rec.loc[good_prep, "REC_DB_DistToPreplot"] = np.sqrt(
+                        (rec.loc[good_prep, "REC_X"] - rec.loc[good_prep, "PREP_X"]) ** 2
+                        + (rec.loc[good_prep, "REC_Y"] - rec.loc[good_prep, "PREP_Y"]) ** 2
+                    )
+
+                    rec["REC_DB_DistLabel"] = rec["REC_DB_DistToPreplot"].map(
+                        lambda v: f"{v:.1f} m" if pd.notna(v) else ""
+                    )
+
+                    rec["Source"] = "REC_DB"
+                    return _valid_xy(rec, "REC_X", "REC_Y")
+
+            except Exception as e:
+                print("REC_DB plot read error:", e)
+                return pd.DataFrame()
+
         line_map = figure(
             title=f"Line Map. Line: {line}",
             x_axis_label="Easting, m",
@@ -3522,62 +3753,55 @@ class DSRLineGraphics(object):
             width_policy="max",
             height_policy="max",
             min_height=100,
+            tools="pan,wheel_zoom,box_zoom,reset,save",
+            active_scroll="wheel_zoom",
         )
 
+        ppdata = _valid_xy(df, "PreplotEasting", "PreplotNorthing")
 
+        if len(ppdata) > 0:
+            ppdata = _ensure_cols(ppdata, ["Station"])
+            ppdata["PointLabel"] = ppdata["Station"].astype(str)
+            pp_source = ColumnDataSource(ppdata)
 
-        # -------------------------------------------------
-        # PREPLOT
-        # -------------------------------------------------
-        if len(df) > 0 and {"PreplotEasting", "PreplotNorthing"}.issubset(df.columns):
-            ppdata = df.loc[
-                pd.to_numeric(df["PreplotEasting"], errors="coerce").notna()
-                & pd.to_numeric(df["PreplotNorthing"], errors="coerce").notna()
-                ].copy()
+            pp_points = line_map.scatter(
+                x="PreplotEasting",
+                y="PreplotNorthing",
+                source=pp_source,
+                color="grey",
+                size=point_size,
+                legend_label="Preplot Stations",
+            )
 
-            if len(ppdata) > 0:
-                ppdata["PreplotEasting"] = pd.to_numeric(ppdata["PreplotEasting"], errors="coerce")
-                ppdata["PreplotNorthing"] = pd.to_numeric(ppdata["PreplotNorthing"], errors="coerce")
-                ppdata["PointLabel"] = ppdata["Station"].astype(str) if "Station" in ppdata.columns else ""
+            radius_pp = line_map.circle(
+                x="PreplotEasting",
+                y="PreplotNorthing",
+                source=pp_source,
+                fill_color=None,
+                line_color="green",
+                radius=5,
+                radius_units="data",
+                visible=False,
+                legend_label="Preplot Radius Circle",
+            )
+            radius_renderers.append(radius_pp)
 
-                pp_source = ColumnDataSource(ppdata)
+            line_map.text(
+                x="PreplotEasting",
+                y="PreplotNorthing",
+                text="PointLabel",
+                source=pp_source,
+                text_font_size="8pt",
+            )
 
-                line_map.scatter(
-                    x="PreplotEasting",
-                    y="PreplotNorthing",
-                    source=pp_source,
-                    color="grey",
-                    size=point_size,
-                    legend_label="Preplot Stations",
-                )
+            x_mean = ppdata["PreplotEasting"].mean()
+            y_mean = ppdata["PreplotNorthing"].mean()
 
-                line_map.circle(
-                    x="PreplotEasting",
-                    y="PreplotNorthing",
-                    source=pp_source,
-                    fill_color=None,
-                    line_color="green",
-                    radius=5,
-                    radius_units="data",
-                    legend_label="5m Radius",
-                )
+            if pd.notna(x_mean) and pd.notna(y_mean):
+                line_map.x_range = Range1d(x_mean - 10000, x_mean + 10000)
+                line_map.y_range = Range1d(y_mean - 10000, y_mean + 10000)
 
-                line_map.text(
-                    x="PreplotEasting",
-                    y="PreplotNorthing",
-                    text="PointLabel",
-                    source=pp_source,
-                )
-
-                x_mean = ppdata["PreplotEasting"].mean()
-                y_mean = ppdata["PreplotNorthing"].mean()
-                if pd.notna(x_mean) and pd.notna(y_mean):
-                    line_map.x_range = Range1d(x_mean - 10000, x_mean + 10000)
-                    line_map.y_range = Range1d(y_mean - 10000, y_mean + 10000)
-
-        # -------------------------------------------------
-        # BLACKBOX
-        # -------------------------------------------------
+        # BBOX points/tracks: NOT added to dsr_point_renderers
         if len(bbdata) > 0:
             bb_numeric_cols = [
                 "VesselEasting", "VesselNorthing", "VesselHDG",
@@ -3586,24 +3810,27 @@ class DSRLineGraphics(object):
                 "ROV2_INS_Easting", "ROV2_INS_Northing",
                 "ROV2_USBL_Easting", "ROV2_USBL_Northing",
             ]
-            for c in bb_numeric_cols:
-                if c in bbdata.columns:
-                    bbdata[c] = pd.to_numeric(bbdata[c], errors="coerce")
+
+            bbdata = _to_num(bbdata, bb_numeric_cols)
 
             if {"VesselEasting", "VesselNorthing", "VesselHDG"}.issubset(bbdata.columns):
                 bb_track = bbdata.loc[
-                    bbdata["VesselEasting"].notna() & bbdata["VesselNorthing"].notna()
+                    bbdata["VesselEasting"].notna()
+                    & bbdata["VesselNorthing"].notna()
+                    & (bbdata["VesselEasting"] > 0)
+                    & (bbdata["VesselNorthing"] > 0)
                     ].copy()
 
                 if len(bb_track) > 0:
                     bb_source = ColumnDataSource(bb_track)
 
-                    vessel_line = line_map.line(
+                    line_map.line(
                         x="VesselEasting",
                         y="VesselNorthing",
                         source=bb_source,
                         line_width=1,
                         color=colors[0],
+                        legend_label=f"{vessel_name} Track",
                     )
 
                     vessel_rect = Rect(
@@ -3618,6 +3845,7 @@ class DSRLineGraphics(object):
                         fill_color="white",
                         line_width=3,
                     )
+
                     vessel_ray = Ray(
                         x="VesselEasting",
                         y="VesselNorthing",
@@ -3629,151 +3857,72 @@ class DSRLineGraphics(object):
                         line_width=3,
                     )
 
-                    rect_renderer = line_map.add_glyph(bb_source, vessel_rect)
-                    ray_renderer = line_map.add_glyph(bb_source, vessel_ray)
+                    line_map.add_glyph(bb_source, vessel_rect)
+                    line_map.add_glyph(bb_source, vessel_ray)
 
-                    if len(line_map.legend) == 0:
-                        legend = Legend(items=[
-                            LegendItem(label=f"{vessel_name} Track",
-                                       renderers=[vessel_line, rect_renderer, ray_renderer])
-                        ])
-                        line_map.add_layout(legend, "right")
-                    else:
-                        line_map.legend[0].items.append(
-                            LegendItem(label=f"{vessel_name} Track",
-                                       renderers=[vessel_line, rect_renderer, ray_renderer])
+            for x_col, y_col, marker, color, label in [
+                ("ROV1_INS_Easting", "ROV1_INS_Northing", "triangle", colors[2], f"{rov1_name} INS"),
+                ("ROV1_USBL_Easting", "ROV1_USBL_Northing", "circle", colors[4], f"{rov1_name} USBL"),
+                ("ROV2_INS_Easting", "ROV2_INS_Northing", "triangle", colors[3], f"{rov2_name} INS"),
+                ("ROV2_USBL_Easting", "ROV2_USBL_Northing", "circle", colors[5], f"{rov2_name} USBL"),
+            ]:
+                if {x_col, y_col}.issubset(bbdata.columns):
+                    d = _valid_xy(bbdata, x_col, y_col)
+                    if len(d) > 0:
+                        src = ColumnDataSource(d)
+                        line_map.scatter(
+                            x=x_col,
+                            y=y_col,
+                            marker=marker,
+                            size=rov_size,
+                            color=color,
+                            legend_label=label,
+                            source=src,
+                        )
+                        line_map.line(
+                            x=x_col,
+                            y=y_col,
+                            width=1,
+                            color=color,
+                            legend_label=label,
+                            source=src,
                         )
 
-            if {"ROV1_INS_Easting", "ROV1_INS_Northing"}.issubset(bbdata.columns):
-                bb1_primary = bbdata.loc[
-                    (bbdata["ROV1_INS_Easting"] > 0) & (bbdata["ROV1_INS_Northing"] > 0)
-                    ].copy()
-                if len(bb1_primary) > 0:
-                    src = ColumnDataSource(bb1_primary)
-                    line_map.scatter(
-                        x="ROV1_INS_Easting",
-                        y="ROV1_INS_Northing",
-                        marker="triangle",
-                        size=rov_size,
-                        color=colors[2],
-                        legend_label=f"{rov1_name} (Primary)",
-                        source=src,
-                    )
-                    line_map.line(
-                        x="ROV1_INS_Easting",
-                        y="ROV1_INS_Northing",
-                        width=1,
-                        color=colors[2],
-                        legend_label=f"{rov1_name} (Primary)",
-                        source=src,
-                    )
-
-            if {"ROV1_USBL_Easting", "ROV1_USBL_Northing"}.issubset(bbdata.columns):
-                bb1_secondary = bbdata.loc[
-                    (bbdata["ROV1_USBL_Easting"] > 0) & (bbdata["ROV1_USBL_Northing"] > 0)
-                    ].copy()
-                if len(bb1_secondary) > 0:
-                    src = ColumnDataSource(bb1_secondary)
-                    line_map.scatter(
-                        x="ROV1_USBL_Easting",
-                        y="ROV1_USBL_Northing",
-                        marker="circle",
-                        size=rov_size,
-                        color=colors[4],
-                        legend_label=f"{rov1_name} (Secondary)",
-                        source=src,
-                    )
-                    line_map.line(
-                        x="ROV1_USBL_Easting",
-                        y="ROV1_USBL_Northing",
-                        width=1,
-                        color=colors[4],
-                        legend_label=f"{rov1_name} (Secondary)",
-                        source=src,
-                    )
-
-            if {"ROV2_INS_Easting", "ROV2_INS_Northing"}.issubset(bbdata.columns):
-                bb2_primary = bbdata.loc[
-                    (bbdata["ROV2_INS_Easting"] > 0) & (bbdata["ROV2_INS_Northing"] > 0)
-                    ].copy()
-                if len(bb2_primary) > 0:
-                    src = ColumnDataSource(bb2_primary)
-                    line_map.scatter(
-                        x="ROV2_INS_Easting",
-                        y="ROV2_INS_Northing",
-                        marker="circle",
-                        size=rov_size,
-                        color=colors[3],
-                        legend_label=f"{rov2_name} (Primary)",
-                        source=src,
-                    )
-                    line_map.line(
-                        x="ROV2_INS_Easting",
-                        y="ROV2_INS_Northing",
-                        width=1,
-                        color=colors[3],
-                        legend_label=f"{rov2_name} (Primary)",
-                        source=src,
-                    )
-
-            if {"ROV2_USBL_Easting", "ROV2_USBL_Northing"}.issubset(bbdata.columns):
-                bb2_secondary = bbdata.loc[
-                    (bbdata["ROV2_USBL_Easting"] > 0) & (bbdata["ROV2_USBL_Northing"] > 0)
-                    ].copy()
-                if len(bb2_secondary) > 0:
-                    src = ColumnDataSource(bb2_secondary)
-                    line_map.scatter(
-                        x="ROV2_USBL_Easting",
-                        y="ROV2_USBL_Northing",
-                        marker="circle",
-                        size=rov_size,
-                        color=colors[5],
-                        legend_label=f"{rov2_name} (Secondary)",
-                        source=src,
-                    )
-                    line_map.line(
-                        x="ROV2_USBL_Easting",
-                        y="ROV2_USBL_Northing",
-                        width=1,
-                        color=colors[5],
-                        legend_label=f"{rov2_name} (Secondary)",
-                        source=src,
-                    )
-
-        # -------------------------------------------------
-        # DSR
-        # -------------------------------------------------
         if len(df) > 0:
-            if "Station" not in df.columns:
-                df["Station"] = ""
-            if "ROV" not in df.columns:
-                df["ROV"] = ""
-            if "TimeStamp" not in df.columns:
-                df["TimeStamp"] = ""
-            if "Comments" not in df.columns:
-                df["Comments"] = ""
+            df = _ensure_cols(
+                df,
+                [
+                    "Station", "Node", "ROV", "ROV1",
+                    "TimeStamp", "TimeStamp1", "Comments",
+                    "PrimaryElevation", "SecondaryElevation",
+                    "Rangeprimarytosecondary", "RangetoPrePlot",
+                ],
+            )
 
-            dsr_source = ColumnDataSource(df)
+            dsr_dep = _valid_xy(df, "PrimaryEasting", "PrimaryNorthing")
 
-            if {"PrimaryEasting", "PrimaryNorthing"}.issubset(df.columns):
+            if len(dsr_dep) > 0:
+                dsr_dep_source = ColumnDataSource(dsr_dep)
+
                 dsr_dep_points = line_map.scatter(
                     x="PrimaryEasting",
                     y="PrimaryNorthing",
                     marker="square",
-                    size=point_size,
+                    size=point_size + 1,
                     fill_color=colors[-1],
                     color=colors[-1],
-                    legend_label="DSR Deployment",
-                    source=dsr_source,
+                    legend_label="DSR Deployment Primary",
+                    source=dsr_dep_source,
                 )
+                dsr_point_renderers.append(dsr_dep_points)
 
                 line_map.line(
                     x="PrimaryEasting",
                     y="PrimaryNorthing",
                     width=1,
                     color=colors[-1],
-                    legend_label="DSR Deployment",
-                    source=dsr_source,
+                    legend_label="DSR Deployment Primary",
+                    source=dsr_dep_source,
                     line_dash="dashed",
                 )
 
@@ -3781,9 +3930,9 @@ class DSRLineGraphics(object):
                     x="PrimaryEasting",
                     y="PrimaryNorthing",
                     text="Station",
-                    source=dsr_source,
+                    source=dsr_dep_source,
                     color=colors[-2],
-                    text_font_size="18pt",
+                    text_font_size="10pt",
                     text_align="right",
                 )
 
@@ -3791,38 +3940,282 @@ class DSRLineGraphics(object):
                     x="PrimaryEasting",
                     y="PrimaryNorthing",
                     text="Comments",
-                    source=dsr_source,
+                    source=dsr_dep_source,
                     color="red",
-                    text_font_size="10pt",
+                    text_font_size="9pt",
                     text_align="left",
                 )
 
-                TOOLTIPS = [
-                    ("Station", "@Station"),
-                    ("Node", "@Node"),
-                    ("WD Prim.", "@PrimaryElevation{3.1}"),
-                    ("WD Sec.", "@SecondaryElevation{3.1}"),
-                    ("ROV", "@ROV"),
-                    ("Range Prim. 2 Sec.", "@Rangeprimarytosecondary{2.1}"),
-                    ("Range 2 Prep.", "@RangetoPrePlot{2.1}"),
-                    ("Dep date", "@TimeStamp"),
-                ]
-                line_map.add_tools(HoverTool(tooltips=TOOLTIPS, renderers=[dsr_dep_points]))
+                line_map.add_tools(
+                    HoverTool(
+                        tooltips=[
+                            ("Type", "DSR Deployment Primary"),
+                            ("Station", "@Station"),
+                            ("Node", "@Node"),
+                            ("ROV", "@ROV"),
+                            ("Primary E", "@PrimaryEasting{0.0}"),
+                            ("Primary N", "@PrimaryNorthing{0.0}"),
+                            ("WD Prim.", "@PrimaryElevation{0.0}"),
+                            ("WD Sec.", "@SecondaryElevation{0.0}"),
+                            ("Range Prim.2Sec.", "@Rangeprimarytosecondary{0.0}"),
+                            ("Range 2 Preplot", "@RangetoPrePlot{0.0}"),
+                            ("Dep date", "@TimeStamp"),
+                            ("Comments", "@Comments"),
+                        ],
+                        renderers=[dsr_dep_points],
+                    )
+                )
 
-        # -------------------------------------------------
-        # MULTISELECT
-        # -------------------------------------------------
+            dep_sec = _valid_xy(df, "SecondaryEasting", "SecondaryNorthing")
+            if len(dep_sec) > 0:
+                dep_sec = _ensure_cols(dep_sec, ["Station", "Node", "ROV", "TimeStamp"])
+                dep_sec_source = ColumnDataSource(dep_sec)
+
+                dep_sec_points = line_map.scatter(
+                    x="SecondaryEasting",
+                    y="SecondaryNorthing",
+                    source=dep_sec_source,
+                    marker="circle",
+                    size=point_size + 1,
+                    fill_color="#9ec5fe",
+                    line_color="#0d6efd",
+                    legend_label="DSR Deployment Secondary",
+                )
+                dsr_point_renderers.append(dep_sec_points)
+
+            _add_distance_line(
+                plot=line_map,
+                data=df,
+                x0="PrimaryEasting",
+                y0="PrimaryNorthing",
+                x1="SecondaryEasting",
+                y1="SecondaryNorthing",
+                label_prefix="Deployment Primary to Secondary",
+                line_color="#0d6efd",
+                legend_label="Deployment Primary ↔ Secondary",
+                station_col="Station",
+                node_col="Node",
+                rov_col="ROV",
+                time_col="TimeStamp",
+                line_dash="solid",
+            )
+
+            _add_distance_line(
+                plot=line_map,
+                data=df,
+                x0="PreplotEasting",
+                y0="PreplotNorthing",
+                x1="PrimaryEasting",
+                y1="PrimaryNorthing",
+                label_prefix="Preplot to Deployment Primary",
+                line_color="#6f42c1",
+                legend_label="Preplot ↔ Deployment Primary",
+                station_col="Station",
+                node_col="Node",
+                rov_col="ROV",
+                time_col="TimeStamp",
+                line_dash="dashed",
+            )
+
+            _add_distance_line(
+                plot=line_map,
+                data=df,
+                x0="PreplotEasting",
+                y0="PreplotNorthing",
+                x1="SecondaryEasting",
+                y1="SecondaryNorthing",
+                label_prefix="Preplot to Deployment Secondary",
+                line_color="#6610f2",
+                legend_label="Preplot ↔ Deployment Secondary",
+                station_col="Station",
+                node_col="Node",
+                rov_col="ROV",
+                time_col="TimeStamp",
+                line_dash="dotdash",
+            )
+
+        if len(df) > 0:
+            dsr_rec = _valid_xy(df, "PrimaryEasting1", "PrimaryNorthing1")
+
+            if len(dsr_rec) > 0:
+                dsr_rec = _ensure_cols(dsr_rec, ["Station", "Node", "ROV1", "TimeStamp1"])
+
+                dsr_rec = dsr_rec[
+                    dsr_rec["ROV1"].notna()
+                    & (dsr_rec["ROV1"].astype(str).str.strip() != "")
+                    ].copy()
+
+                if len(dsr_rec) > 0:
+                    dsr_rec_source = ColumnDataSource(dsr_rec)
+
+                    dsr_rec_points = line_map.scatter(
+                        x="PrimaryEasting1",
+                        y="PrimaryNorthing1",
+                        marker="diamond",
+                        size=point_size + 3,
+                        fill_color="#198754",
+                        line_color="#0f5132",
+                        legend_label="DSR Recovery Primary",
+                        source=dsr_rec_source,
+                    )
+                    dsr_point_renderers.append(dsr_rec_points)
+
+                    line_map.line(
+                        x="PrimaryEasting1",
+                        y="PrimaryNorthing1",
+                        width=1,
+                        color="#198754",
+                        legend_label="DSR Recovery Primary",
+                        source=dsr_rec_source,
+                        line_dash="dotdash",
+                    )
+
+            rec_sec = _valid_xy(df, "SecondaryEasting1", "SecondaryNorthing1")
+            if len(rec_sec) > 0:
+                rec_sec = _ensure_cols(rec_sec, ["Station", "Node", "ROV1", "TimeStamp1"])
+                rec_sec = rec_sec[
+                    rec_sec["ROV1"].notna()
+                    & (rec_sec["ROV1"].astype(str).str.strip() != "")
+                    ].copy()
+
+                if len(rec_sec) > 0:
+                    rec_sec_source = ColumnDataSource(rec_sec)
+
+                    rec_sec_points = line_map.scatter(
+                        x="SecondaryEasting1",
+                        y="SecondaryNorthing1",
+                        source=rec_sec_source,
+                        marker="circle",
+                        size=point_size + 1,
+                        fill_color="#a3cfbb",
+                        line_color="#198754",
+                        legend_label="DSR Recovery Secondary",
+                    )
+                    dsr_point_renderers.append(rec_sec_points)
+
+            _add_distance_line(
+                plot=line_map,
+                data=df,
+                x0="PrimaryEasting1",
+                y0="PrimaryNorthing1",
+                x1="SecondaryEasting1",
+                y1="SecondaryNorthing1",
+                label_prefix="Recovery Primary to Secondary",
+                line_color="#198754",
+                legend_label="Recovery Primary ↔ Secondary",
+                station_col="Station",
+                node_col="Node",
+                rov_col="ROV1",
+                time_col="TimeStamp1",
+                line_dash="solid",
+            )
+
+        recdb_df = _read_recdb_points_for_line(line)
+
+        if len(recdb_df) > 0:
+            recdb_source = ColumnDataSource(recdb_df)
+
+            recdb_points = line_map.scatter(
+                x="REC_X",
+                y="REC_Y",
+                source=recdb_source,
+                marker="x",
+                size=point_size + 5,
+                line_width=2,
+                color="#dc3545",
+                legend_label="REC_DB REC_X/REC_Y",
+            )
+            dsr_point_renderers.append(recdb_points)
+
+            line_map.line(
+                x="REC_X",
+                y="REC_Y",
+                source=recdb_source,
+                width=1,
+                color="#dc3545",
+                line_dash="dotted",
+                legend_label="REC_DB REC_X/REC_Y",
+            )
+
+            recdb_prep = recdb_df[
+                recdb_df["PREP_X"].notna()
+                & recdb_df["PREP_Y"].notna()
+                & (recdb_df["PREP_X"] != 0)
+                & (recdb_df["PREP_Y"] != 0)
+                ].copy()
+
+            if len(recdb_prep) > 0:
+                recdb_prep["MID_X"] = (recdb_prep["REC_X"] + recdb_prep["PREP_X"]) / 2.0
+                recdb_prep["MID_Y"] = (recdb_prep["REC_Y"] + recdb_prep["PREP_Y"]) / 2.0
+                recdb_prep_source = ColumnDataSource(recdb_prep)
+
+                prep_points = line_map.scatter(
+                    x="PREP_X",
+                    y="PREP_Y",
+                    source=recdb_prep_source,
+                    marker="circle_cross",
+                    size=point_size + 3,
+                    color="#fd7e14",
+                    legend_label="REC_DB PREP_X/PREP_Y",
+                )
+                dsr_point_renderers.append(prep_points)
+
+                line_map.segment(
+                    x0="PREP_X",
+                    y0="PREP_Y",
+                    x1="REC_X",
+                    y1="REC_Y",
+                    source=recdb_prep_source,
+                    line_color="#fd7e14",
+                    line_width=2,
+                    line_dash="dashed",
+                    line_alpha=0.8,
+                    legend_label="Preplot ↔ REC_DB",
+                )
+
+                line_map.text(
+                    x="MID_X",
+                    y="MID_Y",
+                    text="REC_DB_DistLabel",
+                    source=recdb_prep_source,
+                    text_font_size="8pt",
+                    text_color="#fd7e14",
+                    text_align="center",
+                    text_baseline="middle",
+                    x_offset=8,
+                    y_offset=8,
+                )
+
+            line_map.add_tools(
+                HoverTool(
+                    tooltips=[
+                        ("Type", "REC_DB"),
+                        ("Station", "@Station"),
+                        ("Node", "@Node"),
+                        ("REC_X", "@REC_X{0.0}"),
+                        ("REC_Y", "@REC_Y{0.0}"),
+                        ("PREP_X", "@PREP_X{0.0}"),
+                        ("PREP_Y", "@PREP_Y{0.0}"),
+                        ("Distance to Preplot", "@REC_DB_DistLabel"),
+                    ],
+                    renderers=[recdb_points],
+                )
+            )
+
         options = []
         lock_code = []
 
         if len(df) > 0 and {"Station", "PrimaryEasting", "PrimaryNorthing"}.issubset(df.columns):
-            for p in df.itertuples():
+            tmp_lock = _valid_xy(df, "PrimaryEasting", "PrimaryNorthing")
+
+            for p in tmp_lock.itertuples():
                 try:
                     station_str = str(p.Station)
                     x0 = float(p.PrimaryEasting) - 20
                     x1 = float(p.PrimaryEasting) + 20
                     y0 = float(p.PrimaryNorthing) - 20
                     y1 = float(p.PrimaryNorthing) + 20
+
                     options.append(station_str)
                     lock_code.append(
                         f"'{station_str}': {{x_range: [{x0}, {x1}], y_range: [{y0}, {y1}]}}"
@@ -3847,6 +4240,7 @@ class DSRLineGraphics(object):
             if (selected_locations.length > 0) {{
                 const selected_location = selected_locations[0];
                 const ranges = locations[selected_location];
+
                 if (ranges) {{
                     plot.x_range.start = ranges.x_range[0];
                     plot.x_range.end = ranges.x_range[1];
@@ -3860,10 +4254,32 @@ class DSRLineGraphics(object):
         js_callback = CustomJS(args=dict(plot=line_map, multiselect=multiselect), code=code1)
         multiselect.js_on_change("value", js_callback)
 
-        button = Button(label="Hide Legend", button_type="success")
+        btn_legend = Button(label="Hide Legend", button_type="success", width=120)
+
+        point_size_input = TextInput(
+            title="DSR point size",
+            value=str(point_size),
+            width=120,
+        )
+
+        btn_apply_point_size = Button(
+            label="Apply point size",
+            button_type="primary",
+            width=140,
+        )
+
+        radius_input = TextInput(
+            title="Preplot circle radius, m",
+            value="5",
+            width=160,
+        )
+
+        btn_apply_radius = Button(label="Apply radius", button_type="primary", width=120)
+        btn_toggle_radius = Button(label="Show circles", button_type="success", width=120)
+
         if len(line_map.legend) > 0:
             callback = CustomJS(
-                args=dict(plot=line_map, button=button, legend=line_map.legend[0]),
+                args=dict(button=btn_legend, legend=line_map.legend[0]),
                 code="""
                     if (legend.visible) {
                         legend.visible = false;
@@ -3874,7 +4290,67 @@ class DSRLineGraphics(object):
                     }
                 """,
             )
-            button.js_on_click(callback)
+            btn_legend.js_on_click(callback)
+
+        btn_apply_point_size.js_on_click(
+            CustomJS(
+                args=dict(renderers=dsr_point_renderers, point_size_input=point_size_input),
+                code="""
+                    const size = parseFloat(point_size_input.value);
+
+                    if (isNaN(size) || size <= 0) {
+                        alert("Input valid point size");
+                        return;
+                    }
+
+                    for (const r of renderers) {
+                        if (r.glyph && 'size' in r.glyph) {
+                            r.glyph.size = size;
+                        }
+                    }
+                """,
+            )
+        )
+
+        btn_apply_radius.js_on_click(
+            CustomJS(
+                args=dict(renderers=radius_renderers, radius_input=radius_input),
+                code="""
+                    const radius = parseFloat(radius_input.value);
+
+                    if (isNaN(radius) || radius <= 0) {
+                        alert("Input valid radius in meters");
+                        return;
+                    }
+
+                    for (const r of renderers) {
+                        if (r.glyph && 'radius' in r.glyph) {
+                            r.glyph.radius = radius;
+                            r.visible = true;
+                        }
+                    }
+                """,
+            )
+        )
+
+        btn_toggle_radius.js_on_click(
+            CustomJS(
+                args=dict(renderers=radius_renderers, button=btn_toggle_radius),
+                code="""
+                    let show = true;
+
+                    if (renderers.length > 0 && renderers[0].visible) {
+                        show = false;
+                    }
+
+                    for (const r of renderers) {
+                        r.visible = show;
+                    }
+
+                    button.label = show ? "Hide circles" : "Show circles";
+                """,
+            )
+        )
 
         line_map.yaxis.formatter = PrintfTickFormatter(format="%d")
         line_map.xaxis.formatter = PrintfTickFormatter(format="%d")
@@ -3882,15 +4358,38 @@ class DSRLineGraphics(object):
         if len(line_map.legend) > 0:
             line_map.legend.click_policy = "hide"
 
-        controls = column([button, multiselect], sizing_mode="stretch_height")
-        layout = row([line_map, controls], sizing_mode="stretch_both")
+        top_controls = row(
+            btn_legend,
+            point_size_input,
+            btn_apply_point_size,
+            radius_input,
+            btn_apply_radius,
+            btn_toggle_radius,
+            sizing_mode="stretch_width",
+        )
+
+        side_controls = column([multiselect], sizing_mode="stretch_height")
+
+        layout = column(
+            top_controls,
+            row([line_map, side_controls], sizing_mode="stretch_both"),
+            sizing_mode="stretch_both",
+        )
+
+        if html_path:
+            html_path = Path(html_path)
+            html_path.parent.mkdir(parents=True, exist_ok=True)
+
+            output_file(
+                filename=str(html_path),
+                title=f"DSR Line Map {line}",
+                mode="inline",
+            )
+            save(layout)
 
         if isShow:
-            #html = file_html(layout, CDN)
-            #with open(f"{line}_view.html", "w", encoding="utf-8") as f:
-            #   f.write(html)
             show(layout)
-            return
+
         return layout
 
     def bokeh_three_vbar_with_2l_by_category_shared_x(
@@ -4722,6 +5221,1241 @@ class DSRLineGraphics(object):
 
         return json_item(layout) if json_return else layout
 
+    def read_rec_db_preplot_all(self) -> pd.DataFrame:
+        """
+        Read all REC_DB rows joined with DSR preplot coordinates.
+
+        REC_DB schema supported:
+          REC_DB.Line
+          REC_DB.Point   -> joins to DSR.Station
+          REC_DB.REC_X
+          REC_DB.REC_Y
+
+        DSR schema required:
+          DSR.Line
+          DSR.Station
+          DSR.ROV
+          DSR.PreplotEasting
+          DSR.PreplotNorthing
+        """
+        with self._connect() as conn:
+            rec_cols = {
+                r["name"] for r in conn.execute("PRAGMA table_info(REC_DB)").fetchall()
+            }
+            dsr_cols = {
+                r["name"] for r in conn.execute("PRAGMA table_info(DSR)").fetchall()
+            }
+
+            if not rec_cols:
+                raise ValueError("Table REC_DB not found.")
+
+            if not dsr_cols:
+                raise ValueError("Table DSR not found.")
+
+            missing_rec = [c for c in ["REC_X", "REC_Y"] if c not in rec_cols]
+            if missing_rec:
+                raise ValueError(f"REC_DB missing columns: {missing_rec}")
+
+            missing_dsr = [
+                c for c in [
+                    "Line",
+                    "Station",
+                    "ROV",
+                    "PreplotEasting",
+                    "PreplotNorthing",
+                ]
+                if c not in dsr_cols
+            ]
+            if missing_dsr:
+                raise ValueError(f"DSR missing columns: {missing_dsr}")
+
+            if "Line" in rec_cols and "Point" in rec_cols:
+                join_sql = """
+                    CAST(r.Line AS INTEGER) = CAST(d.Line AS INTEGER)
+                    AND CAST(r.Point AS REAL) = CAST(d.Station AS REAL)
+                """
+            elif "Line" in rec_cols and "Station" in rec_cols:
+                join_sql = """
+                    CAST(r.Line AS INTEGER) = CAST(d.Line AS INTEGER)
+                    AND CAST(r.Station AS REAL) = CAST(d.Station AS REAL)
+                """
+            elif "Point" in rec_cols:
+                join_sql = """
+                    CAST(r.Point AS REAL) = CAST(d.Station AS REAL)
+                """
+            elif "Station" in rec_cols:
+                join_sql = """
+                    CAST(r.Station AS REAL) = CAST(d.Station AS REAL)
+                """
+            elif "Node" in rec_cols and "Node" in dsr_cols:
+                join_sql = """
+                    CAST(r.Node AS TEXT) = CAST(d.Node AS TEXT)
+                """
+            else:
+                raise ValueError("REC_DB must contain Point, Station, or Node for join to DSR.")
+
+            dsr_extra = []
+            for c in ["Node", "TimeStamp", "TimeStamp1"]:
+                if c in dsr_cols:
+                    dsr_extra.append(f"d.{c} AS {c}")
+
+            rec_extra = []
+            for c in [
+                "ID",
+                "File_FK",
+                "Preplot_FK",
+                "REC_ID",
+                "NODE_ID",
+                "Line",
+                "Point",
+                "LinePoint",
+                "LinePointIdx",
+                "TierLine",
+                "TierLinePoint",
+                "RPRE_X",
+                "RPRE_Y",
+                "RFIELD_X",
+                "RFIELD_Y",
+                "RFIELD_Z",
+                "REC_Z",
+            ]:
+                if c in rec_cols:
+                    rec_extra.append(f"r.{c} AS rec_{c}")
+
+            extra_sql = ""
+            if dsr_extra or rec_extra:
+                extra_sql = ",\n" + ",\n".join(dsr_extra + rec_extra)
+
+            sql = f"""
+                SELECT
+                    d.Line,
+                    d.Station,
+                    d.ROV,
+                    d.PreplotEasting,
+                    d.PreplotNorthing,
+                    r.REC_X,
+                    r.REC_Y
+                    {extra_sql}
+                FROM DSR d
+                INNER JOIN REC_DB r
+                    ON {join_sql}
+                WHERE d.ROV IS NOT NULL
+                  AND TRIM(CAST(d.ROV AS TEXT)) <> ''
+                  AND d.PreplotEasting IS NOT NULL
+                  AND d.PreplotNorthing IS NOT NULL
+                  AND r.REC_X IS NOT NULL
+                  AND r.REC_Y IS NOT NULL
+                ORDER BY CAST(d.Line AS INTEGER), CAST(d.Station AS REAL)
+            """
+
+            return pd.read_sql_query(sql, conn)
+
+    def bokeh_recdb_histograms_all(
+            self,
+            *,
+            bins=40,
+            title_prefix="REC_DB vs PREPLOT",
+            json_return=False,
+            is_show=False,
+            export_html_path=None,
+            export_resources="inline",
+            show_std_lines=True,
+            show_kde=True,
+            kde_points=300,
+            kde_max_samples=5000,
+            max_offset=None,
+            qc_limits=None,
+    ):
+        try:
+            if qc_limits is None:
+                qc_limits = {
+                    "Inline": [-2.0, 2.0],
+                    "Xline": [-2.0, 2.0],
+                    "RangeToPreplot": [2.0, 5.0],
+                }
+
+            def _clean_array(vals):
+                arr = np.asarray(vals, dtype=float)
+                return arr[np.isfinite(arr)]
+
+            df = self.read_rec_db_preplot_all()
+
+            if df is None or df.empty:
+                return self._error_layout(
+                    title="REC_DB vs PREPLOT Histogram",
+                    message="No REC_DB rows joined to DSR / PREPLOT.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            d = df.copy()
+
+            for c in ["Line", "Station", "REC_X", "REC_Y", "PreplotEasting", "PreplotNorthing"]:
+                d[c] = pd.to_numeric(d[c], errors="coerce")
+
+            d = d.dropna(
+                subset=["Line", "Station", "REC_X", "REC_Y", "PreplotEasting", "PreplotNorthing"]
+            )
+
+            if d.empty:
+                return self._error_layout(
+                    title="REC_DB vs PREPLOT Histogram",
+                    message="No valid REC_DB / PREPLOT coordinates after numeric cleanup.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            d["ROV"] = d["ROV"].astype(str).fillna("").str.strip()
+            d = d[d["ROV"] != ""]
+
+            d["dx"] = d["REC_X"] - d["PreplotEasting"]
+            d["dy"] = d["REC_Y"] - d["PreplotNorthing"]
+            d["RangeToPreplot"] = np.sqrt(d["dx"] ** 2 + d["dy"] ** 2)
+
+            d["Inline"] = np.nan
+            d["Xline"] = np.nan
+
+            for line_value, idx in d.groupby("Line").groups.items():
+                sub = d.loc[idx].sort_values("Station")
+
+                if len(sub) < 2:
+                    bearing_rad = 0.0
+                else:
+                    x1 = float(sub["PreplotEasting"].iloc[0])
+                    y1 = float(sub["PreplotNorthing"].iloc[0])
+                    x2 = float(sub["PreplotEasting"].iloc[-1])
+                    y2 = float(sub["PreplotNorthing"].iloc[-1])
+                    bearing_rad = np.arctan2(x2 - x1, y2 - y1)
+
+                u_inline_e = np.sin(bearing_rad)
+                u_inline_n = np.cos(bearing_rad)
+
+                u_xline_e = np.cos(bearing_rad)
+                u_xline_n = -np.sin(bearing_rad)
+
+                d.loc[idx, "Inline"] = (
+                        d.loc[idx, "dx"] * u_inline_e
+                        + d.loc[idx, "dy"] * u_inline_n
+                )
+                d.loc[idx, "Xline"] = (
+                        d.loc[idx, "dx"] * u_xline_e
+                        + d.loc[idx, "dy"] * u_xline_n
+                )
+
+            plots = [
+                ("Inline", "Inline Offset", "Inline, m"),
+                ("Xline", "Xline Offset", "Xline, m"),
+                ("RangeToPreplot", "Range To Preplot", "Range, m"),
+            ]
+
+            def _metric_limits(field, vals):
+                vals = _clean_array(vals)
+
+                if vals.size == 0:
+                    return -0.5, 0.5
+
+                vmin = float(np.min(vals))
+                vmax = float(np.max(vals))
+
+                if field == "RangeToPreplot":
+                    vmin = 0.0
+
+                if max_offset is not None:
+                    mo = abs(float(max_offset))
+                    if field == "RangeToPreplot":
+                        vmin, vmax = 0.0, mo
+                    else:
+                        vmin, vmax = -mo, mo
+
+                if vmin == vmax:
+                    vmin -= 0.5
+                    vmax += 0.5
+
+                pad = (vmax - vmin) * 0.05
+                if field == "RangeToPreplot":
+                    return 0.0, vmax + pad
+                return vmin - pad, vmax + pad
+
+            x_ranges = {}
+            for field, title, label in plots:
+                vmin, vmax = _metric_limits(field, d[field])
+                x_ranges[field] = Range1d(start=vmin, end=vmax)
+
+            def _stats_dict(vals):
+                s = _clean_array(vals)
+
+                if s.size == 0:
+                    return {
+                        "n": 0,
+                        "min": np.nan,
+                        "max": np.nan,
+                        "mean": np.nan,
+                        "std": np.nan,
+                        "p95": np.nan,
+                        "p99": np.nan,
+                    }
+
+                std = float(np.std(s, ddof=1)) if s.size > 1 else 0.0
+
+                return {
+                    "n": int(s.size),
+                    "min": float(np.min(s)),
+                    "max": float(np.max(s)),
+                    "mean": float(np.mean(s)),
+                    "std": std,
+                    "p95": float(np.quantile(s, 0.95)),
+                    "p99": float(np.quantile(s, 0.99)),
+                }
+
+            def _stats_text(vals):
+                st = _stats_dict(vals)
+                if st["n"] == 0:
+                    return "no data"
+                return (
+                    f"avg:{st['mean']:.2f}; std:{st['std']:.2f}; "
+                    f"p95:{st['p95']:.2f}; p99:{st['p99']:.2f}"
+                )
+
+            def _outlier_count(vals, field):
+                s = _clean_array(vals)
+
+                if s.size == 0:
+                    return 0
+
+                limits = qc_limits.get(field)
+                if not limits:
+                    return 0
+
+                if field == "RangeToPreplot":
+                    limit = max(abs(float(x)) for x in limits)
+                    return int(np.sum(s > limit))
+
+                low = min(float(x) for x in limits)
+                high = max(float(x) for x in limits)
+
+                return int(np.sum((s < low) | (s > high)))
+
+            def _kde_xy(vals, xmin, xmax, hist_bin_width):
+                vals = _clean_array(vals)
+
+                if vals.size < 2:
+                    return None, None
+
+                if vals.size > kde_max_samples:
+                    vals = np.random.choice(
+                        vals,
+                        size=int(kde_max_samples),
+                        replace=False,
+                    )
+
+                std = float(np.std(vals, ddof=1))
+                if not np.isfinite(std) or std <= 0:
+                    return None, None
+
+                n = vals.size
+                bandwidth = 1.06 * std * (n ** (-1 / 5))
+
+                if not np.isfinite(bandwidth) or bandwidth <= 0:
+                    return None, None
+
+                xs = np.linspace(xmin, xmax, int(kde_points))
+                density = np.zeros_like(xs, dtype=float)
+
+                chunk = 1000
+                for i in range(0, n, chunk):
+                    v = vals[i:i + chunk]
+                    z = (xs[:, None] - v[None, :]) / bandwidth
+                    density += np.exp(-0.5 * z * z).sum(axis=1)
+
+                density /= n * bandwidth * np.sqrt(2 * np.pi)
+                ys = density * n * hist_bin_width
+
+                return xs, ys
+
+            def _make_hist(rov_df, rov_name, field, plot_title, x_label):
+                vals_all = _clean_array(rov_df[field])
+
+                x_range = x_ranges[field]
+                vmin = float(x_range.start)
+                vmax = float(x_range.end)
+
+                edges = np.linspace(vmin, vmax, int(bins) + 1)
+                hist, e = np.histogram(vals_all, bins=edges)
+
+                bin_width = float(e[1] - e[0]) if len(e) > 1 else 1.0
+
+                src = ColumnDataSource(
+                    data=dict(
+                        top=hist,
+                        left=e[:-1],
+                        right=e[1:],
+                        bin_center=((e[:-1] + e[1:]) / 2.0),
+                        rov=[rov_name] * len(hist),
+                        percent=[
+                            (float(v) / max(len(vals_all), 1)) * 100.0
+                            for v in hist
+                        ],
+                    )
+                )
+
+                st = _stats_dict(vals_all)
+                outliers = _outlier_count(vals_all, field)
+
+                p = figure(
+                    title=f"{plot_title} | {_stats_text(vals_all)} | outliers:{outliers}",
+                    x_axis_label=x_label,
+                    y_axis_label="Count",
+                    x_range=x_range,
+                    sizing_mode="stretch_width",
+                    min_height=360,
+                    tools="pan,wheel_zoom,box_zoom,reset,save",
+                    active_scroll="wheel_zoom",
+                )
+
+                r = p.quad(
+                    top="top",
+                    bottom=0,
+                    left="left",
+                    right="right",
+                    source=src,
+                    fill_alpha=0.55,
+                    line_alpha=0.9,
+                    legend_label=str(rov_name),
+                )
+
+                p.add_tools(
+                    HoverTool(
+                        renderers=[r],
+                        tooltips=[
+                            ("ROV", "@rov"),
+                            ("Bin center", "@bin_center{0.00}"),
+                            ("Count", "@top"),
+                            ("Percent", "@percent{0.00}%"),
+                        ],
+                    )
+                )
+
+                if field != "RangeToPreplot":
+                    p.add_layout(
+                        Span(
+                            location=0,
+                            dimension="height",
+                            line_color="black",
+                            line_dash="dashed",
+                            line_width=1,
+                            line_alpha=0.7,
+                        )
+                    )
+
+                limits = qc_limits.get(field)
+                if limits:
+                    for lim in limits:
+                        lim = float(lim)
+                        if field == "RangeToPreplot" and lim < 0:
+                            continue
+                        p.add_layout(
+                            Span(
+                                location=lim,
+                                dimension="height",
+                                line_color="red",
+                                line_dash="dotdash",
+                                line_width=2,
+                                line_alpha=0.75,
+                            )
+                        )
+
+                if show_std_lines and st["n"] > 1 and np.isfinite(st["std"]):
+                    mean = st["mean"]
+                    std = st["std"]
+
+                    p.add_layout(
+                        Span(
+                            location=mean,
+                            dimension="height",
+                            line_color="blue",
+                            line_dash="solid",
+                            line_width=2,
+                            line_alpha=0.85,
+                        )
+                    )
+
+                    for mult, dash, alpha in [
+                        (1, "dashed", 0.75),
+                        (2, "dotted", 0.65),
+                    ]:
+                        for x in [mean - mult * std, mean + mult * std]:
+                            if field == "RangeToPreplot" and x < 0:
+                                continue
+                            p.add_layout(
+                                Span(
+                                    location=float(x),
+                                    dimension="height",
+                                    line_color="blue",
+                                    line_dash=dash,
+                                    line_width=1,
+                                    line_alpha=alpha,
+                                )
+                            )
+
+                if show_kde and vals_all.size >= 2:
+                    xs, ys = _kde_xy(vals_all, vmin, vmax, bin_width)
+
+                    if xs is not None and ys is not None:
+                        p.line(
+                            xs,
+                            ys,
+                            line_width=3,
+                            line_alpha=0.9,
+                            legend_label="KDE",
+                        )
+
+                max_hist = int(np.max(hist)) if len(hist) else 0
+                label_y = max_hist * 0.92 if max_hist > 0 else 1
+
+                p.add_layout(
+                    Label(
+                        x=vmin + (vmax - vmin) * 0.02,
+                        y=label_y,
+                        text=f"P95={st['p95']:.2f} | P99={st['p99']:.2f} | Out={outliers}",
+                        text_font_size="9pt",
+                        text_alpha=0.8,
+                    )
+                )
+
+                p.legend.location = "top_right"
+                p.legend.label_text_font_size = "8pt"
+                p.legend.spacing = 1
+                p.legend.padding = 4
+                p.legend.click_policy = "hide"
+
+                p.xgrid.visible = True
+                p.ygrid.visible = True
+
+                return p
+
+            rovs = sorted(d["ROV"].dropna().unique().tolist())
+
+            def _project_metric_summary(field):
+                st = _stats_dict(d[field])
+                out = _outlier_count(d[field], field)
+
+                if st["n"] == 0:
+                    return f"{field}: no data"
+
+                return (
+                    f"{field}: avg {st['mean']:.2f}, std {st['std']:.2f}, "
+                    f"P95 {st['p95']:.2f}, P99 {st['p99']:.2f}, outliers {out}"
+                )
+
+            header = Div(
+                text=f"""
+                <div style="padding:8px 10px;border-left:4px solid #0d6efd;background:#f8fafc;">
+                    <b>{title_prefix}</b><br>
+                    Scope: <b>whole project database</b> |
+                    ROVs: <b>{", ".join(rovs)}</b> |
+                    Lines: <b>{d["Line"].nunique()}</b> |
+                    Rows: <b>{len(d)}</b> |
+                    X-axis: <b>synced by metric across ROVs</b><br>
+                    <span>{_project_metric_summary("Inline")}</span><br>
+                    <span>{_project_metric_summary("Xline")}</span><br>
+                    <span>{_project_metric_summary("RangeToPreplot")}</span>
+                </div>
+                """,
+                sizing_mode="stretch_width",
+            )
+
+            sections = [header]
+
+            for rov_name in rovs:
+                rov_df = d[d["ROV"] == rov_name].copy()
+
+                inline_out = _outlier_count(rov_df["Inline"], "Inline")
+                xline_out = _outlier_count(rov_df["Xline"], "Xline")
+                range_out = _outlier_count(rov_df["RangeToPreplot"], "RangeToPreplot")
+
+                rov_header = Div(
+                    text=f"""
+                    <div style="margin-top:14px;padding:7px 10px;
+                                border-left:4px solid #198754;background:#f3f8f5;">
+                        <b>ROV: {rov_name}</b> |
+                        Rows: <b>{len(rov_df)}</b> |
+                        Lines: <b>{rov_df["Line"].nunique()}</b> |
+                        Stations: <b>{rov_df["Station"].nunique()}</b> |
+                        Outliers Inline/Xline/Range:
+                        <b>{inline_out}</b> / <b>{xline_out}</b> / <b>{range_out}</b>
+                    </div>
+                    """,
+                    sizing_mode="stretch_width",
+                )
+
+                figures = [
+                    _make_hist(rov_df, rov_name, field, title, label)
+                    for field, title, label in plots
+                ]
+
+                sections.append(rov_header)
+                sections.append(
+                    gridplot(
+                        [[figures[0], figures[1], figures[2]]],
+                        sizing_mode="stretch_width",
+                        merge_tools=True,
+                        toolbar_location="above",
+                    )
+                )
+
+            layout = column(*sections, sizing_mode="stretch_width")
+
+            if export_html_path:
+                export_html_path = os.path.abspath(export_html_path)
+                os.makedirs(os.path.dirname(export_html_path), exist_ok=True)
+
+                resources = INLINE
+                if str(export_resources).lower() == "cdn":
+                    resources = CDN
+
+                html = file_html(layout, resources, title=title_prefix)
+
+                with open(export_html_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+
+            if is_show:
+                show(layout)
+                return export_html_path if export_html_path else None
+
+            if json_return:
+                return json_item(layout)
+
+            if export_html_path:
+                return export_html_path
+
+            return layout
+
+        except Exception as e:
+            return self._error_layout(
+                title="REC_DB vs PREPLOT Histogram",
+                message="Failed to build REC_DB vs PREPLOT histogram plot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+    def read_rec_db_primary_all(self) -> pd.DataFrame:
+        """
+        Read all REC_DB rows joined with DSR primary deployed coordinates.
+
+        REC_DB:
+          Line
+          Point -> DSR.Station
+          REC_X
+          REC_Y
+
+        DSR:
+          Line
+          Station
+          ROV
+          PrimaryEasting
+          PrimaryNorthing
+        """
+        with self._connect() as conn:
+            rec_cols = {
+                r["name"] for r in conn.execute("PRAGMA table_info(REC_DB)").fetchall()
+            }
+            dsr_cols = {
+                r["name"] for r in conn.execute("PRAGMA table_info(DSR)").fetchall()
+            }
+
+            if not rec_cols:
+                raise ValueError("Table REC_DB not found.")
+
+            if not dsr_cols:
+                raise ValueError("Table DSR not found.")
+
+            missing_rec = [c for c in ["REC_X", "REC_Y"] if c not in rec_cols]
+            if missing_rec:
+                raise ValueError(f"REC_DB missing columns: {missing_rec}")
+
+            missing_dsr = [
+                c for c in [
+                    "Line",
+                    "Station",
+                    "ROV",
+                    "PrimaryEasting",
+                    "PrimaryNorthing",
+                ]
+                if c not in dsr_cols
+            ]
+            if missing_dsr:
+                raise ValueError(f"DSR missing columns: {missing_dsr}")
+
+            if "Line" in rec_cols and "Point" in rec_cols:
+                join_sql = """
+                    CAST(r.Line AS INTEGER) = CAST(d.Line AS INTEGER)
+                    AND CAST(r.Point AS REAL) = CAST(d.Station AS REAL)
+                """
+            elif "Line" in rec_cols and "Station" in rec_cols:
+                join_sql = """
+                    CAST(r.Line AS INTEGER) = CAST(d.Line AS INTEGER)
+                    AND CAST(r.Station AS REAL) = CAST(d.Station AS REAL)
+                """
+            elif "Point" in rec_cols:
+                join_sql = """
+                    CAST(r.Point AS REAL) = CAST(d.Station AS REAL)
+                """
+            elif "Station" in rec_cols:
+                join_sql = """
+                    CAST(r.Station AS REAL) = CAST(d.Station AS REAL)
+                """
+            elif "Node" in rec_cols and "Node" in dsr_cols:
+                join_sql = """
+                    CAST(r.Node AS TEXT) = CAST(d.Node AS TEXT)
+                """
+            else:
+                raise ValueError("REC_DB must contain Point, Station, or Node for join to DSR.")
+
+            dsr_extra = []
+            for c in ["Node", "TimeStamp", "TimeStamp1"]:
+                if c in dsr_cols:
+                    dsr_extra.append(f"d.{c} AS {c}")
+
+            rec_extra = []
+            for c in [
+                "ID",
+                "File_FK",
+                "Preplot_FK",
+                "REC_ID",
+                "NODE_ID",
+                "Line",
+                "Point",
+                "LinePoint",
+                "LinePointIdx",
+                "TierLine",
+                "TierLinePoint",
+                "RPRE_X",
+                "RPRE_Y",
+                "RFIELD_X",
+                "RFIELD_Y",
+                "RFIELD_Z",
+                "REC_Z",
+            ]:
+                if c in rec_cols:
+                    rec_extra.append(f"r.{c} AS rec_{c}")
+
+            extra_sql = ""
+            if dsr_extra or rec_extra:
+                extra_sql = ",\n" + ",\n".join(dsr_extra + rec_extra)
+
+            sql = f"""
+                SELECT
+                    d.Line,
+                    d.Station,
+                    d.ROV,
+                    d.PrimaryEasting,
+                    d.PrimaryNorthing,
+                    r.REC_X,
+                    r.REC_Y
+                    {extra_sql}
+                FROM DSR d
+                INNER JOIN REC_DB r
+                    ON {join_sql}
+                WHERE d.ROV IS NOT NULL
+                  AND TRIM(CAST(d.ROV AS TEXT)) <> ''
+                  AND d.PrimaryEasting IS NOT NULL
+                  AND d.PrimaryNorthing IS NOT NULL
+                  AND r.REC_X IS NOT NULL
+                  AND r.REC_Y IS NOT NULL
+                ORDER BY CAST(d.Line AS INTEGER), CAST(d.Station AS REAL)
+            """
+
+            return pd.read_sql_query(sql, conn)
+
+    def bokeh_recdb_primary_histograms_all(
+            self,
+            *,
+            bins=40,
+            title_prefix="REC_DB vs DSR PRIMARY",
+            json_return=False,
+            is_show=False,
+            export_html_path=None,
+            export_resources="inline",
+            show_std_lines=True,
+            show_kde=True,
+            kde_points=300,
+            kde_max_samples=5000,
+            max_offset=None,
+            qc_limits=None,
+    ):
+        """
+        Whole project REC_DB vs DSR Primary coordinate histogram QC.
+
+        Per ROV:
+          1. dX = REC_X - PrimaryEasting
+          2. dY = REC_Y - PrimaryNorthing
+          3. RangeToPrimary
+
+        Requires imports:
+          from bokeh.models import Range1d, Span, Label
+          from bokeh.embed import file_html
+          from bokeh.resources import CDN, INLINE
+        """
+        try:
+            if qc_limits is None:
+                qc_limits = {
+                    "dx": [-2.0, 2.0],
+                    "dy": [-2.0, 2.0],
+                    "RangeToPrimary": [2.0, 5.0],
+                }
+
+            def _clean_array(vals):
+                arr = np.asarray(vals, dtype=float)
+                return arr[np.isfinite(arr)]
+
+            df = self.read_rec_db_primary_all()
+
+            if df is None or df.empty:
+                return self._error_layout(
+                    title="REC_DB vs DSR PRIMARY Histogram",
+                    message="No REC_DB rows joined to DSR Primary coordinates.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            d = df.copy()
+
+            for c in ["Line", "Station", "REC_X", "REC_Y", "PrimaryEasting", "PrimaryNorthing"]:
+                d[c] = pd.to_numeric(d[c], errors="coerce")
+
+            d = d.dropna(
+                subset=[
+                    "Line",
+                    "Station",
+                    "REC_X",
+                    "REC_Y",
+                    "PrimaryEasting",
+                    "PrimaryNorthing",
+                ]
+            )
+
+            if d.empty:
+                return self._error_layout(
+                    title="REC_DB vs DSR PRIMARY Histogram",
+                    message="No valid REC_DB / DSR Primary coordinates after numeric cleanup.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            d["ROV"] = d["ROV"].astype(str).fillna("").str.strip()
+            d = d[d["ROV"] != ""]
+
+            d["dx"] = d["REC_X"] - d["PrimaryEasting"]
+            d["dy"] = d["REC_Y"] - d["PrimaryNorthing"]
+            d["RangeToPrimary"] = np.sqrt(d["dx"] ** 2 + d["dy"] ** 2)
+
+            plots = [
+                ("dx", "dX = REC_X - PrimaryEasting", "dX, m"),
+                ("dy", "dY = REC_Y - PrimaryNorthing", "dY, m"),
+                ("RangeToPrimary", "Range To DSR Primary", "Range, m"),
+            ]
+
+            def _metric_limits(field, vals):
+                vals = _clean_array(vals)
+
+                if vals.size == 0:
+                    return -0.5, 0.5
+
+                vmin = float(np.min(vals))
+                vmax = float(np.max(vals))
+
+                if field == "RangeToPrimary":
+                    vmin = 0.0
+
+                if max_offset is not None:
+                    mo = abs(float(max_offset))
+                    if field == "RangeToPrimary":
+                        vmin, vmax = 0.0, mo
+                    else:
+                        vmin, vmax = -mo, mo
+
+                if vmin == vmax:
+                    vmin -= 0.5
+                    vmax += 0.5
+
+                pad = (vmax - vmin) * 0.05
+
+                if field == "RangeToPrimary":
+                    return 0.0, vmax + pad
+
+                return vmin - pad, vmax + pad
+
+            x_ranges = {}
+            for field, title, label in plots:
+                vmin, vmax = _metric_limits(field, d[field])
+                x_ranges[field] = Range1d(start=vmin, end=vmax)
+
+            def _stats_dict(vals):
+                s = _clean_array(vals)
+
+                if s.size == 0:
+                    return {
+                        "n": 0,
+                        "min": np.nan,
+                        "max": np.nan,
+                        "mean": np.nan,
+                        "std": np.nan,
+                        "p95": np.nan,
+                        "p99": np.nan,
+                    }
+
+                std = float(np.std(s, ddof=1)) if s.size > 1 else 0.0
+
+                return {
+                    "n": int(s.size),
+                    "min": float(np.min(s)),
+                    "max": float(np.max(s)),
+                    "mean": float(np.mean(s)),
+                    "std": std,
+                    "p95": float(np.quantile(s, 0.95)),
+                    "p99": float(np.quantile(s, 0.99)),
+                }
+
+            def _stats_text(vals):
+                st = _stats_dict(vals)
+                if st["n"] == 0:
+                    return "no data"
+
+                return (
+                    f"avg:{st['mean']:.2f}; std:{st['std']:.2f}; "
+                    f"p95:{st['p95']:.2f}; p99:{st['p99']:.2f}"
+                )
+
+            def _outlier_count(vals, field):
+                s = _clean_array(vals)
+
+                if s.size == 0:
+                    return 0
+
+                limits = qc_limits.get(field)
+                if not limits:
+                    return 0
+
+                if field == "RangeToPrimary":
+                    limit = max(abs(float(x)) for x in limits)
+                    return int(np.sum(s > limit))
+
+                low = min(float(x) for x in limits)
+                high = max(float(x) for x in limits)
+
+                return int(np.sum((s < low) | (s > high)))
+
+            def _kde_xy(vals, xmin, xmax, hist_bin_width):
+                vals = _clean_array(vals)
+
+                if vals.size < 2:
+                    return None, None
+
+                if vals.size > kde_max_samples:
+                    vals = np.random.choice(
+                        vals,
+                        size=int(kde_max_samples),
+                        replace=False,
+                    )
+
+                std = float(np.std(vals, ddof=1))
+
+                if not np.isfinite(std) or std <= 0:
+                    return None, None
+
+                n = vals.size
+                bandwidth = 1.06 * std * (n ** (-1 / 5))
+
+                if not np.isfinite(bandwidth) or bandwidth <= 0:
+                    return None, None
+
+                xs = np.linspace(xmin, xmax, int(kde_points))
+                density = np.zeros_like(xs, dtype=float)
+
+                chunk = 1000
+                for i in range(0, n, chunk):
+                    v = vals[i:i + chunk]
+                    z = (xs[:, None] - v[None, :]) / bandwidth
+                    density += np.exp(-0.5 * z * z).sum(axis=1)
+
+                density /= n * bandwidth * np.sqrt(2 * np.pi)
+                ys = density * n * hist_bin_width
+
+                return xs, ys
+
+            def _make_hist(rov_df, rov_name, field, plot_title, x_label):
+                vals_all = _clean_array(rov_df[field])
+
+                x_range = x_ranges[field]
+                vmin = float(x_range.start)
+                vmax = float(x_range.end)
+
+                edges = np.linspace(vmin, vmax, int(bins) + 1)
+                hist, e = np.histogram(vals_all, bins=edges)
+
+                bin_width = float(e[1] - e[0]) if len(e) > 1 else 1.0
+
+                src = ColumnDataSource(
+                    data=dict(
+                        top=hist,
+                        left=e[:-1],
+                        right=e[1:],
+                        bin_center=((e[:-1] + e[1:]) / 2.0),
+                        rov=[rov_name] * len(hist),
+                        percent=[
+                            (float(v) / max(len(vals_all), 1)) * 100.0
+                            for v in hist
+                        ],
+                    )
+                )
+
+                st = _stats_dict(vals_all)
+                outliers = _outlier_count(vals_all, field)
+
+                p = figure(
+                    title=f"{plot_title} | {_stats_text(vals_all)} | outliers:{outliers}",
+                    x_axis_label=x_label,
+                    y_axis_label="Count",
+                    x_range=x_range,
+                    sizing_mode="stretch_width",
+                    min_height=360,
+                    tools="pan,wheel_zoom,box_zoom,reset,save",
+                    active_scroll="wheel_zoom",
+                )
+
+                r = p.quad(
+                    top="top",
+                    bottom=0,
+                    left="left",
+                    right="right",
+                    source=src,
+                    fill_alpha=0.55,
+                    line_alpha=0.9,
+                    legend_label=str(rov_name),
+                )
+
+                p.add_tools(
+                    HoverTool(
+                        renderers=[r],
+                        tooltips=[
+                            ("ROV", "@rov"),
+                            ("Bin center", "@bin_center{0.00}"),
+                            ("Count", "@top"),
+                            ("Percent", "@percent{0.00}%"),
+                        ],
+                    )
+                )
+
+                if field != "RangeToPrimary":
+                    p.add_layout(
+                        Span(
+                            location=0,
+                            dimension="height",
+                            line_color="black",
+                            line_dash="dashed",
+                            line_width=1,
+                            line_alpha=0.7,
+                        )
+                    )
+
+                limits = qc_limits.get(field)
+                if limits:
+                    for lim in limits:
+                        lim = float(lim)
+                        if field == "RangeToPrimary" and lim < 0:
+                            continue
+                        p.add_layout(
+                            Span(
+                                location=lim,
+                                dimension="height",
+                                line_color="red",
+                                line_dash="dotdash",
+                                line_width=2,
+                                line_alpha=0.75,
+                            )
+                        )
+
+                if show_std_lines and st["n"] > 1 and np.isfinite(st["std"]):
+                    mean = st["mean"]
+                    std = st["std"]
+
+                    p.add_layout(
+                        Span(
+                            location=mean,
+                            dimension="height",
+                            line_color="blue",
+                            line_dash="solid",
+                            line_width=2,
+                            line_alpha=0.85,
+                        )
+                    )
+
+                    for mult, dash, alpha in [
+                        (1, "dashed", 0.75),
+                        (2, "dotted", 0.65),
+                    ]:
+                        for x in [mean - mult * std, mean + mult * std]:
+                            if field == "RangeToPrimary" and x < 0:
+                                continue
+                            p.add_layout(
+                                Span(
+                                    location=float(x),
+                                    dimension="height",
+                                    line_color="blue",
+                                    line_dash=dash,
+                                    line_width=1,
+                                    line_alpha=alpha,
+                                )
+                            )
+
+                if show_kde and vals_all.size >= 2:
+                    xs, ys = _kde_xy(vals_all, vmin, vmax, bin_width)
+
+                    if xs is not None and ys is not None:
+                        p.line(
+                            xs,
+                            ys,
+                            line_width=3,
+                            line_alpha=0.9,
+                            legend_label="KDE",
+                        )
+
+                max_hist = int(np.max(hist)) if len(hist) else 0
+                label_y = max_hist * 0.92 if max_hist > 0 else 1
+
+                p.add_layout(
+                    Label(
+                        x=vmin + (vmax - vmin) * 0.02,
+                        y=label_y,
+                        text=f"P95={st['p95']:.2f} | P99={st['p99']:.2f} | Out={outliers}",
+                        text_font_size="9pt",
+                        text_alpha=0.8,
+                    )
+                )
+
+                p.legend.location = "top_right"
+                p.legend.label_text_font_size = "8pt"
+                p.legend.spacing = 1
+                p.legend.padding = 4
+                p.legend.click_policy = "hide"
+
+                p.xgrid.visible = True
+                p.ygrid.visible = True
+
+                return p
+
+            rovs = sorted(d["ROV"].dropna().unique().tolist())
+
+            def _project_metric_summary(field):
+                st = _stats_dict(d[field])
+                out = _outlier_count(d[field], field)
+
+                if st["n"] == 0:
+                    return f"{field}: no data"
+
+                return (
+                    f"{field}: avg {st['mean']:.2f}, std {st['std']:.2f}, "
+                    f"P95 {st['p95']:.2f}, P99 {st['p99']:.2f}, outliers {out}"
+                )
+
+            header = Div(
+                text=f"""
+                <div style="padding:8px 10px;border-left:4px solid #0d6efd;background:#f8fafc;">
+                    <b>{title_prefix}</b><br>
+                    Scope: <b>whole project database</b> |
+                    ROVs: <b>{", ".join(rovs)}</b> |
+                    Lines: <b>{d["Line"].nunique()}</b> |
+                    Rows: <b>{len(d)}</b> |
+                    X-axis: <b>synced by metric across ROVs</b><br>
+                    <span>{_project_metric_summary("dx")}</span><br>
+                    <span>{_project_metric_summary("dy")}</span><br>
+                    <span>{_project_metric_summary("RangeToPrimary")}</span>
+                </div>
+                """,
+                sizing_mode="stretch_width",
+            )
+
+            sections = [header]
+
+            for rov_name in rovs:
+                rov_df = d[d["ROV"] == rov_name].copy()
+
+                dx_out = _outlier_count(rov_df["dx"], "dx")
+                dy_out = _outlier_count(rov_df["dy"], "dy")
+                range_out = _outlier_count(rov_df["RangeToPrimary"], "RangeToPrimary")
+
+                rov_header = Div(
+                    text=f"""
+                    <div style="margin-top:14px;padding:7px 10px;
+                                border-left:4px solid #198754;background:#f3f8f5;">
+                        <b>ROV: {rov_name}</b> |
+                        Rows: <b>{len(rov_df)}</b> |
+                        Lines: <b>{rov_df["Line"].nunique()}</b> |
+                        Stations: <b>{rov_df["Station"].nunique()}</b> |
+                        Outliers dX/dY/Range:
+                        <b>{dx_out}</b> / <b>{dy_out}</b> / <b>{range_out}</b>
+                    </div>
+                    """,
+                    sizing_mode="stretch_width",
+                )
+
+                figures = [
+                    _make_hist(rov_df, rov_name, field, title, label)
+                    for field, title, label in plots
+                ]
+
+                sections.append(rov_header)
+                sections.append(
+                    gridplot(
+                        [[figures[0], figures[1], figures[2]]],
+                        sizing_mode="stretch_width",
+                        merge_tools=True,
+                        toolbar_location="above",
+                    )
+                )
+
+            layout = column(*sections, sizing_mode="stretch_width")
+
+            if export_html_path:
+                export_html_path = os.path.abspath(export_html_path)
+                os.makedirs(os.path.dirname(export_html_path), exist_ok=True)
+
+                resources = INLINE
+                if str(export_resources).lower() == "cdn":
+                    resources = CDN
+
+                html = file_html(layout, resources, title=title_prefix)
+
+                with open(export_html_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+
+            if is_show:
+                show(layout)
+                return export_html_path if export_html_path else None
+
+            if json_return:
+                return json_item(layout)
+
+            if export_html_path:
+                return export_html_path
+
+            return layout
+
+        except Exception as e:
+            return self._error_layout(
+                title="REC_DB vs DSR PRIMARY Histogram",
+                message="Failed to build REC_DB vs DSR Primary histogram plot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
 
 
 

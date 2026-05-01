@@ -31,6 +31,9 @@ import {initRecalcAllBBoxStats} from "./initRecalcAllBBoxStats.js";
 import {initBBoxFileTable} from "./initBBoxFileTable.js";
 import {initBBoxFilter} from "./initBBoxFilter.js";
 import {initEOLReport} from "./eol_report.js";
+import {initRECDBHistogramCharts} from "./initRECDBHistogram.js";
+import {initROVDepRecLoad} from "./initROVDepRecLoad.js";
+import {initDSRSpeedHeadingMap} from "./initDSRSpeedHeadingMap.js";
 
 
 
@@ -67,7 +70,9 @@ export function initAllJSForRovUpload() {
   initDSRLineSort();
   initLineMinMaxQc();
   initDSRLineQCTabs();
-
+  initRECDBHistogramCharts();
+  initROVDepRecLoad();
+  initDSRSpeedHeadingMap();
 
 
     // GNSS QC

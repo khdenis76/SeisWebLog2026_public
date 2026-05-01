@@ -13,8 +13,9 @@ from bokeh.core.property.vectorization import value
 from bokeh.embed import json_item
 from bokeh.io import show
 from bokeh.layouts import row, column, gridplot
-from bokeh.models import Span, Range1d, FactorRange, Legend, LegendItem
-from bokeh.palettes import Category10, Category20
+from bokeh.models import Span, Range1d, FactorRange, Legend, LegendItem, LinearColorMapper, BasicTicker, \
+    NumeralTickFormatter, ColorBar
+from bokeh.palettes import Category10, Category20, Turbo256
 
 from bokeh.plotting import figure
 from bokeh.models import ColumnDataSource, Span, Range1d,Label, HoverTool, Button, Spinner, CustomJS, LabelSet, DatetimeTickFormatter, Div, \
@@ -24,6 +25,13 @@ import geopandas as gpd
 from bokeh.transform import factor_cmap, cumsum
 import plotly.graph_objects as go
 from pyproj import Transformer
+from bokeh.io import output_file, save, show
+from bokeh.layouts import column, row
+from bokeh.models import (
+    ColumnDataSource, HoverTool, CustomJS, LinearColorMapper, ColorBar,
+    BasicTicker, NumeralTickFormatter, Spinner, Legend, LegendItem,
+    DateRangeSlider, Slider, Button, MultiChoice
+)
 import xyzservices.providers as xyz
 
 PathLike = Union[str, Path]
@@ -4046,16 +4054,6 @@ class DSRMapPlots:
                 show(layout)
             return layout
 
-    from bokeh.models import (
-        ColumnDataSource,
-        FactorRange,
-        HoverTool,
-        CustomJS,
-        Legend,
-        LegendItem,
-    )
-
-
     def build_line_summary_qc_grid(self, df, json_export: bool = True, is_show: bool = True, ncols: int = 2):
         """
         Build Bokeh QC grid from V_DSR_LineSummary dataframe.
@@ -4302,3 +4300,608 @@ class DSRMapPlots:
             show(layout)
 
         return json_item(layout, "dsr_line_summary_qc") if json_export else layout
+
+    def make_dsr_rov_status_map(
+            self,
+            lines=None,
+            solution_fk=1,
+            mode="deployment",  # "deployment" or "recovery"
+            show_preplot=True,
+            show_shapes=True,
+            show_layers=True,
+            is_show=False,
+    ):
+        """
+        Map DSR points colored by Deployment ROV or Recovery ROV.
+
+        Deployment:
+            - uses DSR.ROV
+            - uses PrimaryEasting / PrimaryNorthing
+
+        Recovery:
+            - uses DSR.ROV1
+            - keeps only rows where ROV1 is not empty
+            - uses PrimaryEasting1 / PrimaryNorthing1
+        """
+
+        dsr_df = self.read_dsr(lines=lines, solution_fk=solution_fk)
+        rp_df = self.read_rp_preplot(lines=lines) if show_preplot else None
+
+        if dsr_df is None or dsr_df.empty:
+            return self._error_layout(
+                title="No DSR data",
+                message="DSR table returned no rows for selected line/filter.",
+                level="warning",
+                is_show=is_show,
+            )
+
+        mode = str(mode or "deployment").lower().strip()
+
+        # =====================================================
+        # DEPLOYMENT
+        # =====================================================
+        if mode in ("deployment", "deploy", "dep"):
+            rov_col = "ROV"
+            x_col = "PrimaryEasting"
+            y_col = "PrimaryNorthing"
+
+            if rov_col not in dsr_df.columns:
+                raise ValueError(f"Column '{rov_col}' not found in DSR dataframe.")
+
+            dsr_df[rov_col] = (
+                dsr_df[rov_col]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+                .replace("", "Unknown")
+            )
+
+            title = "Deployment by ROV"
+            layer_name = "Deployment"
+            marker = "circle"
+
+        # =====================================================
+        # RECOVERY
+        # =====================================================
+        elif mode in ("recovery", "recover", "rec"):
+            rov_col = "ROV1"
+
+            if rov_col not in dsr_df.columns:
+                raise ValueError(f"Column '{rov_col}' not found in DSR dataframe.")
+
+            # --- Keep ONLY valid recovery rows ---
+            dsr_df[rov_col] = dsr_df[rov_col].fillna("").astype(str).str.strip()
+            dsr_df = dsr_df[dsr_df[rov_col] != ""].copy()
+
+            if dsr_df.empty:
+                return self._error_layout(
+                    title="No Recovery Data",
+                    message="No rows with ROV1 found in DSR table.",
+                    level="warning",
+                    is_show=is_show,
+                )
+
+            # --- Use recovery coordinates ---
+            x_col = "PrimaryEasting1"
+            y_col = "PrimaryNorthing1"
+
+            for c in (x_col, y_col):
+                if c not in dsr_df.columns:
+                    raise ValueError(f"Column '{c}' not found in DSR dataframe.")
+
+            title = "Recovery by ROV"
+            layer_name = "Recovery"
+            marker = "triangle"
+
+        else:
+            raise ValueError("mode must be 'deployment' or 'recovery'")
+
+        # =====================================================
+        # VALIDATE COORDS
+        # =====================================================
+        for c in (x_col, y_col):
+            if c not in dsr_df.columns:
+                raise ValueError(f"Column '{c}' not found in DSR dataframe.")
+
+        # =====================================================
+        # LAYERS
+        # =====================================================
+        layers = [
+            {
+                "df": "dsr",
+                "name": layer_name,
+                "x_col": x_col,
+                "y_col": y_col,
+                "marker": marker,
+                "size": 7,
+                "alpha": 0.90,
+                "color_col": rov_col,
+                "palette": "Category20",
+                "hover": [
+                    ("Layer", layer_name),
+                    ("Line", "@Line"),
+                    ("Station", "@Station"),
+                    ("Node", "@Node"),
+                    ("Deploy ROV", "@ROV"),
+                    ("Recovery ROV", "@ROV1"),
+                    ("Status", "@Status"),
+                    (x_col, f"@{x_col}{{0,0.00}}"),
+                    (y_col, f"@{y_col}{{0,0.00}}"),
+                    ("Time", "@TimeStamp"),
+                ],
+            }
+        ]
+
+        return self.make_map_multi_layers(
+            rp_df=rp_df,
+            dsr_df=dsr_df,
+            title=title,
+            layers=layers,
+            show_preplot=show_preplot,
+            show_shapes=show_shapes,
+            show_layers=show_layers,
+            is_show=is_show,
+        )
+
+    def make_dsr_deploy_speed_heading_map(
+            self,
+            line=None,
+            solution_fk=1,
+            rov=None,
+            title="DSR Deployment Speed / Heading Map",
+            show_preplot=True,
+            show_shapes=True,
+            show_layers=True,
+            show_tiles=None,
+            min_dt_sec=1,
+            max_dt_min=120,
+            rolling_window=3,
+            arrow_size=14,
+            segment_width=3,
+            save_path=None,
+            is_show=False,
+            jason_item=False,
+    ):
+        """
+        Interactive DSR deployment map.
+
+        Features:
+          - whole database if line=None
+          - consecutive node speed/heading by Line + ROV
+          - speed in knots
+          - arrow marker shows heading
+          - separate ROV legend series, hide/show by legend
+          - date range filter
+          - line filter
+          - time playback slider
+          - export to standalone HTML using save_path
+        """
+
+        lines = [line] if line is not None else None
+        dsr = self.read_dsr(lines=lines, solution_fk=solution_fk)
+
+        if dsr is None or dsr.empty:
+            return self._error_layout(
+                title="No DSR data",
+                message="DSR table is empty.",
+                level="warning",
+                is_show=is_show,
+                json_return=jason_item,
+            )
+
+        required = ["Line", "Station", "ROV", "TimeStamp", "PrimaryEasting", "PrimaryNorthing"]
+        missing = [c for c in required if c not in dsr.columns]
+        if missing:
+            return self._error_layout(
+                title="Missing DSR columns",
+                message=f"Missing columns: {missing}",
+                level="error",
+                is_show=is_show,
+                json_return=jason_item,
+            )
+
+        df = dsr.copy()
+
+        if rov:
+            df = df[df["ROV"].astype(str).str.strip().eq(str(rov).strip())]
+
+        df["Line"] = pd.to_numeric(df["Line"], errors="coerce")
+        df["Station"] = pd.to_numeric(df["Station"], errors="coerce")
+        df["ROV"] = df["ROV"].astype(str).str.strip()
+        df["TimeStamp"] = pd.to_datetime(df["TimeStamp"], errors="coerce")
+        df["PrimaryEasting"] = pd.to_numeric(df["PrimaryEasting"], errors="coerce")
+        df["PrimaryNorthing"] = pd.to_numeric(df["PrimaryNorthing"], errors="coerce")
+
+        df = df.dropna(
+            subset=["Line", "Station", "ROV", "TimeStamp", "PrimaryEasting", "PrimaryNorthing"]
+        )
+
+        if df.empty:
+            return self._error_layout(
+                title="No valid DSR deployment data",
+                message="No valid rows after cleaning.",
+                level="warning",
+                is_show=is_show,
+                json_return=jason_item,
+            )
+
+        df["Line"] = df["Line"].astype(int)
+        df["Station"] = df["Station"].astype(int)
+        df["LineStr"] = df["Line"].astype(str)
+
+        # Consecutive nodes per Line + ROV
+        df = df.sort_values(["Line", "ROV", "TimeStamp", "Station"]).reset_index(drop=True)
+        g = df.groupby(["Line", "ROV"], dropna=False)
+
+        df["PrevEasting"] = g["PrimaryEasting"].shift(1)
+        df["PrevNorthing"] = g["PrimaryNorthing"].shift(1)
+        df["PrevTimeStamp"] = g["TimeStamp"].shift(1)
+        df["PrevStation"] = g["Station"].shift(1)
+        df["PrevNode"] = g["Node"].shift(1) if "Node" in df.columns else ""
+
+        df["dE"] = df["PrimaryEasting"] - df["PrevEasting"]
+        df["dN"] = df["PrimaryNorthing"] - df["PrevNorthing"]
+        df["SegmentDistance_m"] = np.sqrt(df["dE"] ** 2 + df["dN"] ** 2)
+
+        df["dt_sec"] = (df["TimeStamp"] - df["PrevTimeStamp"]).dt.total_seconds()
+        df.loc[df["dt_sec"] < min_dt_sec, "dt_sec"] = np.nan
+        df.loc[df["dt_sec"] > max_dt_min * 60, "dt_sec"] = np.nan
+
+        # knots = m/s * 1.94384
+        df["Speed_knots"] = (df["SegmentDistance_m"] / df["dt_sec"]) * 1.94384
+
+        # Heading: 0=N, 90=E
+        df["Heading_deg"] = (
+                                    np.degrees(np.arctan2(df["dE"], df["dN"])) + 360.0
+                            ) % 360.0
+
+        df["AvgSpeed_knots"] = (
+            df.groupby(["Line", "ROV"])["Speed_knots"]
+            .transform(lambda s: s.rolling(rolling_window, min_periods=1).mean())
+        )
+
+        df["ArrowAngle"] = -np.deg2rad(df["Heading_deg"].fillna(0))
+        df["TimeMS"] = (df["TimeStamp"].astype("int64") // 10 ** 6).astype("int64")
+
+        show_tiles = bool(self.cfg.use_tiles) if show_tiles is None else bool(show_tiles)
+
+        transformer = None
+        if getattr(self.cfg, "default_epsg", None):
+            transformer = Transformer.from_crs(
+                f"EPSG:{self.cfg.default_epsg}",
+                "EPSG:3857",
+                always_xy=True,
+            )
+
+        if transformer is not None and show_tiles:
+            df["__mx"], df["__my"] = transformer.transform(
+                df["PrimaryEasting"].values,
+                df["PrimaryNorthing"].values,
+            )
+            df["__prev_mx"], df["__prev_my"] = transformer.transform(
+                df["PrevEasting"].fillna(df["PrimaryEasting"]).values,
+                df["PrevNorthing"].fillna(df["PrimaryNorthing"]).values,
+            )
+        else:
+            df["__mx"] = df["PrimaryEasting"]
+            df["__my"] = df["PrimaryNorthing"]
+            df["__prev_mx"] = df["PrevEasting"]
+            df["__prev_my"] = df["PrevNorthing"]
+
+        valid_speed = df["AvgSpeed_knots"].dropna()
+        low = float(valid_speed.quantile(0.02)) if not valid_speed.empty else 0.0
+        high = float(valid_speed.quantile(0.98)) if not valid_speed.empty else 1.0
+        if high <= low:
+            high = low + 0.1
+
+        mapper = LinearColorMapper(
+            palette=Turbo256,
+            low=low,
+            high=high,
+            nan_color="#cccccc",
+        )
+
+        p = figure(
+            title=title,
+            sizing_mode="stretch_both",
+            x_axis_type="mercator" if show_tiles else "linear",
+            y_axis_type="mercator" if show_tiles else "linear",
+            match_aspect=self.cfg.match_aspect,
+            tools="pan,wheel_zoom,box_zoom,reset,save",
+            active_scroll="wheel_zoom",
+        )
+
+        if show_tiles:
+            vendor = getattr(self.cfg, "tile_vendor", "CARTODB_POSITRON")
+            provider = {
+                "CARTODB_POSITRON": xyz.CartoDB.Positron,
+                "CARTODB_DARK": xyz.CartoDB.DarkMatter,
+                "OSM": xyz.OpenStreetMap.Mapnik,
+                "ESRI_IMAGERY": xyz.Esri.WorldImagery,
+            }.get(vendor, xyz.CartoDB.Positron)
+            p.add_tile(provider)
+
+        if show_shapes:
+            self.add_project_shapes_layers(
+                p,
+                default_src_epsg=getattr(self.cfg, "default_epsg", None),
+            )
+
+        if show_layers:
+            self.add_csv_layers_to_map(
+                p,
+                csv_epsg=self.cfg.default_epsg,
+                show_tiles=show_tiles,
+            )
+
+        legend_items = []
+        all_arrow_renderers = []
+        all_segment_renderers = []
+        filter_targets = []
+
+        for rov_name in sorted(df["ROV"].dropna().unique()):
+            rov_df = df[df["ROV"] == rov_name].copy()
+
+            full_pts = ColumnDataSource(rov_df)
+            filt_pts = ColumnDataSource(rov_df)
+
+            seg_df = rov_df.dropna(
+                subset=["__prev_mx", "__prev_my", "__mx", "__my", "AvgSpeed_knots"]
+            ).copy()
+
+            full_seg = ColumnDataSource(seg_df)
+            filt_seg = ColumnDataSource(seg_df)
+
+            r_seg = p.segment(
+                x0="__prev_mx",
+                y0="__prev_my",
+                x1="__mx",
+                y1="__my",
+                source=filt_seg,
+                line_color={"field": "AvgSpeed_knots", "transform": mapper},
+                line_width=segment_width,
+                line_alpha=0.75,
+            )
+
+            r_pts = p.scatter(
+                x="__mx",
+                y="__my",
+                source=filt_pts,
+                marker="triangle",
+                angle="ArrowAngle",
+                size=arrow_size,
+                fill_color={"field": "AvgSpeed_knots", "transform": mapper},
+                line_color="black",
+                line_width=0.5,
+                fill_alpha=0.95,
+            )
+
+            all_arrow_renderers.append(r_pts)
+            all_segment_renderers.append(r_seg)
+            filter_targets.append([full_pts, filt_pts])
+            filter_targets.append([full_seg, filt_seg])
+
+            legend_items.append(
+                LegendItem(label=str(rov_name), renderers=[r_seg, r_pts])
+            )
+
+            p.add_tools(
+                HoverTool(
+                    renderers=[r_pts],
+                    tooltips=[
+                        ("ROV", "@ROV"),
+                        ("Line", "@Line"),
+                        ("Station", "@Station"),
+                        ("Prev Station", "@PrevStation"),
+                        ("Node", "@Node"),
+                        ("Prev Node", "@PrevNode"),
+                        ("Time", "@TimeStamp{%F %T}"),
+                        ("Speed", "@Speed_knots{0.00} kn"),
+                        ("Avg speed", "@AvgSpeed_knots{0.00} kn"),
+                        ("Heading", "@Heading_deg{0.0}°"),
+                        ("Distance", "@SegmentDistance_m{0.00} m"),
+                        ("dt", "@dt_sec{0.0} sec"),
+                    ],
+                    formatters={
+                        "@TimeStamp": "datetime",
+                        "@PrevTimeStamp": "datetime",
+                    },
+                )
+            )
+
+        legend = Legend(
+            items=legend_items,
+            location="top_left",
+            click_policy="hide",
+        )
+        p.add_layout(legend, "right")
+
+        color_bar = ColorBar(
+            color_mapper=mapper,
+            ticker=BasicTicker(),
+            formatter=NumeralTickFormatter(format="0.00"),
+            title="Avg speed, knots",
+            location=(0, 0),
+        )
+        p.add_layout(color_bar, "right")
+
+        min_time = int(df["TimeMS"].min())
+        max_time = int(df["TimeMS"].max())
+
+        line_options = sorted(df["LineStr"].unique().tolist(), key=lambda x: int(x))
+
+        line_filter = MultiChoice(
+            title="Line filter",
+            value=[],
+            options=line_options,
+            width=360,
+        )
+
+        date_filter = DateRangeSlider(
+            title="Date range",
+            start=min_time,
+            end=max_time,
+            value=(min_time, max_time),
+            step=60 * 1000,
+            width=460,
+        )
+
+        time_slider = Slider(
+            title="Playback time",
+            start=min_time,
+            end=max_time,
+            value=max_time,
+            step=60 * 1000,
+            width=460,
+        )
+
+        play_btn = Button(label="▶ Play", width=100, button_type="success")
+
+        sp_arrow = Spinner(
+            title="Arrow size",
+            low=4,
+            high=40,
+            step=1,
+            value=arrow_size,
+            width=130,
+        )
+
+        sp_line = Spinner(
+            title="Segment width",
+            low=1,
+            high=15,
+            step=1,
+            value=segment_width,
+            width=140,
+        )
+
+        filter_code = """
+            const selectedLines = new Set(line_filter.value);
+            const dateStart = date_filter.value[0];
+            const dateEnd = date_filter.value[1];
+            const playTime = time_slider.value;
+
+            for (const pair of targets) {
+                const full = pair[0].data;
+                const filtSource = pair[1];
+
+                const out = {};
+                for (const k in full) {
+                    out[k] = [];
+                }
+
+                const n = full["TimeMS"].length;
+
+                for (let i = 0; i < n; i++) {
+                    const lineOk = selectedLines.size === 0 || selectedLines.has(String(full["LineStr"][i]));
+                    const t = full["TimeMS"][i];
+                    const timeOk = t >= dateStart && t <= dateEnd && t <= playTime;
+
+                    if (lineOk && timeOk) {
+                        for (const k in full) {
+                            out[k].push(full[k][i]);
+                        }
+                    }
+                }
+
+                filtSource.data = out;
+                filtSource.change.emit();
+            }
+        """
+
+        filter_cb = CustomJS(
+            args=dict(
+                targets=filter_targets,
+                line_filter=line_filter,
+                date_filter=date_filter,
+                time_slider=time_slider,
+            ),
+            code=filter_code,
+        )
+
+        line_filter.js_on_change("value", filter_cb)
+        date_filter.js_on_change("value", filter_cb)
+        time_slider.js_on_change("value", filter_cb)
+
+        play_btn.js_on_click(
+            CustomJS(
+                args=dict(
+                    btn=play_btn,
+                    time_slider=time_slider,
+                    date_filter=date_filter,
+                ),
+                code="""
+                    if (window._dsr_deploy_play_timer) {
+                        clearInterval(window._dsr_deploy_play_timer);
+                        window._dsr_deploy_play_timer = null;
+                        btn.label = "▶ Play";
+                        btn.button_type = "success";
+                        return;
+                    }
+
+                    btn.label = "⏸ Pause";
+                    btn.button_type = "warning";
+
+                    const step = time_slider.step || 60000;
+
+                    window._dsr_deploy_play_timer = setInterval(function() {
+                        let v = time_slider.value + step * 10;
+
+                        const start = date_filter.value[0];
+                        const end = date_filter.value[1];
+
+                        if (v > end) {
+                            v = start;
+                        }
+
+                        time_slider.value = v;
+                        time_slider.change.emit();
+                    }, 250);
+                """,
+            )
+        )
+
+        sp_arrow.js_on_change(
+            "value",
+            CustomJS(
+                args=dict(renderers=all_arrow_renderers),
+                code="""
+                    for (const r of renderers) {
+                        r.glyph.size = cb_obj.value;
+                    }
+                """,
+            ),
+        )
+
+        sp_line.js_on_change(
+            "value",
+            CustomJS(
+                args=dict(renderers=all_segment_renderers),
+                code="""
+                    for (const r of renderers) {
+                        r.glyph.line_width = cb_obj.value;
+                    }
+                """,
+            ),
+        )
+
+        controls = column(
+            row(line_filter, date_filter, sizing_mode="stretch_width"),
+            row(play_btn, time_slider, sp_arrow, sp_line, sizing_mode="stretch_width"),
+            sizing_mode="stretch_width",
+        )
+
+        layout = column(controls, p, sizing_mode="stretch_both")
+
+        if save_path:
+            output_file(save_path, title=title)
+            save(layout)
+
+        if is_show:
+            show(layout)
+            return None
+
+        if jason_item:
+            return json_item(layout)
+
+        return layout

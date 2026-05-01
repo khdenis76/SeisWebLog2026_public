@@ -12,17 +12,21 @@ from typing import Any
 
 import pandas as pd
 from bokeh.core.property.vectorization import value
-from bokeh.embed import json_item
+from bokeh.embed import json_item, components, file_html
 from bokeh.io import show
 from bokeh.layouts import column, row
-from bokeh.models import ColumnDataSource, HoverTool, Button, CustomJS, Div, Slider, FactorRange, LegendItem, Legend
+from bokeh.models import ColumnDataSource, HoverTool, Button, CustomJS, Div, Slider, FactorRange, LegendItem, Legend, \
+    CDSView, GroupFilter, Span
 from bokeh.palettes import Category10, Category20, Turbo256
 from bokeh.plotting import figure
 from bokeh.models import CheckboxGroup, TextInput, CheckboxGroup
+from bokeh.io import show
 import sqlite3
 import geopandas as gpd
 from bokeh.models.tiles import WMTSTileSource
+from bokeh.resources import CDN
 from bokeh.transform import factor_cmap
+from django.template.loader import render_to_string
 from pyproj import Transformer
 import plotly.express as px
 import plotly.graph_objects as go
@@ -2050,3 +2054,246 @@ class SourceMapGraphics:
 
         except Exception as e:
             raise RuntimeError(f"Failed to build SPSolution vs SPPreplot plot for Line {line}: {e}") from e
+
+    def graph_sps_depths_stacked(
+            self,
+            sail_line=None,
+            nominal_gun_depth=None,
+            gun_depth_tolerance=None,
+            json_return=False,
+            save_to_file=False,
+            save_path=None,
+            is_show=False,
+    ):
+        colors = Category20[20]
+
+        where = ""
+        params = []
+
+        if sail_line not in (None, "", "ALL"):
+            where = "WHERE Line = ?"
+            params.append(str(sail_line))
+
+        sql = f"""
+            SELECT
+                SailLine,
+                Point,
+                PointCode,
+                FireCode,
+                ArrayCode,
+                PointDepth,
+                WaterDepth,
+                Elevation
+            FROM SPSolution
+            {where}
+            ORDER BY Point
+        """
+
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.execute("PRAGMA busy_timeout = 120000;")
+                df = pd.read_sql(sql, conn, params=params)
+        except Exception as e:
+            return {"error": f"SPS depth plot failed: {e}"}
+
+        if df.empty:
+            return {"error": f"No SPS data for SailLine: {sail_line}"}
+
+        df["Point"] = pd.to_numeric(df["Point"], errors="coerce")
+        df["PointDepth"] = pd.to_numeric(df["PointDepth"], errors="coerce")
+        df["WaterDepth"] = pd.to_numeric(df["WaterDepth"], errors="coerce")
+        df = df.dropna(subset=["Point"])
+
+        df["PointCode"] = df["PointCode"].fillna("Unknown").astype(str)
+        df["FireCode"] = df["FireCode"].fillna("").astype(str)
+        df["ArrayCode"] = df["ArrayCode"].fillna("").astype(str)
+
+        point_codes = sorted(df["PointCode"].unique())
+        color_map = {code: colors[i % len(colors)] for i, code in enumerate(point_codes)}
+        df["color"] = df["PointCode"].map(color_map)
+
+        df["base_size"] = 5
+        df["size"] = df["base_size"]
+
+        source = ColumnDataSource(df)
+
+        title_line = sail_line if sail_line not in (None, "", "ALL") else "ALL"
+
+        p1 = figure(
+            height=300,
+            width_policy="max",
+            title=f"Gun Depth - {title_line}",
+            x_axis_label="Point",
+            y_axis_label="Gun Depth",
+            tools="pan,wheel_zoom,box_zoom,reset,save",
+        )
+
+        for code in point_codes:
+            view = CDSView(filter=GroupFilter(column_name="PointCode", group=code))
+
+            r = p1.scatter(
+                "Point",
+                "PointDepth",
+                source=source,
+                color="color",
+                size="size",
+                legend_label=str(code),
+                view=view,
+            )
+
+            p1.add_tools(HoverTool(
+                renderers=[r],
+                tooltips=[
+                    ("SailLine", "@SailLine"),
+                    ("Point", "@Point"),
+                    ("Point Code", "@PointCode"),
+                    ("Fire Code", "@FireCode"),
+                    ("Array Code", "@ArrayCode"),
+                    ("Gun Depth", "@PointDepth{0.0}"),
+                ],
+            ))
+
+        if nominal_gun_depth is not None:
+            nominal_gun_depth = float(nominal_gun_depth)
+
+            p1.add_layout(Span(
+                location=nominal_gun_depth,
+                dimension="width",
+                line_dash="dashed",
+                line_width=2,
+                line_color="green",
+            ))
+
+            if gun_depth_tolerance is not None:
+                gun_depth_tolerance = float(gun_depth_tolerance)
+
+                p1.add_layout(Span(
+                    location=nominal_gun_depth + gun_depth_tolerance,
+                    dimension="width",
+                    line_dash="dashed",
+                    line_width=2,
+                    line_color="red",
+                ))
+
+                p1.add_layout(Span(
+                    location=nominal_gun_depth - gun_depth_tolerance,
+                    dimension="width",
+                    line_dash="dashed",
+                    line_width=2,
+                    line_color="red",
+                ))
+
+        p1.legend.click_policy = "hide"
+        p1.toolbar.logo = None
+
+        p2 = figure(
+            height=300,
+            width_policy="max",
+            x_range=p1.x_range,
+            title=f"Water Depth - {title_line}",
+            x_axis_label="Point",
+            y_axis_label="Water Depth",
+            tools="pan,wheel_zoom,box_zoom,reset,save",
+        )
+
+        water_line = p2.line(
+            "Point",
+            "WaterDepth",
+            source=source,
+            line_width=2,
+            legend_label="Water Depth",
+        )
+
+        p2.add_tools(HoverTool(
+            renderers=[water_line],
+            tooltips=[
+                ("SailLine", "@SailLine"),
+                ("Point", "@Point"),
+                ("Water Depth", "@WaterDepth{0.0}"),
+                ("Point Code", "@PointCode"),
+            ],
+        ))
+
+        for code in point_codes:
+            view = CDSView(filter=GroupFilter(column_name="PointCode", group=code))
+
+            r = p2.scatter(
+                "Point",
+                "WaterDepth",
+                source=source,
+                color="color",
+                size="size",
+                legend_label=str(code),
+                view=view,
+            )
+
+            p2.add_tools(HoverTool(
+                renderers=[r],
+                tooltips=[
+                    ("SailLine", "@SailLine"),
+                    ("Point", "@Point"),
+                    ("Code", "@PointCode"),
+                    ("Water Depth", "@WaterDepth{0.0}"),
+                ],
+            ))
+
+        p2.legend.click_policy = "hide"
+        p2.toolbar.logo = None
+
+        radius_slider = Slider(
+            title="Point Size",
+            start=1,
+            end=20,
+            step=1,
+            value=1,
+            sizing_mode="stretch_width",
+        )
+
+        radius_slider.js_on_change(
+            "value",
+            CustomJS(
+                args=dict(source=source, radius_slider=radius_slider),
+                code="""
+                    const scale = radius_slider.value;
+                    const data = source.data;
+                    const base = data["base_size"];
+                    const size = data["size"];
+
+                    for (let i = 0; i < base.length; i++) {
+                        size[i] = base[i] * scale;
+                    }
+
+                    source.change.emit();
+                """,
+            ),
+        )
+
+        layout = column([radius_slider, p1, p2], sizing_mode="stretch_both")
+
+        if is_show:
+            #output_file("sps_depths_stacked_preview.html", title=f"SPS Depth Plot {title_line}")
+            show(layout)
+            return None
+
+        if json_return:
+            return json_item(layout)
+
+        if save_to_file:
+            html = file_html(layout, CDN, f"SPS Depth Plot {title_line}")
+
+            if save_path:
+                save_path = Path(save_path)
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                save_path.write_text(html, encoding="utf-8")
+
+            return html
+
+        script, div = components(layout)
+
+        return render_to_string(
+            "sourcepage/bokeh_plot.html",
+            {
+                "bokeh_script": script,
+                "bokeh_div": div,
+            },
+        )

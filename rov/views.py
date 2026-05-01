@@ -49,6 +49,7 @@ def rov_main_view(request):
     pdb=ProjectDB(project.db_path)
 
     dsrdb.ensure_dsr_line_summary_ready()
+    dsrdb.ensure_recover_daily_view_schema()
     dsr_map_plot = DSRMapPlots(project.db_path,default_epsg=dsrdb.pdb.get_main().epsg,use_tiles=True)
     plotly_template="plotly_dark" if pdb.get_main().color_scheme == "dark" else "plotly_white"
     rp_data = dsr_map_plot.read_rp_preplot()
@@ -162,6 +163,100 @@ def rov_main_view(request):
                    "recovery_pie":recovery_pie,
                    "bbox_vessel_options": bbox_vessel_options,
                    })
+@require_GET
+@login_required
+@log_action("refresh_progress_map", object_type="ROV")
+def rov_progress_map_item(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    try:
+        dsrdb = DSRDB(project.db_path)
+
+        dsr_map_plot = DSRMapPlots(
+            project.db_path,
+            default_epsg=dsrdb.pdb.get_main().epsg,
+            use_tiles=True,
+        )
+
+        rp_data = dsr_map_plot.read_rp_preplot()
+        dsr_data = dsr_map_plot.read_dsr()
+        rec_db_data = dsr_map_plot.read_recdb()
+
+        layers = [
+            dict(
+                name="Deployment",
+                df="dsr",
+                x_col="PrimaryEasting",
+                y_col="PrimaryNorthing",
+                marker="circle",
+                size=6,
+                alpha=0.9,
+                color="blue",
+                where="ROV.notna() and ROV1 != ''",
+            ),
+            dict(
+                name="SM (Deployment)",
+                df="sm",
+                x_col="PrimaryEasting1",
+                y_col="PrimaryNorthing1",
+                marker="circle",
+                size=6,
+                alpha=0.9,
+                color="lightblue",
+            ),
+            dict(
+                name="Recovered Nodes",
+                df="dsr",
+                x_col="PrimaryEasting1",
+                y_col="PrimaryNorthing1",
+                marker="circle",
+                size=6,
+                alpha=0.9,
+                color="orange",
+                where="ROV1.notna() and ROV1 != ''",
+            ),
+            dict(
+                name="Processed Nodes",
+                df="rec",
+                x_col="REC_X",
+                y_col="REC_Y",
+                marker="circle",
+                size=6,
+                alpha=0.9,
+                color="red",
+                where=None,
+            ),
+        ]
+
+        progress_map = dsr_map_plot.make_map_multi_layers(
+            rp_df=rp_data,
+            dsr_df=dsr_data,
+            rec_db_df=rec_db_data,
+            title="PROJECT PROGRESS MAP",
+            layers=layers,
+            show_preplot=True,
+            show_shapes=True,
+            show_sm=True,
+            show_tiles=True,
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "item": json_item(progress_map, target="rov-progress-map-target"),
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            "ok": False,
+            "error": str(e),
+        }, status=500)
 @require_POST
 @login_required
 @log_action("upload_dsr", object_type="DSR")
@@ -533,7 +628,6 @@ def rov_upload_rec_db(request):
         if changed_lines:
             refreshed_count = dsrdb.refresh_dsr_line_summary_lines(lines=sorted(changed_lines))
         else:
-            # fallback because old load_fb_from_file does not return changed_lines
             dsrdb.ensure_dsr_line_summary_ready()
             refreshed_count = 0
     except Exception as e:
@@ -543,7 +637,7 @@ def rov_upload_rec_db(request):
             "results": results,
         }, status=500)
 
-    dsr_lines_body = dsrdb.render_dsr_line_summary_body(request=request)
+    dsr_lines_body = dsrdb.render_dsr_line_summary_body()
     dsr_statistics_table = dsrdb.get_dsr_html_stat()
 
     return JsonResponse({
@@ -559,7 +653,7 @@ def rov_upload_rec_db(request):
         "upserts_attempted_total": total_upserts,
         "refreshed_lines": sorted(changed_lines),
         "dsr_lines_body": dsr_lines_body,
-        "dsr_line_body_html": dsr_lines_body,  # keep old JS compatibility
+        "dsr_line_body_html": dsr_lines_body,
         "dsr_statistics_table": dsr_statistics_table,
     })
 
@@ -1637,7 +1731,7 @@ def dsr_line_qc_plot_item(request):
                 bbox_df = ldb.get_blackbox_for_line(
                     line=line,
                     config_id=config_id,
-                    each_point=10
+                    each_point=1
                 )
 
                 layout = g.plot_line_map(
@@ -1664,7 +1758,7 @@ def dsr_line_qc_plot_item(request):
                                                        title1="Δ Easting Primary(DEP) to Primary(REC)",
                                                        title2="Δ Northing Primary(DEP) to Primary(REC)",
                                                        title3="Δ Range Dep -> Rec",
-                                                       y1_label="σE", y2_label="σN", y3_label="σZ ",
+                                                       y1_label="σE", y2_label="σN", y3_label="Rad offset ",
                                                        y_axis_label="Offset,m",
                                                        p1_line1_col="dX_primary", p1_line2_col="dX_primary1",
                                                        p2_line1_col="dY_primary", p2_line2_col="dY_primary1",
@@ -1860,3 +1954,153 @@ def bbox_file_filter(request):
             "ok": False,
             "error": str(e),
         }, status=500)
+@require_GET
+@login_required
+@log_action("load_recdb_preplot_histograms", object_type="REC_DB")
+def load_recdb_preplot_histograms(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied
+
+    try:
+        bins = int(request.GET.get("bins", 60))
+    except Exception:
+        bins = 60
+
+    max_offset = request.GET.get("max_offset")
+    try:
+        max_offset = float(max_offset) if max_offset not in (None, "", "none") else None
+    except Exception:
+        max_offset = None
+
+    g = DSRLineGraphics(project.db_path)
+
+    item = g.bokeh_recdb_histograms_all(
+        bins=bins,
+        max_offset=max_offset,
+        qc_limits={
+            "Inline": [-2, 2],
+            "Xline": [-2, 2],
+            "RangeToPreplot": [2, 5],
+        },
+        json_return=True,
+    )
+
+    return JsonResponse({"ok": True, "item": item}, safe=False)
+
+
+@require_GET
+@login_required
+@log_action("load_recdb_primary_histograms", object_type="REC_DB")
+def load_recdb_primary_histograms(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied
+
+    try:
+        bins = int(request.GET.get("bins", 60))
+    except Exception:
+        bins = 60
+
+    max_offset = request.GET.get("max_offset")
+    try:
+        max_offset = float(max_offset) if max_offset not in (None, "", "none") else None
+    except Exception:
+        max_offset = None
+
+    g = DSRLineGraphics(project.db_path)
+
+    item = g.bokeh_recdb_primary_histograms_all(
+        bins=bins,
+        max_offset=max_offset,
+        qc_limits={
+            "dx": [-2, 2],
+            "dy": [-2, 2],
+            "RangeToPrimary": [2, 5],
+        },
+        json_return=True,
+    )
+
+    return JsonResponse({"ok": True, "item": item}, safe=False)
+@require_GET
+@login_required
+@log_action("rov_dsr_rov_map_json", object_type="ROV_MAP")
+def rov_dsr_rov_map_json(request, mode):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    dsrdb = DSRDB(project.db_path)
+    epsg = dsrdb.pdb.get_main().epsg
+
+    dsr_map_plot = DSRMapPlots(
+        project.db_path,
+        default_epsg=epsg,
+        use_tiles=True,
+    )
+
+    line = request.GET.get("line")
+    lines = [int(line)] if line and str(line).isdigit() else None
+
+    try:
+        layout = dsr_map_plot.make_dsr_rov_status_map(
+            lines=lines,
+            mode=mode,
+            show_preplot=True,
+            show_shapes=True,
+            show_layers=True,
+            is_show=False,
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "item": json_item(layout, target=f"dsr-{mode}-rov-map"),
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            "ok": False,
+            "error": str(e),
+        }, status=500)
+
+@login_required
+@log_action("rov_dsr_speed_heading_map_json", object_type="DSR_MAP")
+def rov_dsr_speed_heading_map_json(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    line = request.GET.get("line")
+    line = int(line) if line else None
+
+    dsr_plot = DSRMapPlots(
+        project.db_path,
+        default_epsg=32615,
+        use_tiles=True,
+    )
+
+    item = dsr_plot.make_dsr_deploy_speed_heading_map(
+        line=line,          # None = whole database
+        solution_fk=1,
+        jason_item=True,
+        is_show=False,
+    )
+
+    return JsonResponse(item, safe=False)

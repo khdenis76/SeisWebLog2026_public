@@ -269,3 +269,108 @@ def _safe_float(v: Any):
         return float(str(v).strip())
     except Exception:
         return None
+
+
+
+def delete_results_by_paths(db_path: str, image_paths: Iterable[str]) -> int:
+    ensure_schema(db_path)
+    paths = [p for p in image_paths if p]
+    if not paths:
+        return 0
+    conn = _connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.executemany(f"DELETE FROM {TABLE_NAME} WHERE image_path=?", [(p,) for p in paths])
+        conn.commit()
+        return cur.rowcount if cur.rowcount is not None else len(paths)
+    finally:
+        conn.close()
+
+
+def delete_results_by_station_keys(db_path: str, keys: Iterable[tuple[str, str]]) -> int:
+    ensure_schema(db_path)
+    pairs = [(str(a), str(b)) for a, b in keys if str(a) or str(b)]
+    if not pairs:
+        return 0
+    conn = _connect(db_path)
+    try:
+        cur = conn.cursor()
+        total = 0
+        for line, station in pairs:
+            cur.execute(
+                f"""
+                DELETE FROM {TABLE_NAME}
+                WHERE COALESCE(NULLIF(file_line,''), line, dsr_line, '')=?
+                  AND COALESCE(NULLIF(file_station,''), station, dsr_station, '')=?
+                """,
+                (line, station),
+            )
+            total += cur.rowcount if cur.rowcount is not None else 0
+        conn.commit()
+        return total
+    finally:
+        conn.close()
+
+
+def delete_results_by_rov(db_path: str, rov: str, include_rov1: bool = True) -> int:
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    try:
+        cur = conn.cursor()
+        if include_rov1:
+            cur.execute(f"DELETE FROM {TABLE_NAME} WHERE dsr_rov=? OR dsr_rov1=? OR rov=?", (rov, rov, rov))
+        else:
+            cur.execute(f"DELETE FROM {TABLE_NAME} WHERE dsr_rov=? OR rov=?", (rov, rov))
+        conn.commit()
+        return cur.rowcount if cur.rowcount is not None else 0
+    finally:
+        conn.close()
+
+
+def reset_checked_for_paths(db_path: str, image_paths: Iterable[str], checked: bool = False) -> int:
+    ensure_schema(db_path)
+    paths = [p for p in image_paths if p]
+    if not paths:
+        return 0
+    conn = _connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.executemany(
+            f"UPDATE {TABLE_NAME} SET checked=?, processed_at=CURRENT_TIMESTAMP WHERE image_path=?",
+            [(1 if checked else 0, p) for p in paths],
+        )
+        conn.commit()
+        return cur.rowcount if cur.rowcount is not None else len(paths)
+    finally:
+        conn.close()
+
+
+def distinct_ocr_values(db_path: str, column: str) -> list[str]:
+    ensure_schema(db_path)
+    allowed = {"dsr_rov", "dsr_rov1", "rov", "status", "station_status", "file_line", "file_station"}
+    if column not in allowed:
+        return []
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            f"SELECT DISTINCT {column} AS v FROM {TABLE_NAME} WHERE TRIM(COALESCE({column},'')) <> '' ORDER BY {column}"
+        ).fetchall()
+        return [str(r["v"]) for r in rows]
+    finally:
+        conn.close()
+
+
+def fetch_unchecked_image_paths(db_path: str) -> List[str]:
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            f"SELECT image_path FROM {TABLE_NAME} WHERE COALESCE(checked, 0) = 0 AND COALESCE(image_path, '') <> '' ORDER BY file_line, file_station, image_path"
+        ).fetchall()
+        return [str(r["image_path"]) for r in rows if r["image_path"]]
+    finally:
+        conn.close()
+
+
+def fetch_unchecked_existing_image_paths(db_path: str) -> List[str]:
+    return [p for p in fetch_unchecked_image_paths(db_path) if Path(p).exists()]

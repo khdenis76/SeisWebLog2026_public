@@ -2,6 +2,7 @@
 from django.urls import path
 from rov.eol.views import eol_generate_reports
 from .views import *
+from .views import rov_progress_map_item
 urlpatterns = [
     path("", rov_main_view, name="rov_main_view"),
     path("load/drs", rov_upload_dsr,name="rov_upload_dsr"),
@@ -36,6 +37,9 @@ urlpatterns = [
     path("bbox/recalc_all/",recalc_all_bbox_file_stats,name="recalc_all_bbox_file_stats"),
     path("bbox/filter/", bbox_file_filter, name="bbox_file_filter"),
     path("eol/generate/", eol_generate_reports, name="eol_generate_reports"),
-
-
+    path("progress-map/item/", rov_progress_map_item, name="rov_progress_map_item"),
+    path("recdb/preplot/histograms/",load_recdb_preplot_histograms,name="load_recdb_preplot_histograms",),
+    path("recdb/primary/histograms/",load_recdb_primary_histograms,name="load_recdb_primary_histograms",),
+    path("api/map/dsr-rov/<str:mode>/", rov_dsr_rov_map_json, name="rov_dsr_rov_map_json"),
+    path("api/dsr-speed-heading-map/",rov_dsr_speed_heading_map_json,name="rov_dsr_speed_heading_map_json",),
 ]

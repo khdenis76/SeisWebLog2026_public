@@ -572,6 +572,7 @@ def source_sps_table_data(request):
 def source_sp_solution_vs_preplot_json(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+
     if not project:
         return JsonResponse({"ok": False, "error": "No active project."}, status=400)
 
@@ -601,9 +602,19 @@ def source_sp_solution_vs_preplot_json(request):
         point_size = 7
 
     try:
+        pdb = ProjectDB(project.db_path)
+        gun_qc = pdb.get_gun_qc()
+
+        nominal_gun_depth = None
+        gun_depth_tolerance = None
+
+        if gun_qc:
+            nominal_gun_depth = getattr(gun_qc, "depth", None)
+            gun_depth_tolerance = getattr(gun_qc, "depth_tolerance", None)
+
         sm = SourceMapGraphics(project.db_path)
 
-        item = sm.build_sp_solution_vs_preplot(
+        map_item = sm.build_sp_solution_vs_preplot(
             line=line,
             is_show=False,
             json_return=True,
@@ -611,10 +622,29 @@ def source_sp_solution_vs_preplot_json(request):
             point_size=point_size,
         )
 
+        depth_result = sm.graph_sps_depths_stacked(
+            sail_line=line,
+            nominal_gun_depth=nominal_gun_depth,
+            gun_depth_tolerance=gun_depth_tolerance,
+            is_show=False,
+            json_return=True,
+            save_to_file=False,
+        )
+
+        depth_item = None
+        depth_error = None
+
+        if isinstance(depth_result, dict) and depth_result.get("error"):
+            depth_error = depth_result["error"]
+        else:
+            depth_item = depth_result
+
         return JsonResponse({
             "ok": True,
             "line": line,
-            "item": item,
+            "item": map_item,
+            "depth_item": depth_item,
+            "depth_error": depth_error,
         })
 
     except Exception as e:

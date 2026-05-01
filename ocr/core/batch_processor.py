@@ -8,7 +8,7 @@ import shutil
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 from PySide6.QtCore import QObject, Signal, Slot
 
@@ -32,6 +32,8 @@ class BatchSettings:
     config_path: str
     include_subfolders: bool
     masks: List[str]
+    explicit_files: Optional[List[str]] = None
+    force_recheck: bool = False
 
 
 class BatchWorker(QObject):
@@ -67,7 +69,9 @@ class BatchWorker(QObject):
         ensure_schema(self.settings.project_db_path)
         dsr = load_dsr(self.settings.project_db_path)
         rl_mask = self._load_rl_mask(self.settings.project_db_path)
-        files = scan_images(self.settings.folder, main_config.file_masks, main_config.include_subfolders)
+        files = list(self.settings.explicit_files or [])
+        if not files:
+            files = scan_images(self.settings.folder, main_config.file_masks, main_config.include_subfolders)
         ocr_main = OCREngine(use_easyocr_first=main_config.use_easyocr_first)
         ocr_alt = OCREngine(use_easyocr_first=alt_config.use_easyocr_first)
         skip_checked = bool(bundle.get("skip_checked", True))
@@ -80,7 +84,7 @@ class BatchWorker(QObject):
             if self._cancel:
                 break
             self.progress.emit(i, total, os.path.basename(path))
-            if skip_checked and is_checked(self.settings.project_db_path, path):
+            if skip_checked and (not self.settings.force_recheck) and is_checked(self.settings.project_db_path, path):
                 continue
             row = self._process_one(path, bundle, main_config, alt_config, dsr, rl_mask, ocr_main, ocr_alt)
             rows.append(row)

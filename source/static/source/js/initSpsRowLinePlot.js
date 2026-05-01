@@ -1,119 +1,121 @@
 export function initSpsRowLinePlot() {
-  const plotEl = document.getElementById("source-line-map-plot");
-  if (!plotEl) return;
+    const plotEl = document.getElementById("source-line-map-plot");
+    const depthEl = document.getElementById("gun-depth-plot");
 
-  const url = plotEl.dataset.url;
-  if (!url) {
-    console.error("source-line-map-plot is missing data-url");
-    return;
-  }
+    if (!plotEl) return;
 
-  let currentLine = null;
-  let currentRequestId = 0;
-
-  function setPlotMessage(html) {
-    plotEl.innerHTML = `
-      <div class="d-flex align-items-center justify-content-center h-100 text-muted small">
-        ${html}
-      </div>
-    `;
-  }
-
-  function clearSelectedRows() {
-    document.querySelectorAll("tr.sps-row-active").forEach(tr => {
-      tr.classList.remove("sps-row-active");
-    });
-  }
-
-  function markRowSelected(tr) {
-    clearSelectedRows();
-    tr.classList.add("sps-row-active");
-  }
-
-  function shouldIgnoreClick(event) {
-    return !!event.target.closest(
-      "input, button, a, label, select, textarea, option"
-    );
-  }
-
-  async function loadLinePlot(line, rowEl, forceReload = false) {
-    line = parseInt(line, 10);
-    if (!Number.isFinite(line) || line <= 0) {
-      setPlotMessage("Invalid line");
-      return;
+    const url = plotEl.dataset.url;
+    if (!url) {
+        console.error("source-line-map-plot is missing data-url");
+        return;
     }
 
-    if (!forceReload && currentLine === line) {
-      markRowSelected(rowEl);
-      return;
+    let currentLine = null;
+    let currentRequestId = 0;
+
+    function setPlotMessage(html) {
+        plotEl.innerHTML = `${html}`;
     }
 
-    currentLine = line;
-    currentRequestId += 1;
-    const requestId = currentRequestId;
+    function setDepthMessage(html) {
+        if (depthEl) depthEl.innerHTML = `${html}`;
+    }
 
-    markRowSelected(rowEl);
-    setPlotMessage(`
-      <div class="text-center">
-        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-        Loading line ${line}...
-      </div>
-    `);
+    function clearSelectedRows() {
+        document.querySelectorAll("tr.sps-row-active").forEach(tr => {
+            tr.classList.remove("sps-row-active");
+        });
+    }
 
-    try {
-      const qs = new URLSearchParams({
-        line: String(line)
-      });
+    function markRowSelected(tr) {
+        clearSelectedRows();
+        tr.classList.add("sps-row-active");
+    }
 
-      const resp = await fetch(`${url}?${qs.toString()}`, {
-        method: "GET",
-        headers: {
-          "X-Requested-With": "XMLHttpRequest"
+    function shouldIgnoreClick(event) {
+        return !!event.target.closest(
+            "input, button, a, label, select, textarea, option"
+        );
+    }
+
+    async function loadLinePlot(line, rowEl, forceReload = false) {
+        line = parseInt(line, 10);
+
+        if (!Number.isFinite(line) || line <= 0) {
+            setPlotMessage("Invalid line");
+            setDepthMessage("Invalid line");
+            return;
         }
-      });
 
-      const data = await resp.json();
+        if (!forceReload && currentLine === line) {
+            markRowSelected(rowEl);
+            return;
+        }
 
-      if (requestId !== currentRequestId) return;
+        currentLine = line;
+        currentRequestId += 1;
+        const requestId = currentRequestId;
 
-      if (!resp.ok || !data.ok) {
-        throw new Error(data.error || `HTTP ${resp.status}`);
-      }
+        markRowSelected(rowEl);
 
-      if (!window.Bokeh || !window.Bokeh.embed || !window.Bokeh.embed.embed_item) {
-        throw new Error("Bokeh JS is not loaded");
-      }
+        setPlotMessage(`Loading line ${line} map...`);
+        setDepthMessage(`Loading line ${line} depths...`);
 
-      plotEl.innerHTML = "";
-      window.Bokeh.embed.embed_item(data.item, plotEl);
+        try {
+            const qs = new URLSearchParams({ line: String(line) });
 
-    } catch (err) {
-      if (requestId !== currentRequestId) return;
+            const resp = await fetch(`${url}?${qs.toString()}`, {
+                method: "GET",
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            });
 
-      console.error("Failed to load line plot:", err);
-      setPlotMessage(`
-        <div class="text-danger text-center px-3">
-          Failed to load plot<br>
-          <span class="small">${err.message || err}</span>
-        </div>
-      `);
+            const data = await resp.json();
+
+            if (requestId !== currentRequestId) return;
+
+            if (!resp.ok || !data.ok) {
+                throw new Error(data.error || `HTTP ${resp.status}`);
+            }
+
+            if (!window.Bokeh || !window.Bokeh.embed || !window.Bokeh.embed.embed_item) {
+                throw new Error("Bokeh JS is not loaded");
+            }
+
+            plotEl.innerHTML = "";
+            window.Bokeh.embed.embed_item(data.item, plotEl);
+
+            if (depthEl) {
+    depthEl.innerHTML = "";
+
+    if (data.depth_item) {
+        await window.Bokeh.embed.embed_item(data.depth_item, depthEl);
+    } else {
+        depthEl.innerHTML = `<div class="text-danger p-2">${data.depth_error || "No depth plot"}</div>`;
     }
-  }
+}
 
-  document.addEventListener("click", function (event) {
-    const tr = event.target.closest("tr[id^='sps-row-']");
-    if (!tr) return;
+        } catch (err) {
+            if (requestId !== currentRequestId) return;
 
-    if (shouldIgnoreClick(event)) return;
+            console.error("Failed to load line plot:", err);
 
-    const line = tr.dataset.line;
-    loadLinePlot(line, tr);
-  });
+            setPlotMessage(`Failed to load map: ${err.message || err}`);
+            setDepthMessage(`Failed to load depth plot: ${err.message || err}`);
+        }
+    }
 
-  // optional: expose reload helper
-  window.reloadCurrentSourceLinePlot = function () {
-    const activeRow = document.querySelector("tr.sps-row-active");
-    if (!activeRow) return;
-    loadLinePlot(activeRow.dataset.line, activeRow, true);
-  };
+    document.addEventListener("click", function (event) {
+        const tr = event.target.closest("tr[id^='sps-row-']");
+        if (!tr) return;
+        if (shouldIgnoreClick(event)) return;
+
+        const line = tr.dataset.line;
+        loadLinePlot(line, tr);
+    });
+
+    window.reloadCurrentSourceLinePlot = function () {
+        const activeRow = document.querySelector("tr.sps-row-active");
+        if (!activeRow) return;
+        loadLinePlot(activeRow.dataset.line, activeRow, true);
+    };
 }

@@ -30,6 +30,30 @@
         </button>
       </li>
       <li class="nav-item" role="presentation">
+          <button class="nav-link lazy-bokeh-map-tab"
+                  id="dsr-deployment-rov-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#dsr-deployment-rov-pane"
+                  data-map-url="{% url 'rov_dsr_rov_map_json' 'deployment' %}"
+                  data-map-target="dsr-deployment-rov-map"
+                  type="button"
+                  role="tab">
+              Deployment by ROV
+          </button>
+      </li>
+      <li class="nav-item" role="presentation">
+          <button class="nav-link lazy-bokeh-map-tab"
+                  id="dsr-recovery-rov-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#dsr-recovery-rov-pane"
+                  data-map-url="{% url 'rov_dsr_rov_map_json' 'recovery' %}"
+                  data-map-target="dsr-recovery-rov-map"
+                  type="button"
+                  role="tab">
+              Recovery by ROV
+          </button>
+      </li>
+      <li class="nav-item" role="presentation">
               <button class="nav-link pill-prod"
                       data-bs-toggle="pill"
                       data-bs-target="#prod-pie-tab"
@@ -38,6 +62,16 @@
                       aria-selected="false">
                 <i class="fa-solid fa-chart-pie me-1"></i> Deployment & Recovery
               </button>
+      </li>
+      <li class="nav-item" role="presentation">
+           <button class="nav-link pill-hist"
+                   id="dsr-speed-heading-tab"
+                   data-bs-toggle="tab"
+                   data-bs-target="#dsr-speed-heading-pane"
+                   type="button"
+                   role="tab">
+               DSR Speed / Heading
+           </button>
       </li>
       <li class="nav-item" role="presentation">
                <button class="nav-link pill-calendar"
@@ -69,14 +103,40 @@
           <i class="fa-solid fa-chart-column me-1"></i> MIN/MAX/AVG
         </button>
       </li>
+      <li class="nav-item" role="presentation">
+                <button class="nav-link pill-hist"
+                        id="recdb-preplot-tab"
+                        data-bs-toggle="tab"
+                        data-bs-target="#recdb-preplot-pane"
+                        type="button"
+                        role="tab">
+                    REC_DB vs Preplot
+                </button>
+      </li>
+      <li class="nav-item" role="presentation">
+          <button class="nav-link  pill-hist"
+                  id="recdb-primary-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#recdb-primary-pane"
+                  type="button"
+                  role="tab">
+              REC_DB vs DSR Primary
+          </button>
+      </li>
 </ul>
 
 <div class="tab-content mt-3">
        <div class="tab-pane fade show active" id="progress-map-tab" role="tabpanel">
-            {{ pp_map_script|safe }}
-                   <div class="w-100 bokeh-light-scope" style="height: 80vh" id="progress-map-container">
-                         {{ pp_map_div|safe }}
-                   </div>
+            <div    id="rov-progress-map-wrap" style="height: 80vh"  data-progress-map-url="{% url 'rov_progress_map_item' %}">
+                    <!-- Bokeh script stays OUTSIDE target -->
+                     {{ pp_map_script|safe }}
+                       <div class="w-100 bokeh-light-scope" style="height: 80vh" id="progress-map-container">
+                                 <div id="rov-progress-map-target" class="w-100 bokeh-light-scope" style="height: 80vh">
+                                     {{ pp_map_div|safe }}
+                                 </div>
+                       </div>
+
+            </div>
        </div>
        <div class="tab-pane fade" id="batterylife-map-tab" role="tabpanel">
       <div class="row">
@@ -222,4 +282,49 @@
 
              </div>
        </div>
+       <div class="tab-pane fade"
+                 id="recdb-preplot-pane"
+                 role="tabpanel"
+                 data-url="{% url 'load_recdb_preplot_histograms' %}">
+                <div id="recdb-preplot-hist-container"
+                     class="w-100"
+                     style="min-height: 650px;">
+                    <div class="text-muted small">Click REC_DB vs Preplot to load chart.</div>
+                </div>
+            </div>
+       <div class="tab-pane fade"
+            id="recdb-primary-pane"
+            role="tabpanel"
+            data-url="{% url 'load_recdb_primary_histograms' %}">
+           <div id="recdb-primary-hist-container"
+                class="w-100"
+                style="min-height: 650px;">
+               <div class="text-muted small">Click REC_DB vs DSR Primary to load chart.</div>
+           </div>
+       </div>
+       <div class="tab-pane fade" id="dsr-deployment-rov-pane" role="tabpanel">
+            <div class="text-muted small py-2">Map will load when tab opens...</div>
+             <div id="dsr-deployment-rov-map"
+                  class="w-100 bokeh-light-scope" style="height: 80vh;">
+
+             </div>
+       </div>
+      <div class="tab-pane fade" id="dsr-recovery-rov-pane" role="tabpanel">
+            <div class="text-muted small py-2">Map will load when tab opens...</div>
+            <div id="dsr-recovery-rov-map"
+                 class="w-100 bokeh-light-scope"
+                 style="height: 80vh;">
+            </div>
+      </div>
+      <div class="tab-pane fade" id="dsr-speed-heading-pane" role="tabpanel">
+            <div class="text-muted small py-2">
+                Map will load when tab opens...
+           </div>
+
+          <div id="dsr-speed-heading-map"
+               class="w-100 bokeh-light-scope"
+               style="height: 80vh;">
+          </div>
+
+      </div>
 </div>
