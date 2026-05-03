@@ -26,10 +26,12 @@
                  value="{{ r.PPLine_FK }}|{{ r.Seq }}|{{ r.Attempt }}">
         </td>
 
-        <td class="sps-sticky-1 w-sailline">{{ r.SailLine }}</td>
+        <td class="sps-sticky-1 w-sailline vessel_{{ r.Vessel_FK }}" title="{{ r.VesselName }}">{{ r.SailLine }}</td>
         <td class="sps-sticky-2 w-line">{{ r.Line }}</td>
-        <td class="sps-sticky-3 w-seq num seq-kind-{{ r.purpose_id }}"title ="{{ r.purpose }}">{{ r.Seq|stringformat:"04d" }}</td>
-
+        <td class="sps-sticky-3 w-seq num seq-kind-{{ r.purpose_id }} vessel_{{ r.Vessel_FK }} {% if r.SeqGapError %}text-danger{% endif %}"
+              title="{{ r.purpose }}{% if r.SeqGapError %} | Seq gap: previous {{ r.PrevSeq }}, current {{ r.Seq }}, gap {{ r.SeqGap }}{% endif %}">
+               {{ r.Seq|stringformat:"04d" }}
+        </td>
         <td class="num{% if r.Attempt == 1 %} text-primary
                       {% elif r.Attempt == "R" %} text-danger
                       {% elif r.Attempt == "T" %} text-warning {% endif %}

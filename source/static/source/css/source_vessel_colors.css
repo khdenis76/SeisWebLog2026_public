@@ -1,0 +1,22 @@
+/* Vessel colors based on Turbo256 */
+
+.vessel_1  { color: #30123b; }  /* deep purple */
+.vessel_2  { color: #4145ab; }
+.vessel_3  { color: #4675ed; }
+.vessel_4  { color: #39a2fc; }
+.vessel_5  { color: #1bcfd4; }
+.vessel_6  { color: #3ef48a; }
+.vessel_7  { color: #8ffb4a; }
+.vessel_8  { color: #d6e635; }
+.vessel_9  { color: #fca50a; }
+.vessel_10 { color: #e63900; }  /* red/orange */
+.vessel_bg_1  { background-color: #30123b; color: white; }
+.vessel_bg_2  { background-color: #4145ab; color: white; }
+.vessel_bg_3  { background-color: #4675ed; color: white; }
+.vessel_bg_4  { background-color: #39a2fc; color: black; }
+.vessel_bg_5  { background-color: #1bcfd4; color: black; }
+.vessel_bg_6  { background-color: #3ef48a; color: black; }
+.vessel_bg_7  { background-color: #8ffb4a; color: black; }
+.vessel_bg_8  { background-color: #d6e635; color: black; }
+.vessel_bg_9  { background-color: #fca50a; color: black; }
+.vessel_bg_10 { background-color: #e63900; color: white; }

@@ -14,7 +14,7 @@ import pandas as pd
 from bokeh.core.property.vectorization import value
 from bokeh.embed import json_item, components, file_html
 from bokeh.io import show
-from bokeh.layouts import column, row
+from bokeh.layouts import column, row, gridplot
 from bokeh.models import ColumnDataSource, HoverTool, Button, CustomJS, Div, Slider, FactorRange, LegendItem, Legend, \
     CDSView, GroupFilter, Span
 from bokeh.palettes import Category10, Category20, Turbo256
@@ -2097,12 +2097,15 @@ class SourceMapGraphics:
             return {"error": f"SPS depth plot failed: {e}"}
 
         if df.empty:
-            return {"error": f"No SPS data for SailLine: {sail_line}"}
+            return {"error": f"No SPS data for Line: {sail_line}"}
 
         df["Point"] = pd.to_numeric(df["Point"], errors="coerce")
         df["PointDepth"] = pd.to_numeric(df["PointDepth"], errors="coerce")
         df["WaterDepth"] = pd.to_numeric(df["WaterDepth"], errors="coerce")
         df = df.dropna(subset=["Point"])
+
+        if df.empty:
+            return {"error": f"No valid SPS depth data for Line: {sail_line}"}
 
         df["PointCode"] = df["PointCode"].fillna("Unknown").astype(str)
         df["FireCode"] = df["FireCode"].fillna("").astype(str)
@@ -2116,33 +2119,89 @@ class SourceMapGraphics:
         df["size"] = df["base_size"]
 
         source = ColumnDataSource(df)
-
         title_line = sail_line if sail_line not in (None, "", "ALL") else "ALL"
 
+        def _stats_text(series, decimals=1):
+            series = pd.to_numeric(series, errors="coerce").dropna()
+            if series.empty:
+                return "No stats"
+
+            return (
+                f"MIN: {series.min():.{decimals}f} | "
+                f"MAX: {series.max():.{decimals}f} | "
+                f"AVG: {series.mean():.{decimals}f} | "
+                f"STD: {series.std():.2f}"
+            )
+
+        gun_stats_text = _stats_text(df["PointDepth"])
+        water_stats_text = _stats_text(df["WaterDepth"])
+
+        if nominal_gun_depth is not None and gun_depth_tolerance is not None:
+            try:
+                nominal = float(nominal_gun_depth)
+                tol = abs(float(gun_depth_tolerance))
+
+                in_spec_mask = (
+                        (df["PointDepth"] >= nominal - tol) &
+                        (df["PointDepth"] <= nominal + tol)
+                )
+
+                in_spec_pct = in_spec_mask.mean() * 100.0
+                out_count = int((~in_spec_mask).sum())
+
+                gun_stats_text += f" | IN SPEC: {in_spec_pct:.1f}% | OUT: {out_count}"
+            except Exception:
+                pass
+
+        gun_renderers_by_code = {}
+        water_renderers_by_code = {}
+
+        # =========================
+        # TOP PLOT - GUN DEPTH
+        # =========================
         p1 = figure(
-            height=300,
-            width_policy="max",
-            title=f"Gun Depth - {title_line}",
+            sizing_mode="stretch_both",
+            min_height=300,
+            title=f"Gun Depth - Line {title_line}   ({gun_stats_text})",
             x_axis_label="Point",
             y_axis_label="Gun Depth",
             tools="pan,wheel_zoom,box_zoom,reset,save",
+            toolbar_location=None,
         )
+
+        if nominal_gun_depth is not None and gun_depth_tolerance is not None:
+            nominal = float(nominal_gun_depth)
+            tol_120 = abs(float(gun_depth_tolerance)) * 1.2
+
+            qc_min = nominal - tol_120
+            qc_max = nominal + tol_120
+
+            data_min = df["PointDepth"].min()
+            data_max = df["PointDepth"].max()
+
+            if pd.notna(data_min) and pd.notna(data_max):
+                p1.y_range.start = min(qc_min, data_min)
+                p1.y_range.end = max(qc_max, data_max)
+            else:
+                p1.y_range.start = qc_min
+                p1.y_range.end = qc_max
 
         for code in point_codes:
             view = CDSView(filter=GroupFilter(column_name="PointCode", group=code))
 
-            r = p1.scatter(
+            gun_renderer = p1.scatter(
                 "Point",
                 "PointDepth",
                 source=source,
                 color="color",
                 size="size",
-                legend_label=str(code),
                 view=view,
             )
 
+            gun_renderers_by_code[str(code)] = gun_renderer
+
             p1.add_tools(HoverTool(
-                renderers=[r],
+                renderers=[gun_renderer],
                 tooltips=[
                     ("SailLine", "@SailLine"),
                     ("Point", "@Point"),
@@ -2165,7 +2224,7 @@ class SourceMapGraphics:
             ))
 
             if gun_depth_tolerance is not None:
-                gun_depth_tolerance = float(gun_depth_tolerance)
+                gun_depth_tolerance = abs(float(gun_depth_tolerance))
 
                 p1.add_layout(Span(
                     location=nominal_gun_depth + gun_depth_tolerance,
@@ -2183,17 +2242,20 @@ class SourceMapGraphics:
                     line_color="red",
                 ))
 
-        p1.legend.click_policy = "hide"
         p1.toolbar.logo = None
 
+        # =========================
+        # BOTTOM PLOT - WATER DEPTH
+        # =========================
         p2 = figure(
-            height=300,
-            width_policy="max",
+            sizing_mode="stretch_both",
+            min_height=300,
             x_range=p1.x_range,
-            title=f"Water Depth - {title_line}",
+            title=f"Water Depth - Line {title_line}   ({water_stats_text})",
             x_axis_label="Point",
             y_axis_label="Water Depth",
             tools="pan,wheel_zoom,box_zoom,reset,save",
+            toolbar_location=None,
         )
 
         water_line = p2.line(
@@ -2201,7 +2263,6 @@ class SourceMapGraphics:
             "WaterDepth",
             source=source,
             line_width=2,
-            legend_label="Water Depth",
         )
 
         p2.add_tools(HoverTool(
@@ -2217,18 +2278,19 @@ class SourceMapGraphics:
         for code in point_codes:
             view = CDSView(filter=GroupFilter(column_name="PointCode", group=code))
 
-            r = p2.scatter(
+            water_renderer = p2.scatter(
                 "Point",
                 "WaterDepth",
                 source=source,
                 color="color",
                 size="size",
-                legend_label=str(code),
                 view=view,
             )
 
+            water_renderers_by_code[str(code)] = water_renderer
+
             p2.add_tools(HoverTool(
-                renderers=[r],
+                renderers=[water_renderer],
                 tooltips=[
                     ("SailLine", "@SailLine"),
                     ("Point", "@Point"),
@@ -2237,9 +2299,44 @@ class SourceMapGraphics:
                 ],
             ))
 
-        p2.legend.click_policy = "hide"
         p2.toolbar.logo = None
 
+        # =========================
+        # COMMON LEGEND
+        # =========================
+        legend_items = []
+
+        for code in point_codes:
+            code_str = str(code)
+            renderers = []
+
+            if code_str in gun_renderers_by_code:
+                renderers.append(gun_renderers_by_code[code_str])
+
+            if code_str in water_renderers_by_code:
+                renderers.append(water_renderers_by_code[code_str])
+
+            if renderers:
+                legend_items.append((code_str, renderers))
+
+        legend_items.append(("Water Depth Line", [water_line]))
+
+        common_legend = Legend(
+            items=legend_items,
+            orientation="horizontal",
+            location="center",
+            click_policy="hide",
+        )
+
+        common_legend.spacing = 8
+        common_legend.label_text_font_size = "9pt"
+        common_legend.visible = True
+
+        p1.add_layout(common_legend, "above")
+
+        # =========================
+        # CONTROLS
+        # =========================
         radius_slider = Slider(
             title="Point Size",
             start=1,
@@ -2247,6 +2344,7 @@ class SourceMapGraphics:
             step=1,
             value=1,
             sizing_mode="stretch_width",
+            width_policy="max",
         )
 
         radius_slider.js_on_change(
@@ -2268,10 +2366,40 @@ class SourceMapGraphics:
             ),
         )
 
-        layout = column([radius_slider, p1, p2], sizing_mode="stretch_both")
+        legend_button = Button(
+            label="Hide Legend",
+            button_type="default",
+            width=130,
+        )
+
+        legend_button.js_on_click(CustomJS(
+            args=dict(common_legend=common_legend, legend_button=legend_button),
+            code="""
+                common_legend.visible = !common_legend.visible;
+                legend_button.label = common_legend.visible ? "Hide Legend" : "Show Legend";
+            """,
+        ))
+
+        controls = row(
+            radius_slider,
+            legend_button,
+            sizing_mode="stretch_width",
+        )
+
+        plot_grid = gridplot(
+            [[p1], [p2]],
+            toolbar_location="right",
+            merge_tools=True,
+            sizing_mode="stretch_both",
+        )
+
+        layout = column(
+            controls,
+            plot_grid,
+            sizing_mode="stretch_both",
+        )
 
         if is_show:
-            #output_file("sps_depths_stacked_preview.html", title=f"SPS Depth Plot {title_line}")
             show(layout)
             return None
 

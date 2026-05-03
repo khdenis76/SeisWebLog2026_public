@@ -1396,23 +1396,20 @@ class SourceData:
             line_to: int | None = None,
             seq_from: int | None = None,
             seq_to: int | None = None,
-            wd: str = "",  # "", "Ok", "Error"
-            gd: str = "",  # "", "Ok", "Error"
+            wd: str = "",
+            gd: str = "",
             min_depth_limit: float | None = None,
             max_depth_limit: float | None = None,
             sort_by: str = "seq",
             sort_dir: str = "asc",
     ) -> list[dict]:
         conn = self._connect()
+
         try:
             cur = conn.cursor()
-
             where = []
             params = []
 
-            # -----------------------------
-            # text search
-            # -----------------------------
             search = (search or "").strip().lower()
             if search:
                 like = f"%{search}%"
@@ -1430,11 +1427,8 @@ class SourceData:
                         OR CAST(COALESCE(sl.KillCount, '') AS TEXT) LIKE ?
                     )
                 """)
-                params.extend([like, like, like, like, like, like, like, like, like, like])
+                params.extend([like] * 10)
 
-            # -----------------------------
-            # exact filters
-            # -----------------------------
             if vessel_fk is not None:
                 where.append("COALESCE(sl.Vessel_FK, 0) = ?")
                 params.append(int(vessel_fk))
@@ -1470,22 +1464,12 @@ class SourceData:
                 where.append("COALESCE(sl.Seq, 0) <= ?")
                 params.append(int(seq_to))
 
-            # -----------------------------
-            # WD status
-            # template logic:
-            # if MinProdWaterDepth > 0 => Ok else Error
-            # -----------------------------
             wd = (wd or "").strip()
             if wd == "Ok":
                 where.append("COALESCE(sl.MinProdWaterDepth, 0) > 0")
             elif wd == "Error":
                 where.append("COALESCE(sl.MinProdWaterDepth, 0) <= 0")
 
-            # -----------------------------
-            # GD status
-            # template logic:
-            # min_depth_limit <= MinProdGunDepth <= max_depth_limit => Ok
-            # -----------------------------
             gd = (gd or "").strip()
             if gd and min_depth_limit is not None and max_depth_limit is not None:
                 if gd == "Ok":
@@ -1500,9 +1484,6 @@ class SourceData:
                     """)
                     params.extend([float(min_depth_limit), float(max_depth_limit)])
 
-            # -----------------------------
-            # safe order by map
-            # -----------------------------
             sort_map = {
                 "id": "sl.ID",
                 "ppline": "sl.PPLine_FK",
@@ -1597,7 +1578,36 @@ class SourceData:
             """
 
             rows = cur.execute(sql, params).fetchall()
-            return [dict(r) for r in rows]
+            result = [dict(r) for r in rows]
+
+            # -------------------------------------------------
+            # Seq gap check
+            # Checks difference between this row Seq and previous row Seq.
+            # It follows current table sort order.
+            # -------------------------------------------------
+            prev_seq = None
+
+            for r in result:
+                try:
+                    seq = int(r.get("Seq"))
+                except (TypeError, ValueError):
+                    seq = None
+
+                r["SeqGapError"] = False
+                r["PrevSeq"] = prev_seq
+                r["SeqGap"] = None
+
+                if prev_seq is not None and seq is not None:
+                    gap = seq - prev_seq
+                    r["SeqGap"] = gap
+
+                    if abs(gap) > 1:
+                        r["SeqGapError"] = True
+
+                if seq is not None:
+                    prev_seq = seq
+
+            return result
 
         finally:
             print("[DB CLOSE]", self.db_path)

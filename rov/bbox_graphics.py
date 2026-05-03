@@ -13,6 +13,7 @@ from bokeh.models import (
     Range1d,
     Span,
     ColorBar, LinearColorMapper, BasicTicker, PrintfTickFormatter, Legend, LegendItem, BoxAnnotation, Button, CustomJS,
+    Div,
 )
 from bokeh.palettes import Category10, Turbo256, Viridis256, Blues256, Turbo256
 from bokeh.plotting import figure, show
@@ -90,11 +91,14 @@ class BlackBoxGraphics(object):
                 # GNSS
                 "bb.GNSS1_NOS", "bb.GNSS1_DiffAge", "bb.GNSS1_FixQuality","bb.GNSS1_HDOP",
                 "bb.GNSS2_NOS", "bb.GNSS2_DiffAge", "bb.GNSS2_FixQuality","bb.GNSS2_HDOP",
+                "bb.GNSS1_Northing", "bb.GNSS1_Easting","bb.GNSS2_Northing", "bb.GNSS2_Easting",
                 "bb.GNSS1_Elevation", "bb.GNSS2_Elevation",
 
                 # ROV depths (both rovs; keep as-is even if null in some configs)
                 "bb.ROV1_Depth1", "bb.ROV1_Depth2",
                 "bb.ROV2_Depth1", "bb.ROV2_Depth2",
+                "bb.ROV1_USBL_Easting","bb.ROV1_USBL_Northing","bb.ROV1_INS_Easting","bb.ROV1_INS_Northing",
+                "bb.ROV2_USBL_Easting", "bb.ROV2_USBL_Northing", "bb.ROV2_INS_Easting", "bb.ROV2_INS_Northing",
                 "bb.ROV1_Depth","bb.ROV1_HDG","bb.ROV1_SOG","bb.ROV1_COG","bb.ROV1_PITCH","bb.ROV1_ROLL",
                 "bb.ROV2_Depth", "bb.ROV2_HDG", "bb.ROV2_SOG", "bb.ROV2_COG","bb.ROV2_PITCH","bb.ROV2_ROLL",
 
@@ -2849,6 +2853,1328 @@ class BlackBoxGraphics(object):
                 hover.renderers = lst
 
         return p
+
+    def bokeh_gnss12_dxdy_difference(
+            self,
+            *,
+            file_name: str | None = None,
+            file_names: list[str] | None = None,
+            file_ids: list[int] | None = None,
+            config_fk: int | None = None,
+            day: str | None = None,
+            start_ts: str | None = None,
+            end_ts: str | None = None,
+            title: str = "GNSS1 vs GNSS2 — DX/DY Difference",
+            point_size: int = 6,
+            alpha: float = 0.75,
+            qc_radius: float | None = None,
+            max_abs_xy: float | None = None,
+            bins_downsample: int | None = None,
+            data: pd.DataFrame | None = None,
+            return_json: bool = False,
+            is_show: bool = False,
+    ):
+        """
+        Bokeh scatter plot:
+            DX = GNSS2_Easting  - GNSS1_Easting
+            DY = GNSS2_Northing - GNSS1_Northing
+
+        Shows GNSS1/GNSS2 horizontal difference in metres.
+        """
+
+        if data is None:
+            df = self.load_bbox_data(
+                file_name=file_name,
+                file_names=file_names,
+                file_ids=file_ids,
+                config_fk=config_fk,
+                day=day,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                columns=[
+                    "bb.TimeStamp AS T",
+                    "bb.File_FK AS File_FK",
+                    "bf.FileName AS FileName",
+                    "bf.Config_FK AS Config_FK",
+
+                    "bb.GNSS1_Easting",
+                    "bb.GNSS1_Northing",
+                    "bb.GNSS1_Elevation",
+                    "bb.GNSS1_NOS",
+                    "bb.GNSS1_DiffAge",
+                    "bb.GNSS1_FixQuality",
+                    "bb.GNSS1_HDOP",
+
+                    "bb.GNSS2_Easting",
+                    "bb.GNSS2_Northing",
+                    "bb.GNSS2_Elevation",
+                    "bb.GNSS2_NOS",
+                    "bb.GNSS2_DiffAge",
+                    "bb.GNSS2_FixQuality",
+                    "bb.GNSS2_HDOP",
+
+                    "cfg.gnss1_name AS Gnss1Name",
+                    "cfg.gnss2_name AS Gnss2Name",
+                ],
+            )
+        else:
+            df = data.copy()
+
+        if df is None or df.empty:
+            p = figure(
+                title=f"{title} (no data)",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            if is_show:
+                show(p)
+            return json_item(p) if return_json else p
+
+        df = df.loc[:, ~df.columns.duplicated()].copy()
+
+        if "T" in df.columns:
+            df["T"] = pd.to_datetime(df["T"], errors="coerce")
+
+        num_cols = [
+            "GNSS1_Easting", "GNSS1_Northing", "GNSS1_Elevation",
+            "GNSS1_NOS", "GNSS1_DiffAge", "GNSS1_FixQuality", "GNSS1_HDOP",
+            "GNSS2_Easting", "GNSS2_Northing", "GNSS2_Elevation",
+            "GNSS2_NOS", "GNSS2_DiffAge", "GNSS2_FixQuality", "GNSS2_HDOP",
+        ]
+
+        for c in num_cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        required = [
+            "T",
+            "GNSS1_Easting",
+            "GNSS1_Northing",
+            "GNSS2_Easting",
+            "GNSS2_Northing",
+        ]
+
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            p = figure(
+                title=f"{title} (missing columns: {', '.join(missing)})",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            if is_show:
+                show(p)
+            return json_item(p) if return_json else p
+
+        df = df.dropna(subset=required).copy()
+
+        if bins_downsample and int(bins_downsample) > 1:
+            df = df.iloc[::int(bins_downsample), :].copy()
+
+        if df.empty:
+            p = figure(
+                title=f"{title} (no valid GNSS1/GNSS2 position pairs)",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            if is_show:
+                show(p)
+            return json_item(p) if return_json else p
+
+        def _first_nonnull(col_name: str, fallback: str) -> str:
+            if col_name in df.columns and df[col_name].notna().any():
+                v = str(df[col_name].dropna().iloc[0]).strip()
+                return v if v else fallback
+            return fallback
+
+        gnss1_label = _first_nonnull("Gnss1Name", "GNSS1")
+        gnss2_label = _first_nonnull("Gnss2Name", "GNSS2")
+
+        df["DX"] = df["GNSS2_Easting"] - df["GNSS1_Easting"]
+        df["DY"] = df["GNSS2_Northing"] - df["GNSS1_Northing"]
+        df["Range"] = np.sqrt(df["DX"] ** 2 + df["DY"] ** 2)
+        df["SampleNo"] = np.arange(len(df), dtype=float)
+
+        dx_mean = float(df["DX"].mean())
+        dy_mean = float(df["DY"].mean())
+        r_mean = float(df["Range"].mean())
+        r_p95 = float(df["Range"].quantile(0.95))
+        r_max = float(df["Range"].max())
+
+        if qc_radius is not None:
+            qc_radius = float(qc_radius)
+            df["QCStatus"] = np.where(df["Range"] <= qc_radius, "OK", "ERROR")
+        else:
+            df["QCStatus"] = "DATA"
+
+        if max_abs_xy is None:
+            max_abs_xy = float(np.nanmax(np.abs(np.r_[df["DX"].to_numpy(), df["DY"].to_numpy()])))
+            if qc_radius is not None:
+                max_abs_xy = max(max_abs_xy, qc_radius)
+            max_abs_xy = max(max_abs_xy * 1.15, 1.0)
+        else:
+            max_abs_xy = float(max_abs_xy)
+
+        src = ColumnDataSource(df)
+
+        mapper = LinearColorMapper(
+            palette=Turbo256,
+            low=float(df["SampleNo"].min()),
+            high=float(df["SampleNo"].max()) if len(df) > 1 else 1.0,
+        )
+
+        p = figure(
+            title=(
+                f"{title} — {gnss2_label} - {gnss1_label} | "
+                f"mean DX={dx_mean:.3f} m, mean DY={dy_mean:.3f} m, "
+                f"mean R={r_mean:.3f} m, P95={r_p95:.3f} m, max={r_max:.3f} m"
+            ),
+            x_axis_label=f"DX = {gnss2_label} Easting - {gnss1_label} Easting (m)",
+            y_axis_label=f"DY = {gnss2_label} Northing - {gnss1_label} Northing (m)",
+            x_range=Range1d(-max_abs_xy, max_abs_xy),
+            y_range=Range1d(-max_abs_xy, max_abs_xy),
+            match_aspect=True,
+            sizing_mode="stretch_both",
+            tools="pan,wheel_zoom,box_zoom,reset,save,hover",
+            active_scroll="wheel_zoom",
+        )
+
+        p.add_layout(Span(location=0.0, dimension="height", line_dash="dashed"))
+        p.add_layout(Span(location=0.0, dimension="width", line_dash="dashed"))
+
+        r = p.scatter(
+            x="DX",
+            y="DY",
+            source=src,
+            size=point_size,
+            alpha=alpha,
+            line_color=None,
+            fill_color={"field": "SampleNo", "transform": mapper},
+            legend_field="QCStatus",
+        )
+
+        if qc_radius is not None and qc_radius > 0:
+            p.circle(
+                x=0,
+                y=0,
+                radius=qc_radius,
+                fill_alpha=0,
+                line_dash="dashed",
+                line_width=2,
+                legend_label=f"QC radius ±{qc_radius:g} m",
+            )
+
+        p.add_tools(
+            HoverTool(
+                renderers=[r],
+                tooltips=[
+                    ("Time", "@T{%F %T}"),
+                    ("File", "@FileName"),
+                    ("DX", "@DX{0.000} m"),
+                    ("DY", "@DY{0.000} m"),
+                    ("Range", "@Range{0.000} m"),
+                    (f"{gnss1_label} E/N", "@GNSS1_Easting{0.000}, @GNSS1_Northing{0.000}"),
+                    (f"{gnss2_label} E/N", "@GNSS2_Easting{0.000}, @GNSS2_Northing{0.000}"),
+                    (f"{gnss1_label} FixQ / HDOP", "@GNSS1_FixQuality / @GNSS1_HDOP{0.00}"),
+                    (f"{gnss2_label} FixQ / HDOP", "@GNSS2_FixQuality / @GNSS2_HDOP{0.00}"),
+                ],
+                formatters={"@T": "datetime"},
+            )
+        )
+
+        color_bar = ColorBar(
+            color_mapper=mapper,
+            title="Sample order",
+            ticker=BasicTicker(desired_num_ticks=8),
+            formatter=PrintfTickFormatter(format="%.0f"),
+            width=8,
+            location=(0, 0),
+        )
+        p.add_layout(color_bar, "right")
+
+        p.legend.location = "top_left"
+        p.legend.click_policy = "hide"
+
+        if is_show:
+            show(p)
+
+        return json_item(p) if return_json else p
+
+    def bokeh_gnss12_dxdy_ellipse(
+            self,
+            *,
+            file_name: str | None = None,
+            file_names: list[str] | None = None,
+            file_ids: list[int] | None = None,
+            config_fk: int | None = None,
+            day: str | None = None,
+            start_ts: str | None = None,
+            end_ts: str | None = None,
+            data: pd.DataFrame | None = None,
+
+            title: str = "GNSS Antenna Difference",
+            point_size: int = 5,
+            alpha: float = 0.65,
+            max_points: int | None = 80000,
+
+            color_by: str = "time",  # "time", "range", "de", "dn", "dz", "hdop1", "hdop2"
+            ellipse_level: float = 0.95,
+            fixed_axis_limit: float | None = None,
+
+            hist_bins: int = 60,
+            hist_height: int = 170,
+
+            is_show: bool = False,
+            return_json: bool = False,
+    ):
+        """
+        Bokeh GNSS1/GNSS2 difference plot with 95% ellipse and histograms.
+
+        Computes:
+            ΔE = GNSS2_Easting  - GNSS1_Easting
+            ΔN = GNSS2_Northing - GNSS1_Northing
+            ΔZ = GNSS2_Elevation - GNSS1_Elevation, if available
+        """
+
+        if data is None:
+            df = self.load_bbox_data(
+                file_name=file_name,
+                file_names=file_names,
+                file_ids=file_ids,
+                config_fk=config_fk,
+                day=day,
+                start_ts=start_ts,
+                end_ts=end_ts,
+            )
+        else:
+            df = data.copy()
+
+        if df is None or df.empty:
+            p = figure(
+                title=f"{title} — no data",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            layout = column(p, sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout) if return_json else layout
+
+        df = df.loc[:, ~df.columns.duplicated()].copy()
+
+        required_cols = [
+            "GNSS1_Easting",
+            "GNSS1_Northing",
+            "GNSS2_Easting",
+            "GNSS2_Northing",
+        ]
+
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            p = figure(
+                title=f"{title} — missing columns: {', '.join(missing)}",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            layout = column(p, sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout) if return_json else layout
+
+        if "T" in df.columns:
+            df["T"] = pd.to_datetime(df["T"], errors="coerce")
+
+        numeric_cols = [
+            "GNSS1_Easting",
+            "GNSS1_Northing",
+            "GNSS2_Easting",
+            "GNSS2_Northing",
+            "GNSS1_Elevation",
+            "GNSS2_Elevation",
+            "GNSS1_HDOP",
+            "GNSS2_HDOP",
+            "GNSS1_FixQuality",
+            "GNSS2_FixQuality",
+            "GNSS1_DiffAge",
+            "GNSS2_DiffAge",
+        ]
+
+        for c in numeric_cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        df = df.dropna(subset=required_cols).copy()
+
+        if df.empty:
+            p = figure(
+                title=f"{title} — no valid GNSS1/GNSS2 coordinate pairs",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            layout = column(p, sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout) if return_json else layout
+
+        def _first_name(col_name: str, fallback: str) -> str:
+            if col_name in df.columns and df[col_name].notna().any():
+                v = str(df[col_name].dropna().iloc[0]).strip()
+                if v:
+                    return v
+            return fallback
+
+        gnss1_name = _first_name("Gnss1Name", "GNSS1")
+        gnss2_name = _first_name("Gnss2Name", "GNSS2")
+
+        df["DE"] = df["GNSS2_Easting"] - df["GNSS1_Easting"]
+        df["DN"] = df["GNSS2_Northing"] - df["GNSS1_Northing"]
+        df["Range2D"] = np.sqrt(df["DE"] ** 2 + df["DN"] ** 2)
+
+        has_dz = (
+                "GNSS1_Elevation" in df.columns
+                and "GNSS2_Elevation" in df.columns
+                and df["GNSS1_Elevation"].notna().any()
+                and df["GNSS2_Elevation"].notna().any()
+        )
+
+        if has_dz:
+            df["DZ"] = df["GNSS2_Elevation"] - df["GNSS1_Elevation"]
+        else:
+            df["DZ"] = np.nan
+
+        df["SampleNo"] = np.arange(len(df), dtype=float)
+
+        # =========================================================
+        # Statistics on full dataframe
+        # =========================================================
+        mean_de = float(df["DE"].mean())
+        mean_dn = float(df["DN"].mean())
+        mean_dz = float(df["DZ"].mean()) if df["DZ"].notna().any() else float("nan")
+
+        rms_de = float(np.sqrt(np.mean(df["DE"] ** 2)))
+        rms_dn = float(np.sqrt(np.mean(df["DN"] ** 2)))
+        rms_2d = float(np.sqrt(np.mean(df["DE"] ** 2 + df["DN"] ** 2)))
+        rms_dz = float(np.sqrt(np.nanmean(df["DZ"] ** 2))) if df["DZ"].notna().any() else float("nan")
+
+        p95_range = float(df["Range2D"].quantile(0.95))
+        p99_range = float(df["Range2D"].quantile(0.99))
+        max_range = float(df["Range2D"].max())
+
+        x = df["DE"].to_numpy(dtype=float)
+        y = df["DN"].to_numpy(dtype=float)
+
+        if len(df) >= 3:
+            cov = np.cov(np.vstack([x, y]))
+            eigvals, eigvecs = np.linalg.eigh(cov)
+
+            order = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[order]
+            eigvecs = eigvecs[:, order]
+
+            # 95% 2D ellipse, chi-square df=2
+            chi2_scale = 5.991
+            sma = float(np.sqrt(max(eigvals[0], 0.0) * chi2_scale))
+            smi = float(np.sqrt(max(eigvals[1], 0.0) * chi2_scale))
+
+            angle_rad = float(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+            angle_deg = float(np.degrees(angle_rad))
+
+            t = np.linspace(0, 2 * np.pi, 361)
+            ellipse_x = sma * np.cos(t)
+            ellipse_y = smi * np.sin(t)
+
+            rot = np.array([
+                [np.cos(angle_rad), -np.sin(angle_rad)],
+                [np.sin(angle_rad), np.cos(angle_rad)],
+            ])
+
+            ellipse_xy = rot @ np.vstack([ellipse_x, ellipse_y])
+            ellipse_de = ellipse_xy[0, :] + mean_de
+            ellipse_dn = ellipse_xy[1, :] + mean_dn
+        else:
+            sma = 0.0
+            smi = 0.0
+            angle_deg = 0.0
+            ellipse_de = []
+            ellipse_dn = []
+
+        # =========================================================
+        # Downsample only for display
+        # =========================================================
+        plot_df = df.copy()
+        if max_points is not None and len(plot_df) > int(max_points):
+            step = max(1, int(np.ceil(len(plot_df) / int(max_points))))
+            plot_df = plot_df.iloc[::step, :].copy()
+
+        # =========================================================
+        # Color scale
+        # =========================================================
+        color_by = str(color_by or "time").lower().strip()
+
+        if color_by == "range":
+            color_field = "Range2D"
+            color_title = "2D Range (m)"
+        elif color_by == "de":
+            color_field = "DE"
+            color_title = "ΔE (m)"
+        elif color_by == "dn":
+            color_field = "DN"
+            color_title = "ΔN (m)"
+        elif color_by == "dz" and plot_df["DZ"].notna().any():
+            color_field = "DZ"
+            color_title = "ΔZ (m)"
+        elif color_by == "hdop1" and "GNSS1_HDOP" in plot_df.columns:
+            color_field = "GNSS1_HDOP"
+            color_title = f"{gnss1_name} HDOP"
+        elif color_by == "hdop2" and "GNSS2_HDOP" in plot_df.columns:
+            color_field = "GNSS2_HDOP"
+            color_title = f"{gnss2_name} HDOP"
+        else:
+            color_field = "SampleNo"
+            color_title = "Sample order"
+
+        color_values = pd.to_numeric(plot_df[color_field], errors="coerce")
+        color_low = float(color_values.min()) if color_values.notna().any() else 0.0
+        color_high = float(color_values.max()) if color_values.notna().any() else 1.0
+
+        if color_low == color_high:
+            color_high = color_low + 1.0
+
+        mapper = LinearColorMapper(
+            palette=Turbo256,
+            low=color_low,
+            high=color_high,
+        )
+
+        plot_src = ColumnDataSource(plot_df)
+        ell_src = ColumnDataSource(dict(DE=ellipse_de, DN=ellipse_dn))
+
+        if fixed_axis_limit is not None:
+            axis_limit = float(fixed_axis_limit)
+        else:
+            axis_limit = float(np.nanmax(np.abs(np.r_[
+                                                    df["DE"].to_numpy(dtype=float),
+                                                    df["DN"].to_numpy(dtype=float),
+                                                    ellipse_de if len(ellipse_de) else [0],
+                                                    ellipse_dn if len(ellipse_dn) else [0],
+                                                ])))
+            axis_limit = max(axis_limit * 1.20, 0.10)
+
+        # =========================================================
+        # Main scatter plot
+        # =========================================================
+        plot_title = (
+            f"{title}: ΔE vs ΔN ({gnss2_name} − {gnss1_name}) | "
+            f"2D RMS={rms_2d:.3f} m, P95={p95_range:.3f} m"
+        )
+
+        p = figure(
+            title=plot_title,
+            x_axis_label=f"ΔE = {gnss2_name} Easting − {gnss1_name} Easting (m)",
+            y_axis_label=f"ΔN = {gnss2_name} Northing − {gnss1_name} Northing (m)",
+            x_range=Range1d(-axis_limit, axis_limit),
+            y_range=Range1d(-axis_limit, axis_limit),
+            match_aspect=True,
+            sizing_mode="stretch_both",
+            min_height=520,
+            tools="pan,wheel_zoom,box_zoom,reset,save,hover",
+            active_scroll="wheel_zoom",
+        )
+
+        p.add_layout(Span(location=0, dimension="height", line_color="#999999", line_alpha=0.65, line_dash="dashed"))
+        p.add_layout(Span(location=0, dimension="width", line_color="#999999", line_alpha=0.65, line_dash="dashed"))
+
+        scatter_renderer = p.scatter(
+            x="DE",
+            y="DN",
+            source=plot_src,
+            size=point_size,
+            alpha=alpha,
+            line_color=None,
+            fill_color={"field": color_field, "transform": mapper},
+            legend_label="GNSS samples",
+        )
+
+        if len(ellipse_de) > 0:
+            p.line(
+                x="DE",
+                y="DN",
+                source=ell_src,
+                line_color="red",
+                line_width=2,
+                legend_label="95% ellipse",
+            )
+
+        p.scatter(
+            x=[mean_de],
+            y=[mean_dn],
+            size=12,
+            marker="cross",
+            line_color="black",
+            line_width=2,
+            legend_label="Mean offset",
+        )
+
+        color_bar = ColorBar(
+            color_mapper=mapper,
+            title=color_title,
+            ticker=BasicTicker(desired_num_ticks=8),
+            formatter=PrintfTickFormatter(format="%.3f"),
+            width=10,
+            location=(0, 0),
+        )
+        p.add_layout(color_bar, "right")
+
+        hover_items = [
+            ("Time", "@T{%F %T}"),
+            ("File", "@FileName"),
+            ("ΔE", "@DE{0.000} m"),
+            ("ΔN", "@DN{0.000} m"),
+            ("ΔZ", "@DZ{0.000} m"),
+            ("2D Range", "@Range2D{0.000} m"),
+            (f"{gnss1_name} E/N/Z", "@GNSS1_Easting{0.000}, @GNSS1_Northing{0.000}, @GNSS1_Elevation{0.000}"),
+            (f"{gnss2_name} E/N/Z", "@GNSS2_Easting{0.000}, @GNSS2_Northing{0.000}, @GNSS2_Elevation{0.000}"),
+        ]
+
+        if "GNSS1_HDOP" in plot_df.columns:
+            hover_items.append((f"{gnss1_name} HDOP", "@GNSS1_HDOP{0.00}"))
+        if "GNSS2_HDOP" in plot_df.columns:
+            hover_items.append((f"{gnss2_name} HDOP", "@GNSS2_HDOP{0.00}"))
+        if "GNSS1_FixQuality" in plot_df.columns:
+            hover_items.append((f"{gnss1_name} FixQ", "@GNSS1_FixQuality{0}"))
+        if "GNSS2_FixQuality" in plot_df.columns:
+            hover_items.append((f"{gnss2_name} FixQ", "@GNSS2_FixQuality{0}"))
+
+        p.add_tools(
+            HoverTool(
+                renderers=[scatter_renderer],
+                tooltips=hover_items,
+                formatters={"@T": "datetime"},
+            )
+        )
+
+        p.legend.location = "top_left"
+        p.legend.click_policy = "hide"
+
+        # =========================================================
+        # Histogram helper
+        # =========================================================
+        def _make_hist(series, hist_title, x_label, mean_value=None, p95_value=None):
+            s = pd.to_numeric(series, errors="coerce").dropna()
+
+            hp = figure(
+                title=hist_title,
+                height=hist_height,
+                sizing_mode="stretch_width",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+                x_axis_label=x_label,
+                y_axis_label="Count",
+            )
+
+            if s.empty:
+                return hp
+
+            counts, edges = np.histogram(s.to_numpy(dtype=float), bins=int(hist_bins))
+
+            src = ColumnDataSource(dict(
+                top=counts,
+                left=edges[:-1],
+                right=edges[1:],
+            ))
+
+            hp.quad(
+                top="top",
+                bottom=0,
+                left="left",
+                right="right",
+                source=src,
+                fill_alpha=0.65,
+                line_alpha=0.25,
+            )
+
+            if mean_value is not None and np.isfinite(mean_value):
+                hp.add_layout(
+                    Span(
+                        location=float(mean_value),
+                        dimension="height",
+                        line_color="red",
+                        line_width=2,
+                        line_dash="dashed",
+                    )
+                )
+
+            if p95_value is not None and np.isfinite(p95_value):
+                hp.add_layout(
+                    Span(
+                        location=float(p95_value),
+                        dimension="height",
+                        line_color="black",
+                        line_width=2,
+                        line_dash="dotted",
+                    )
+                )
+
+            return hp
+
+        hist_de = _make_hist(
+            df["DE"],
+            f"ΔE Histogram ({gnss2_name} − {gnss1_name})",
+            "ΔE (m)",
+            mean_value=mean_de,
+        )
+
+        hist_dn = _make_hist(
+            df["DN"],
+            f"ΔN Histogram ({gnss2_name} − {gnss1_name})",
+            "ΔN (m)",
+            mean_value=mean_dn,
+        )
+
+        hist_range = _make_hist(
+            df["Range2D"],
+            "2D Range Histogram",
+            "2D Range (m)",
+            mean_value=rms_2d,
+            p95_value=p95_range,
+        )
+
+        hist_list = [hist_de, hist_dn, hist_range]
+
+        if df["DZ"].notna().any():
+            hist_dz = _make_hist(
+                df["DZ"],
+                f"ΔZ Histogram ({gnss2_name} − {gnss1_name})",
+                "ΔZ (m)",
+                mean_value=mean_dz,
+            )
+            hist_list.append(hist_dz)
+
+        # =========================================================
+        # Stats panel
+        # =========================================================
+        dz_line = ""
+        if not np.isnan(mean_dz):
+            dz_line = f"""
+                Mean ΔZ: {mean_dz:.3f} m<br>
+                RMS ΔZ: {rms_dz:.3f} m<br>
+            """
+
+        stats_html = f"""
+        <div style="
+            font-size:13px;
+            line-height:1.45;
+            padding:10px 12px;
+            border:1px solid #ddd;
+            border-radius:8px;
+            background:#fafafa;
+            min-width:280px;
+        ">
+            <b>Ellipse & Offset Statistics</b><br><br>
+            <b>Baseline:</b> {gnss2_name} − {gnss1_name}<br>
+            Points: {len(df):,}<br>
+            Plotted: {len(plot_df):,}<br><br>
+
+            Mean ΔE: {mean_de:.3f} m<br>
+            Mean ΔN: {mean_dn:.3f} m<br>
+            {dz_line}
+            RMS ΔE: {rms_de:.3f} m<br>
+            RMS ΔN: {rms_dn:.3f} m<br>
+            2D RMS: {rms_2d:.3f} m<br><br>
+
+            2D Range P95: {p95_range:.3f} m<br>
+            2D Range P99: {p99_range:.3f} m<br>
+            2D Range Max: {max_range:.3f} m<br><br>
+
+            95% SMA: {sma:.3f} m<br>
+            95% SMI: {smi:.3f} m<br>
+            Orientation: {angle_deg:.2f}°<br><br>
+
+            Color scale: {color_title}
+        </div>
+        """
+
+        stats_div = Div(text=stats_html, width=320)
+
+        left_col = column(stats_div, *hist_list, width=340)
+        layout = row(left_col, p, sizing_mode="stretch_both")
+
+        if is_show:
+            show(layout)
+
+        return json_item(layout) if return_json else layout
+    def bokeh_rov_ins_usbl_dxdy_ellipse(
+            self,
+            *,
+            pair: str = "rov1",  # "rov1" or "rov2"
+            file_name: str | None = None,
+            file_names: list[str] | None = None,
+            file_ids: list[int] | None = None,
+            config_fk: int | None = None,
+            day: str | None = None,
+            start_ts: str | None = None,
+            end_ts: str | None = None,
+            data: pd.DataFrame | None = None,
+
+            title: str | None = None,
+            point_size: int = 5,
+            alpha: float = 0.65,
+            max_points: int | None = 80000,
+            color_by: str = "range",  # "time", "range", "de", "dn", "dz", "depth", "sog"
+            fixed_axis_limit: float | None = None,
+            hist_bins: int = 60,
+            hist_height: int = 170,
+
+            is_show: bool = False,
+            return_json: bool = False,
+    ):
+        """
+        Bokeh INS vs USBL delta plot with ellipse and histograms.
+
+        ROV1:
+            ΔE = ROV1_USBL_Easting  - ROV1_INS_Easting
+            ΔN = ROV1_USBL_Northing - ROV1_INS_Northing
+            ΔDepth = ROV1_Depth2 - ROV1_Depth1
+
+        ROV2:
+            ΔE = ROV2_USBL_Easting  - ROV2_INS_Easting
+            ΔN = ROV2_USBL_Northing - ROV2_INS_Northing
+            ΔDepth = ROV2_Depth2 - ROV2_Depth1
+        """
+
+        pair = str(pair or "rov1").lower().strip()
+
+        if pair in {"rov1", "1"}:
+            prefix = "ROV1"
+            ins_e_col = "ROV1_INS_Easting"
+            ins_n_col = "ROV1_INS_Northing"
+            usbl_e_col = "ROV1_USBL_Easting"
+            usbl_n_col = "ROV1_USBL_Northing"
+            depth1_col = "ROV1_Depth1"
+            depth2_col = "ROV1_Depth2"
+            main_depth_col = "ROV1_Depth"
+            sog_col = "ROV1_SOG"
+            rov_name_col = "Rov1Name"
+            fallback_name = "ROV1"
+
+        elif pair in {"rov2", "2"}:
+            prefix = "ROV2"
+            ins_e_col = "ROV2_INS_Easting"
+            ins_n_col = "ROV2_INS_Northing"
+            usbl_e_col = "ROV2_USBL_Easting"
+            usbl_n_col = "ROV2_USBL_Northing"
+            depth1_col = "ROV2_Depth1"
+            depth2_col = "ROV2_Depth2"
+            main_depth_col = "ROV2_Depth"
+            sog_col = "ROV2_SOG"
+            rov_name_col = "Rov2Name"
+            fallback_name = "ROV2"
+
+        else:
+            p = figure(
+                title=f"Unknown ROV pair: {pair}",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            layout = column(p, sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout) if return_json else layout
+
+        if data is None:
+            df = self.load_bbox_data(
+                file_name=file_name,
+                file_names=file_names,
+                file_ids=file_ids,
+                config_fk=config_fk,
+                day=day,
+                start_ts=start_ts,
+                end_ts=end_ts,
+            )
+        else:
+            df = data.copy()
+
+        if df is None or df.empty:
+            p = figure(
+                title=f"{fallback_name} INS vs USBL — no data",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            layout = column(p, sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout) if return_json else layout
+
+        df = df.loc[:, ~df.columns.duplicated()].copy()
+
+        required_cols = [
+            ins_e_col,
+            ins_n_col,
+            usbl_e_col,
+            usbl_n_col,
+        ]
+
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            p = figure(
+                title=f"{fallback_name} INS vs USBL — missing columns: {', '.join(missing)}",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            layout = column(p, sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout) if return_json else layout
+
+        if "T" in df.columns:
+            df["T"] = pd.to_datetime(df["T"], errors="coerce")
+        elif "TimeStamp" in df.columns:
+            df["T"] = pd.to_datetime(df["TimeStamp"], errors="coerce")
+
+        numeric_cols = [
+            ins_e_col,
+            ins_n_col,
+            usbl_e_col,
+            usbl_n_col,
+            depth1_col,
+            depth2_col,
+            main_depth_col,
+            sog_col,
+        ]
+
+        for c in numeric_cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        df = df.dropna(subset=required_cols).copy()
+
+        # Remove impossible / dummy coordinate values
+        for c in required_cols:
+            df = df[df[c].abs() < 1e20]
+
+        if df.empty:
+            p = figure(
+                title=f"{fallback_name} INS vs USBL — no valid coordinate pairs",
+                sizing_mode="stretch_both",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            layout = column(p, sizing_mode="stretch_both")
+            if is_show:
+                show(layout)
+            return json_item(layout) if return_json else layout
+
+        def _first_name(col_name: str, fallback: str) -> str:
+            if col_name in df.columns and df[col_name].notna().any():
+                v = str(df[col_name].dropna().iloc[0]).strip()
+                if v:
+                    return v
+            return fallback
+
+        rov_name = _first_name(rov_name_col, fallback_name)
+
+        df["DE"] = df[usbl_e_col] - df[ins_e_col]
+        df["DN"] = df[usbl_n_col] - df[ins_n_col]
+        df["Range2D"] = np.sqrt(df["DE"] ** 2 + df["DN"] ** 2)
+
+        if depth1_col in df.columns and depth2_col in df.columns:
+            df["DZ"] = df[depth2_col] - df[depth1_col]
+        else:
+            df["DZ"] = np.nan
+
+        df["SampleNo"] = np.arange(len(df), dtype=float)
+
+        if main_depth_col not in df.columns:
+            df[main_depth_col] = np.nan
+
+        if sog_col not in df.columns:
+            df[sog_col] = np.nan
+
+        # =========================================================
+        # Statistics on full dataframe
+        # =========================================================
+        mean_de = float(df["DE"].mean())
+        mean_dn = float(df["DN"].mean())
+        mean_dz = float(df["DZ"].mean()) if df["DZ"].notna().any() else float("nan")
+
+        rms_de = float(np.sqrt(np.mean(df["DE"] ** 2)))
+        rms_dn = float(np.sqrt(np.mean(df["DN"] ** 2)))
+        rms_2d = float(np.sqrt(np.mean(df["DE"] ** 2 + df["DN"] ** 2)))
+        rms_dz = float(np.sqrt(np.nanmean(df["DZ"] ** 2))) if df["DZ"].notna().any() else float("nan")
+
+        p95_range = float(df["Range2D"].quantile(0.95))
+        p99_range = float(df["Range2D"].quantile(0.99))
+        max_range = float(df["Range2D"].max())
+
+        x = df["DE"].to_numpy(dtype=float)
+        y = df["DN"].to_numpy(dtype=float)
+
+        if len(df) >= 3:
+            cov = np.cov(np.vstack([x, y]))
+            eigvals, eigvecs = np.linalg.eigh(cov)
+
+            order = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[order]
+            eigvecs = eigvecs[:, order]
+
+            chi2_scale = 5.991  # 95%, df=2
+
+            sma = float(np.sqrt(max(eigvals[0], 0.0) * chi2_scale))
+            smi = float(np.sqrt(max(eigvals[1], 0.0) * chi2_scale))
+
+            angle_rad = float(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+            angle_deg = float(np.degrees(angle_rad))
+
+            t = np.linspace(0, 2 * np.pi, 361)
+            ellipse_x = sma * np.cos(t)
+            ellipse_y = smi * np.sin(t)
+
+            rot = np.array([
+                [np.cos(angle_rad), -np.sin(angle_rad)],
+                [np.sin(angle_rad), np.cos(angle_rad)],
+            ])
+
+            ellipse_xy = rot @ np.vstack([ellipse_x, ellipse_y])
+            ellipse_de = ellipse_xy[0, :] + mean_de
+            ellipse_dn = ellipse_xy[1, :] + mean_dn
+        else:
+            sma = 0.0
+            smi = 0.0
+            angle_deg = 0.0
+            ellipse_de = []
+            ellipse_dn = []
+
+        # =========================================================
+        # Downsample only for display
+        # =========================================================
+        plot_df = df.copy()
+        if max_points is not None and len(plot_df) > int(max_points):
+            step = max(1, int(np.ceil(len(plot_df) / int(max_points))))
+            plot_df = plot_df.iloc[::step, :].copy()
+
+        # =========================================================
+        # Color scale
+        # =========================================================
+        color_by = str(color_by or "range").lower().strip()
+
+        if color_by == "time":
+            color_field = "SampleNo"
+            color_title = "Sample order"
+        elif color_by == "de":
+            color_field = "DE"
+            color_title = "ΔE (m)"
+        elif color_by == "dn":
+            color_field = "DN"
+            color_title = "ΔN (m)"
+        elif color_by == "dz" and plot_df["DZ"].notna().any():
+            color_field = "DZ"
+            color_title = "ΔDepth = Depth2 − Depth1 (m)"
+        elif color_by == "depth" and main_depth_col in plot_df.columns and plot_df[main_depth_col].notna().any():
+            color_field = main_depth_col
+            color_title = f"{rov_name} Depth (m)"
+        elif color_by == "sog" and sog_col in plot_df.columns and plot_df[sog_col].notna().any():
+            color_field = sog_col
+            color_title = f"{rov_name} SOG"
+        else:
+            color_field = "Range2D"
+            color_title = "2D Range (m)"
+
+        color_values = pd.to_numeric(plot_df[color_field], errors="coerce")
+        color_low = float(color_values.min()) if color_values.notna().any() else 0.0
+        color_high = float(color_values.max()) if color_values.notna().any() else 1.0
+
+        if color_low == color_high:
+            color_high = color_low + 1.0
+
+        mapper = LinearColorMapper(
+            palette=Turbo256,
+            low=color_low,
+            high=color_high,
+        )
+
+        plot_src = ColumnDataSource(plot_df)
+        ell_src = ColumnDataSource(dict(DE=ellipse_de, DN=ellipse_dn))
+
+        if fixed_axis_limit is not None:
+            axis_limit = float(fixed_axis_limit)
+        else:
+            axis_limit = float(np.nanmax(np.abs(np.r_[
+                                                    df["DE"].to_numpy(dtype=float),
+                                                    df["DN"].to_numpy(dtype=float),
+                                                    ellipse_de if len(ellipse_de) else [0],
+                                                    ellipse_dn if len(ellipse_dn) else [0],
+                                                ])))
+            axis_limit = max(axis_limit * 1.20, 0.10)
+
+        if title is None:
+            title = f"{rov_name} INS vs USBL Difference"
+
+        plot_title = (
+            f"{title}: ΔE vs ΔN | "
+            f"2D RMS={rms_2d:.3f} m, P95={p95_range:.3f} m"
+        )
+
+        p = figure(
+            title=plot_title,
+            x_axis_label=f"ΔE = {prefix}_USBL_Easting − {prefix}_INS_Easting (m)",
+            y_axis_label=f"ΔN = {prefix}_USBL_Northing − {prefix}_INS_Northing (m)",
+            x_range=Range1d(-axis_limit, axis_limit),
+            y_range=Range1d(-axis_limit, axis_limit),
+            match_aspect=True,
+            sizing_mode="stretch_both",
+            min_height=520,
+            tools="pan,wheel_zoom,box_zoom,reset,save,hover",
+            active_scroll="wheel_zoom",
+        )
+
+        p.add_layout(
+            Span(
+                location=0,
+                dimension="height",
+                line_color="#999999",
+                line_alpha=0.65,
+                line_dash="dashed",
+            )
+        )
+        p.add_layout(
+            Span(
+                location=0,
+                dimension="width",
+                line_color="#999999",
+                line_alpha=0.65,
+                line_dash="dashed",
+            )
+        )
+
+        scatter_renderer = p.scatter(
+            x="DE",
+            y="DN",
+            source=plot_src,
+            size=point_size,
+            alpha=alpha,
+            line_color=None,
+            fill_color={"field": color_field, "transform": mapper},
+            legend_label=f"{rov_name} USBL − INS",
+        )
+
+        if len(ellipse_de) > 0:
+            p.line(
+                x="DE",
+                y="DN",
+                source=ell_src,
+                line_color="red",
+                line_width=2,
+                legend_label="95% ellipse",
+            )
+
+        p.scatter(
+            x=[mean_de],
+            y=[mean_dn],
+            size=12,
+            marker="cross",
+            line_color="black",
+            line_width=2,
+            legend_label="Mean offset",
+        )
+
+        color_bar = ColorBar(
+            color_mapper=mapper,
+            title=color_title,
+            ticker=BasicTicker(desired_num_ticks=8),
+            formatter=PrintfTickFormatter(format="%.3f"),
+            width=10,
+            location=(0, 0),
+        )
+        p.add_layout(color_bar, "right")
+
+        hover_items = [
+            ("Time", "@T{%F %T}"),
+            ("File", "@FileName"),
+            ("ΔE", "@DE{0.000} m"),
+            ("ΔN", "@DN{0.000} m"),
+            ("2D Range", "@Range2D{0.000} m"),
+            ("ΔDepth", "@DZ{0.000} m"),
+            ("INS E/N", f"@{ins_e_col}{{0.000}}, @{ins_n_col}{{0.000}}"),
+            ("USBL E/N", f"@{usbl_e_col}{{0.000}}, @{usbl_n_col}{{0.000}}"),
+        ]
+
+        if depth1_col in plot_df.columns and depth2_col in plot_df.columns:
+            hover_items.append(
+                ("Depth1 / Depth2", f"@{depth1_col}{{0.000}} / @{depth2_col}{{0.000}}")
+            )
+
+        if main_depth_col in plot_df.columns:
+            hover_items.append(("Main Depth", f"@{main_depth_col}{{0.000}}"))
+
+        if sog_col in plot_df.columns:
+            hover_items.append(("SOG", f"@{sog_col}{{0.00}}"))
+
+        p.add_tools(
+            HoverTool(
+                renderers=[scatter_renderer],
+                tooltips=hover_items,
+                formatters={"@T": "datetime"},
+            )
+        )
+
+        p.legend.location = "top_left"
+        p.legend.click_policy = "hide"
+
+        # =========================================================
+        # Histograms
+        # =========================================================
+        def _make_hist(series, hist_title, x_label, mean_value=None, p95_value=None):
+            s = pd.to_numeric(series, errors="coerce").dropna()
+
+            hp = figure(
+                title=hist_title,
+                height=hist_height,
+                sizing_mode="stretch_width",
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+                x_axis_label=x_label,
+                y_axis_label="Count",
+            )
+
+            if s.empty:
+                return hp
+
+            counts, edges = np.histogram(s.to_numpy(dtype=float), bins=int(hist_bins))
+
+            src = ColumnDataSource(dict(
+                top=counts,
+                left=edges[:-1],
+                right=edges[1:],
+            ))
+
+            hp.quad(
+                top="top",
+                bottom=0,
+                left="left",
+                right="right",
+                source=src,
+                fill_alpha=0.65,
+                line_alpha=0.25,
+            )
+
+            if mean_value is not None and np.isfinite(mean_value):
+                hp.add_layout(
+                    Span(
+                        location=float(mean_value),
+                        dimension="height",
+                        line_color="red",
+                        line_width=2,
+                        line_dash="dashed",
+                    )
+                )
+
+            if p95_value is not None and np.isfinite(p95_value):
+                hp.add_layout(
+                    Span(
+                        location=float(p95_value),
+                        dimension="height",
+                        line_color="black",
+                        line_width=2,
+                        line_dash="dotted",
+                    )
+                )
+
+            return hp
+
+        hist_de = _make_hist(
+            df["DE"],
+            f"{rov_name} ΔE Histogram",
+            "ΔE USBL − INS (m)",
+            mean_value=mean_de,
+        )
+
+        hist_dn = _make_hist(
+            df["DN"],
+            f"{rov_name} ΔN Histogram",
+            "ΔN USBL − INS (m)",
+            mean_value=mean_dn,
+        )
+
+        hist_range = _make_hist(
+            df["Range2D"],
+            f"{rov_name} 2D Range Histogram",
+            "2D Range (m)",
+            mean_value=rms_2d,
+            p95_value=p95_range,
+        )
+
+        hist_list = [hist_de, hist_dn, hist_range]
+
+        if df["DZ"].notna().any():
+            hist_dz = _make_hist(
+                df["DZ"],
+                f"{rov_name} ΔDepth Histogram",
+                "ΔDepth = Depth2 − Depth1 (m)",
+                mean_value=mean_dz,
+            )
+            hist_list.append(hist_dz)
+
+        # =========================================================
+        # Stats panel
+        # =========================================================
+        dz_line = ""
+        if not np.isnan(mean_dz):
+            dz_line = f"""
+                Mean ΔDepth: {mean_dz:.3f} m<br>
+                RMS ΔDepth: {rms_dz:.3f} m<br>
+            """
+
+        stats_html = f"""
+        <div style="
+            font-size:13px;
+            line-height:1.45;
+            padding:10px 12px;
+            border:1px solid #ddd;
+            border-radius:8px;
+            background:#fafafa;
+            min-width:280px;
+        ">
+            <b>{rov_name} INS vs USBL Statistics</b><br><br>
+            <b>Delta:</b> USBL − INS<br>
+            Points: {len(df):,}<br>
+            Plotted: {len(plot_df):,}<br><br>
+
+            Mean ΔE: {mean_de:.3f} m<br>
+            Mean ΔN: {mean_dn:.3f} m<br>
+            {dz_line}
+            RMS ΔE: {rms_de:.3f} m<br>
+            RMS ΔN: {rms_dn:.3f} m<br>
+            2D RMS: {rms_2d:.3f} m<br><br>
+
+            2D Range P95: {p95_range:.3f} m<br>
+            2D Range P99: {p99_range:.3f} m<br>
+            2D Range Max: {max_range:.3f} m<br><br>
+
+            95% SMA: {sma:.3f} m<br>
+            95% SMI: {smi:.3f} m<br>
+            Orientation: {angle_deg:.2f}°<br><br>
+
+            Color scale: {color_title}
+        </div>
+        """
+
+        stats_div = Div(text=stats_html, width=320)
+
+        left_col = column(stats_div, *hist_list, width=340)
+        layout = row(left_col, p, sizing_mode="stretch_both")
+
+        if is_show:
+            show(layout)
+
+        return json_item(layout) if return_json else layout
 
 
 

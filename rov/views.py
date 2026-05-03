@@ -905,53 +905,100 @@ def delete_bbox_files(request):
 def bbox_file_selected(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+
     if not project:
-        return JsonResponse({"error": "No active project"}, status=400)
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
 
     try:
         payload = json.loads(request.body or "{}")
+
         file_id = int(payload.get("file_id") or 0)
         file_name = payload.get("file_name") or ""
+        plot_key = payload.get("plot_key") or "gnss_qc"
 
         if not file_id and not file_name:
-            return JsonResponse({"ok": False, "error": "No file_id / file_name"}, status=400)
+            return JsonResponse(
+                {"ok": False, "error": "No file_id / file_name"},
+                status=400,
+            )
 
         bbgr = BlackBoxGraphics(project.db_path)
 
-        # ---- 1) load file meta / labels (light query)
-        # (kept same logic as you already have)
-        file_details = bbgr.get_bbox_config_names_by_filename(file_name) if file_name else {}
+        file_details = (
+            bbgr.get_bbox_config_names_by_filename(file_name)
+            if file_name
+            else {}
+        )
 
-        # ---- 2) ONE heavy query for ALL plots
-        # Use file_name (your existing workflow uses filename)
         data = bbgr.load_bbox_data(
             file_name=file_name if file_name else None,
             file_ids=[file_id] if (not file_name and file_id) else None,
-            # columns=None -> loads the shared common package for many plots
-            # you can also pass start_ts/end_ts here later if you add UI time filters
-        )
-        dsr_df = bbgr.dsr_points_in_bbox_timeframe(data)
-        # ---- 3) build plots from same dataframe
-        gnss_plot = bbgr.bokeh_gnss_qc_timeseries(
-            title="GNSS QC",
-            gnss1_label=file_details.get("gnss1_name"),
-            gnss2_label=file_details.get("gnss2_name"),
-            is_show=False,
-            data=data,
         )
 
-        rovs_depths_plot = bbgr.bokeh_bbox_depth12_diff_timeseries(df=data, diff_threshold=10, plot_kind="vbar", is_show=False)
-        vessel_sog = bbgr.bokeh_bbox_sog_timeseries(df=data,plot_kind="line",is_show=False)
-        hdop_plot = bbgr.bokeh_bbox_gnss_hdop_timeseries(df=data,is_show=False,return_json=False)
-        cog_vs_hdg_plot = bbgr.boke_cog_hdg_timeseries_all(df=data,is_show=False)
+        if data is None or data.empty:
+            return JsonResponse(
+                {"ok": False, "error": "No BlackBox data found for selected file"},
+                status=404,
+            )
+
+        if plot_key == "gnss_qc":
+            fig = bbgr.bokeh_gnss_qc_timeseries(
+                title="GNSS QC",
+                gnss1_label=file_details.get("gnss1_name"),
+                gnss2_label=file_details.get("gnss2_name"),
+                is_show=False,
+                data=data,
+            )
+
+        elif plot_key == "gnss_delta":
+            fig = bbgr.bokeh_gnss12_dxdy_ellipse(
+                data=data,
+                title="GNSS Antenna Difference",
+                color_by="range",
+                hist_bins=80,
+                max_points=80000,
+                is_show=False,
+                return_json=False,
+            )
+
+        elif plot_key == "hdop":
+            fig = bbgr.bokeh_bbox_gnss_hdop_timeseries(
+                df=data,
+                is_show=False,
+                return_json=False,
+            )
+
+        elif plot_key == "rovs_depths":
+            fig = bbgr.bokeh_bbox_depth12_diff_timeseries(
+                df=data,
+                diff_threshold=10,
+                plot_kind="vbar",
+                is_show=False,
+            )
+
+        elif plot_key == "vessel_sog":
+            fig = bbgr.bokeh_bbox_sog_timeseries(
+                df=data,
+                plot_kind="line",
+                is_show=False,
+            )
+
+        elif plot_key == "cog_vs_hdg":
+            fig = bbgr.boke_cog_hdg_timeseries_all(
+                df=data,
+                is_show=False,
+            )
+
+        else:
+            return JsonResponse(
+                {"ok": False, "error": f"Unknown plot_key: {plot_key}"},
+                status=400,
+            )
 
         return JsonResponse({
             "ok": True,
-            "gnss_qc_plot": json_item(gnss_plot),
-            "rovs_depths_plot": json_item(rovs_depths_plot),
-            "vessel_sog": json_item(vessel_sog),
-            "hdop_plot":json_item(hdop_plot),
-            "cog_vs_hdg_plot": json_item(cog_vs_hdg_plot),
+            "plot_key": plot_key,
+            "item": json_item(fig),
         })
 
     except Exception as e:
@@ -1463,9 +1510,11 @@ def load_min_max_line_qc(request):
 
 @require_POST
 @login_required
+@log_action("Plot bbox graph for selected file", object_type="BBOX")
 def bbox_plot_item(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+
     if not project:
         return JsonResponse({"ok": False, "error": "No active project"}, status=400)
 
@@ -1484,24 +1533,30 @@ def bbox_plot_item(request):
 
         bbgr = BlackBoxGraphics(project.db_path)
 
-        # light meta (optional per request)
-        file_details = bbgr.get_bbox_config_names_by_filename(file_name) if file_name else {}
+        file_details = (
+            bbgr.get_bbox_config_names_by_filename(file_name)
+            if file_name
+            else {}
+        )
 
-        # ---- OPTIONAL: cache the heavy dataframe so 5 plot calls don't re-load it 5 times
-        # If you don't want cache yet, just call bbgr.load_bbox_data(...) directly.
         cache_key = f"bbox_df:{project.id}:{file_name or file_id}"
-        data = cache.get(cache_key)
-        if data is None:
+        cached_data = cache.get(cache_key)
+
+        if cached_data is None:
             data = bbgr.load_bbox_data(
                 file_name=file_name if file_name else None,
                 file_ids=[file_id] if (not file_name and file_id) else None,
             )
-            # store pickled df in cache (works well with filesystem/redis cache)
             cache.set(cache_key, pickle.dumps(data), timeout=15 * 60)
         else:
-            data = pickle.loads(data)
+            data = pickle.loads(cached_data)
 
-        # ---- build ONLY requested plot
+        if data is None or data.empty:
+            return JsonResponse({
+                "ok": False,
+                "error": "No BlackBox data found for selected file",
+            }, status=404)
+
         if plot_key == "gnss_qc":
             fig = bbgr.bokeh_gnss_qc_timeseries(
                 title="GNSS QC",
@@ -1510,18 +1565,75 @@ def bbox_plot_item(request):
                 is_show=False,
                 data=data,
             )
+
+        elif plot_key == "gnss_delta":
+            fig = bbgr.bokeh_gnss12_dxdy_ellipse(
+                data=data,
+                title="GNSS Antenna Difference",
+                color_by="range",
+                hist_bins=80,
+                max_points=80000,
+                is_show=False,
+                return_json=False,
+            )
+
+        elif plot_key == "rov1_ins_usbl":
+            fig = bbgr.bokeh_rov_ins_usbl_dxdy_ellipse(
+                data=data,
+                pair="rov1",
+                title="ROV1 INS vs USBL Difference",
+                color_by="range",
+                hist_bins=80,
+                max_points=80000,
+                is_show=False,
+                return_json=False,
+            )
+
+        elif plot_key == "rov2_ins_usbl":
+            fig = bbgr.bokeh_rov_ins_usbl_dxdy_ellipse(
+                data=data,
+                pair="rov2",
+                title="ROV2 INS vs USBL Difference",
+                color_by="range",
+                hist_bins=80,
+                max_points=80000,
+                is_show=False,
+                return_json=False,
+            )
+
+        elif plot_key == "hdop":
+            fig = bbgr.bokeh_bbox_gnss_hdop_timeseries(
+                df=data,
+                is_show=False,
+                return_json=False,
+            )
+
         elif plot_key == "rovs_depths":
             fig = bbgr.bokeh_bbox_depth12_diff_timeseries(
-                df=data, diff_threshold=10, plot_kind="vbar", is_show=False
+                df=data,
+                diff_threshold=10,
+                plot_kind="vbar",
+                is_show=False,
             )
+
         elif plot_key == "vessel_sog":
-            fig = bbgr.bokeh_bbox_sog_timeseries(df=data, plot_kind="line", is_show=False)
-        elif plot_key == "hdop":
-            fig = bbgr.bokeh_bbox_gnss_hdop_timeseries(df=data, is_show=False, return_json=False)
+            fig = bbgr.bokeh_bbox_sog_timeseries(
+                df=data,
+                plot_kind="line",
+                is_show=False,
+            )
+
         elif plot_key == "cog_vs_hdg":
-            fig = bbgr.boke_cog_hdg_timeseries_all(df=data, is_show=False)
+            fig = bbgr.boke_cog_hdg_timeseries_all(
+                df=data,
+                is_show=False,
+            )
+
         else:
-            return JsonResponse({"ok": False, "error": f"Unknown plot_key: {plot_key}"}, status=400)
+            return JsonResponse({
+                "ok": False,
+                "error": f"Unknown plot_key: {plot_key}",
+            }, status=400)
 
         return JsonResponse({
             "ok": True,

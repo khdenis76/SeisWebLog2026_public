@@ -118,6 +118,14 @@ Change shot_table loader. loading more fast but database should be isolated
 ### Fixed
 REC_DB optional fixed. 
 ### Changed
+## [2026.1.02.05] - 2026-05-03
+### Added
+Gund Depth and Wated Depth plots added
+BBox plots GNSS1 vs GNSS2  and ROV1 vs ROV2 dx/dy plots
+### Fixed
+Fixed an error in Daily recover statistics 
+Deployed and recovered by ROV now has date filters 
+### Changed
   
 
   

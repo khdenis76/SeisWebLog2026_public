@@ -77,8 +77,8 @@
 }
 #sps-table .sticky-col-3{
   left: 24ch;
-  min-width: 5ch;
-  font-weight: 900;
+  min-width: 8ch;
+  font-weight: 800;
 }
 
 /* sticky header cells must be above everything */
@@ -136,6 +136,11 @@
 
 /* widths for sticky columns */
 .w-col1{min-width: 4ch}
-.w-seq{min-width: 5ch}
+.w-seq {
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;   /* space between icon and number */
+}
 .w-sailline{min-width: 12ch}
 .w-sline{ min-width: 6ch; }

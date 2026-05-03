@@ -14,7 +14,7 @@ from bokeh.embed import json_item
 from bokeh.io import show
 from bokeh.layouts import row, column, gridplot
 from bokeh.models import Span, Range1d, FactorRange, Legend, LegendItem, LinearColorMapper, BasicTicker, \
-    NumeralTickFormatter, ColorBar
+    NumeralTickFormatter, ColorBar, Select
 from bokeh.palettes import Category10, Category20, Turbo256
 
 from bokeh.plotting import figure
@@ -27,6 +27,7 @@ import plotly.graph_objects as go
 from pyproj import Transformer
 from bokeh.io import output_file, save, show
 from bokeh.layouts import column, row
+from bokeh.models import DateRangeSlider, CustomJSFilter, CDSView
 from bokeh.models import (
     ColumnDataSource, HoverTool, CustomJS, LinearColorMapper, ColorBar,
     BasicTicker, NumeralTickFormatter, Spinner, Legend, LegendItem,
@@ -4309,19 +4310,23 @@ class DSRMapPlots:
             show_preplot=True,
             show_shapes=True,
             show_layers=True,
+            show_tiles=None,
             is_show=False,
+            jason_item=False,
     ):
         """
-        Map DSR points colored by Deployment ROV or Recovery ROV.
+        Dynamic Bokeh ROV status map.
 
         Deployment:
-            - uses DSR.ROV
-            - uses PrimaryEasting / PrimaryNorthing
+          - color by DSR.ROV
+          - coordinate: PrimaryEasting / PrimaryNorthing
+          - From/To day dropdowns use TimeStamp
 
         Recovery:
-            - uses DSR.ROV1
-            - keeps only rows where ROV1 is not empty
-            - uses PrimaryEasting1 / PrimaryNorthing1
+          - color by DSR.ROV1
+          - coordinate: PrimaryEasting1 / PrimaryNorthing1
+          - From/To day dropdowns use TimeStamp1
+          - only rows where ROV1 is not empty
         """
 
         dsr_df = self.read_dsr(lines=lines, solution_fk=solution_fk)
@@ -4337,13 +4342,14 @@ class DSRMapPlots:
 
         mode = str(mode or "deployment").lower().strip()
 
-        # =====================================================
-        # DEPLOYMENT
-        # =====================================================
         if mode in ("deployment", "deploy", "dep"):
             rov_col = "ROV"
+            time_col = "TimeStamp"
             x_col = "PrimaryEasting"
             y_col = "PrimaryNorthing"
+            title = "Deployment by ROV"
+            layer_name = "Deployment"
+            marker = "circle"
 
             if rov_col not in dsr_df.columns:
                 raise ValueError(f"Column '{rov_col}' not found in DSR dataframe.")
@@ -4356,20 +4362,18 @@ class DSRMapPlots:
                 .replace("", "Unknown")
             )
 
-            title = "Deployment by ROV"
-            layer_name = "Deployment"
-            marker = "circle"
-
-        # =====================================================
-        # RECOVERY
-        # =====================================================
         elif mode in ("recovery", "recover", "rec"):
             rov_col = "ROV1"
+            time_col = "TimeStamp1"
+            x_col = "PrimaryEasting1"
+            y_col = "PrimaryNorthing1"
+            title = "Recovery by ROV"
+            layer_name = "Recovery"
+            marker = "triangle"
 
             if rov_col not in dsr_df.columns:
                 raise ValueError(f"Column '{rov_col}' not found in DSR dataframe.")
 
-            # --- Keep ONLY valid recovery rows ---
             dsr_df[rov_col] = dsr_df[rov_col].fillna("").astype(str).str.strip()
             dsr_df = dsr_df[dsr_df[rov_col] != ""].copy()
 
@@ -4380,68 +4384,412 @@ class DSRMapPlots:
                     level="warning",
                     is_show=is_show,
                 )
-
-            # --- Use recovery coordinates ---
-            x_col = "PrimaryEasting1"
-            y_col = "PrimaryNorthing1"
-
-            for c in (x_col, y_col):
-                if c not in dsr_df.columns:
-                    raise ValueError(f"Column '{c}' not found in DSR dataframe.")
-
-            title = "Recovery by ROV"
-            layer_name = "Recovery"
-            marker = "triangle"
-
         else:
             raise ValueError("mode must be 'deployment' or 'recovery'")
 
-        # =====================================================
-        # VALIDATE COORDS
-        # =====================================================
-        for c in (x_col, y_col):
+        required_cols = [x_col, y_col, time_col, rov_col]
+        for c in required_cols:
             if c not in dsr_df.columns:
                 raise ValueError(f"Column '{c}' not found in DSR dataframe.")
 
-        # =====================================================
-        # LAYERS
-        # =====================================================
-        layers = [
-            {
-                "df": "dsr",
-                "name": layer_name,
-                "x_col": x_col,
-                "y_col": y_col,
-                "marker": marker,
-                "size": 7,
-                "alpha": 0.90,
-                "color_col": rov_col,
-                "palette": "Category20",
-                "hover": [
-                    ("Layer", layer_name),
-                    ("Line", "@Line"),
-                    ("Station", "@Station"),
-                    ("Node", "@Node"),
-                    ("Deploy ROV", "@ROV"),
-                    ("Recovery ROV", "@ROV1"),
-                    ("Status", "@Status"),
-                    (x_col, f"@{x_col}{{0,0.00}}"),
-                    (y_col, f"@{y_col}{{0,0.00}}"),
-                    ("Time", "@TimeStamp"),
-                ],
-            }
-        ]
+        dsr_df[x_col] = pd.to_numeric(dsr_df[x_col], errors="coerce")
+        dsr_df[y_col] = pd.to_numeric(dsr_df[y_col], errors="coerce")
+        dsr_df[time_col] = pd.to_datetime(dsr_df[time_col], errors="coerce")
 
-        return self.make_map_multi_layers(
-            rp_df=rp_df,
-            dsr_df=dsr_df,
+        dsr_df = dsr_df.dropna(subset=[x_col, y_col, time_col]).copy()
+
+        if dsr_df.empty:
+            return self._error_layout(
+                title="No valid DSR data",
+                message=f"No valid rows after checking {x_col}, {y_col}, and {time_col}.",
+                level="warning",
+                is_show=is_show,
+            )
+
+        dsr_df["_MapTime"] = dsr_df[time_col].dt.strftime("%Y-%m-%d %H:%M:%S")
+        dsr_df["_day"] = dsr_df[time_col].dt.strftime("%Y-%m-%d")
+
+        if "Line" not in dsr_df.columns:
+            dsr_df["Line"] = ""
+        if "Station" not in dsr_df.columns:
+            dsr_df["Station"] = ""
+        if "Node" not in dsr_df.columns:
+            dsr_df["Node"] = ""
+        if "ROV" not in dsr_df.columns:
+            dsr_df["ROV"] = ""
+        if "ROV1" not in dsr_df.columns:
+            dsr_df["ROV1"] = ""
+        if "Status" not in dsr_df.columns:
+            dsr_df["Status"] = ""
+
+        show_tiles = bool(getattr(self.cfg, "use_tiles", False)) if show_tiles is None else bool(show_tiles)
+
+        transformer = None
+        if show_tiles and getattr(self.cfg, "default_epsg", None):
+            transformer = Transformer.from_crs(
+                f"EPSG:{self.cfg.default_epsg}",
+                "EPSG:3857",
+                always_xy=True,
+            )
+
+        if transformer is not None:
+            mx, my = transformer.transform(dsr_df[x_col].values, dsr_df[y_col].values)
+            dsr_df["__mx"] = mx
+            dsr_df["__my"] = my
+        else:
+            dsr_df["__mx"] = dsr_df[x_col]
+            dsr_df["__my"] = dsr_df[y_col]
+
+        p = figure(
             title=title,
-            layers=layers,
-            show_preplot=show_preplot,
-            show_shapes=show_shapes,
-            show_layers=show_layers,
-            is_show=is_show,
+            sizing_mode="stretch_both",
+            x_axis_type="mercator" if show_tiles else "linear",
+            y_axis_type="mercator" if show_tiles else "linear",
+            match_aspect=getattr(self.cfg, "match_aspect", True),
+            tools="pan,wheel_zoom,box_zoom,reset,save",
+            active_scroll="wheel_zoom",
         )
+
+        if show_tiles:
+            vendor = getattr(self.cfg, "tile_vendor", "CARTODB_POSITRON")
+            provider = {
+                "CARTODB_POSITRON": xyz.CartoDB.Positron,
+                "CARTODB_DARK": xyz.CartoDB.DarkMatter,
+                "OSM": xyz.OpenStreetMap.Mapnik,
+                "ESRI_IMAGERY": xyz.Esri.WorldImagery,
+            }.get(vendor, xyz.CartoDB.Positron)
+            p.add_tile(provider)
+
+        if show_shapes:
+            self.add_project_shapes_layers(
+                p,
+                default_src_epsg=getattr(self.cfg, "default_epsg", None),
+            )
+
+        if show_layers:
+            self.add_csv_layers_to_map(
+                p,
+                csv_epsg=getattr(self.cfg, "default_epsg", None),
+                show_tiles=show_tiles,
+            )
+
+        r_rp = None
+
+        if show_preplot and rp_df is not None and not rp_df.empty:
+            rp = rp_df.copy()
+
+            if "X" in rp.columns and "Y" in rp.columns:
+                rp["X"] = pd.to_numeric(rp["X"], errors="coerce")
+                rp["Y"] = pd.to_numeric(rp["Y"], errors="coerce")
+                rp = rp.dropna(subset=["X", "Y"]).copy()
+
+                if not rp.empty:
+                    if transformer is not None:
+                        mx, my = transformer.transform(rp["X"].values, rp["Y"].values)
+                        rp["__mx"] = mx
+                        rp["__my"] = my
+                    else:
+                        rp["__mx"] = rp["X"]
+                        rp["__my"] = rp["Y"]
+
+                    if "Line" not in rp.columns:
+                        rp["Line"] = ""
+                    if "Point" not in rp.columns:
+                        rp["Point"] = ""
+
+                    src_rp = ColumnDataSource(rp)
+
+                    r_rp = p.scatter(
+                        x="__mx",
+                        y="__my",
+                        marker="circle",
+                        size=5,
+                        alpha=0.75,
+                        source=src_rp,
+                        line_color="grey",
+                        fill_color="grey",
+                        legend_label=f"Receiver Preplot ({len(rp)})",
+                    )
+
+                    p.add_tools(
+                        HoverTool(
+                            renderers=[r_rp],
+                            tooltips=[
+                                ("Layer", "Preplot"),
+                                ("Line", "@Line"),
+                                ("Station", "@Point"),
+                                ("E", "@X{0,0.00}"),
+                                ("N", "@Y{0,0.00}"),
+                            ],
+                        )
+                    )
+
+        rovs = sorted(dsr_df[rov_col].dropna().astype(str).unique().tolist())
+
+        if len(rovs) <= 10:
+            colors = Category10[10][:len(rovs)]
+        elif len(rovs) <= 20:
+            colors = Category20[20][:len(rovs)]
+        else:
+            colors = (Category20[20] * ((len(rovs) // 20) + 1))[:len(rovs)]
+
+        full_sources = []
+        plot_sources = []
+        dsr_renderers = []
+
+        for rov_name, color in zip(rovs, colors):
+            d = dsr_df[dsr_df[rov_col].astype(str) == str(rov_name)].copy()
+
+            full_src = ColumnDataSource(d)
+            plot_src = ColumnDataSource(d)
+
+            r = p.scatter(
+                x="__mx",
+                y="__my",
+                marker=marker,
+                size=7,
+                alpha=0.90,
+                source=plot_src,
+                line_color=color,
+                fill_color=color,
+                legend_label=f"{rov_name} ({len(d)})",
+            )
+
+            p.add_tools(
+                HoverTool(
+                    renderers=[r],
+                    tooltips=[
+                        ("Layer", layer_name),
+                        ("Line", "@Line"),
+                        ("Station", "@Station"),
+                        ("Node", "@Node"),
+                        ("Deploy ROV", "@ROV"),
+                        ("Recovery ROV", "@ROV1"),
+                        ("Status", "@Status"),
+                        ("Time", "@_MapTime"),
+                        (x_col, f"@{x_col}{{0,0.00}}"),
+                        (y_col, f"@{y_col}{{0,0.00}}"),
+                    ],
+                )
+            )
+
+            full_sources.append(full_src)
+            plot_sources.append(plot_src)
+            dsr_renderers.append(r)
+
+        days = sorted(dsr_df["_day"].dropna().unique().tolist())
+
+        from_day_select = Select(
+            title="From day",
+            value=days[0],
+            options=days,
+            width=130,
+        )
+
+        to_day_select = Select(
+            title="To day",
+            value=days[-1],
+            options=days,
+            width=130,
+        )
+
+        rov_select = MultiChoice(
+            title="Visible ROVs",
+            value=rovs,
+            options=rovs,
+            width=250,
+        )
+
+        callback_code = """
+            let fromDay = from_day_select.value;
+            let toDay = to_day_select.value;
+
+            if (fromDay > toDay) {
+                const tmp = fromDay;
+                fromDay = toDay;
+                toDay = tmp;
+            }
+
+            const selected = new Set(rov_select.value);
+
+            for (let s = 0; s < full_sources.length; s++) {
+                const full = full_sources[s];
+                const out = plot_sources[s];
+                const rovName = rov_names[s];
+
+                const keys = Object.keys(full.data);
+                const newData = {};
+
+                for (const k of keys) {
+                    newData[k] = [];
+                }
+
+                if (selected.has(rovName)) {
+                    const days = full.data["_day"];
+
+                    for (let i = 0; i < days.length; i++) {
+                        if (days[i] >= fromDay && days[i] <= toDay) {
+                            for (const k of keys) {
+                                newData[k].push(full.data[k][i]);
+                            }
+                        }
+                    }
+                }
+
+                out.data = newData;
+                out.change.emit();
+            }
+        """
+
+        filter_cb = CustomJS(
+            args=dict(
+                from_day_select=from_day_select,
+                to_day_select=to_day_select,
+                rov_select=rov_select,
+                full_sources=full_sources,
+                plot_sources=plot_sources,
+                rov_names=rovs,
+            ),
+            code=callback_code,
+        )
+
+        from_day_select.js_on_change("value", filter_cb)
+        to_day_select.js_on_change("value", filter_cb)
+        rov_select.js_on_change("value", filter_cb)
+
+        reset_btn = Button(label="Reset", button_type="default", width=70)
+        reset_btn.js_on_click(
+            CustomJS(
+                args=dict(
+                    from_day_select=from_day_select,
+                    to_day_select=to_day_select,
+                    first_day=days[0],
+                    last_day=days[-1],
+                ),
+                code="""
+                    from_day_select.value = first_day;
+                    to_day_select.value = last_day;
+                """,
+            )
+        )
+
+        select_all_btn = Button(label="All ROVs", button_type="primary", width=80)
+        select_all_btn.js_on_click(
+            CustomJS(
+                args=dict(rov_select=rov_select, rovs=rovs),
+                code="rov_select.value = rovs;",
+            )
+        )
+
+        clear_rovs_btn = Button(label="No ROVs", button_type="default", width=85)
+        clear_rovs_btn.js_on_click(
+            CustomJS(
+                args=dict(rov_select=rov_select),
+                code="rov_select.value = [];",
+            )
+        )
+
+        if p.legend and len(p.legend) > 0:
+            p.legend.click_policy = "hide"
+            p.legend.location = "top_left"
+            p.legend.visible = True
+            p.legend.title = rov_col
+
+        toggle_legend_btn = Button(label="Hide legend", button_type="primary", width=105)
+
+        if p.legend and len(p.legend) > 0:
+            toggle_legend_btn.js_on_click(
+                CustomJS(
+                    args=dict(legend=p.legend[0], btn=toggle_legend_btn),
+                    code="""
+                        legend.visible = !legend.visible;
+                        btn.label = legend.visible ? "Hide legend" : "Show legend";
+                    """,
+                )
+            )
+        else:
+            toggle_legend_btn.disabled = True
+
+        cycle_legend_pos_btn = Button(label="Legend pos", button_type="default", width=105)
+
+        if p.legend and len(p.legend) > 0:
+            cycle_legend_pos_btn.js_on_click(
+                CustomJS(
+                    args=dict(legend=p.legend[0]),
+                    code="""
+                        const positions = ["top_left", "top_right", "bottom_right", "bottom_left"];
+                        const current = legend.location;
+                        const idx = positions.indexOf(current);
+                        legend.location = positions[(idx + 1) % positions.length];
+                    """,
+                )
+            )
+        else:
+            cycle_legend_pos_btn.disabled = True
+
+        sp_rp = Spinner(title="RP size", low=1, high=100, step=1, value=5, width=90)
+
+        if r_rp is not None:
+            sp_rp.js_on_change(
+                "value",
+                CustomJS(args=dict(r=r_rp), code="r.glyph.size = cb_obj.value;"),
+            )
+        else:
+            sp_rp.disabled = True
+
+        sp_dsr = Spinner(title="DSR size", low=1, high=100, step=1, value=7, width=95)
+        sp_dsr.js_on_change(
+            "value",
+            CustomJS(
+                args=dict(renderers=dsr_renderers),
+                code="""
+                    for (const r of renderers) {
+                        r.glyph.size = cb_obj.value;
+                    }
+                """,
+            ),
+        )
+
+        info = Div(
+            text=f"""
+            <div style="font-size:12px; color:#666; white-space:nowrap;">
+                <b>{layer_name}</b> by <b>{rov_col}</b>,
+                date: <b>{time_col}</b>,
+                rows: <b>{len(dsr_df)}</b>
+            </div>
+            """,
+            width=260,
+        )
+
+        controls = row(
+            info,
+            from_day_select,
+            to_day_select,
+            rov_select,
+            reset_btn,
+            select_all_btn,
+            clear_rovs_btn,
+            toggle_legend_btn,
+            cycle_legend_pos_btn,
+            sp_rp,
+            sp_dsr,
+            sizing_mode="stretch_width",
+        )
+
+        layout = column(
+            controls,
+            p,
+            sizing_mode="stretch_both",
+        )
+
+        if is_show:
+            show(layout)
+            return None
+
+        if jason_item:
+            return json_item(layout)
+
+        return layout
 
     def make_dsr_deploy_speed_heading_map(
             self,
