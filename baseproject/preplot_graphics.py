@@ -119,7 +119,6 @@ class PreplotGraphics:
                 x_axis_type="mercator" if show_tiles else "linear",
                 y_axis_type="mercator" if show_tiles else "linear",
                 sizing_mode="stretch_both",
-                height=height,
                 tools="pan,wheel_zoom,box_zoom,reset,save",
                 active_scroll="wheel_zoom",
                 title=f"PREPLOT MAP FOR {self.pdb.get_main().name} – RL + SL EPSG:{src_epsg}",

@@ -15,7 +15,7 @@ db.sqlite3
 *.sqlite3
 # Archives
 *.zip
-*.7zgit
+*.7z
 
 # Virtualenv
 myenv/

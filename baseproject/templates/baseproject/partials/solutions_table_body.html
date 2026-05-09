@@ -1,10 +1,45 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+{% for row in solutions %}
+<tr>
+  <td>{{ row.ID }}</td>
+
+  <td class="fw-semibold">
+    {{ row.Solution }}
+  </td>
+
+  <td class="text-muted small">
+    {{ row.Comments|default:"" }}
+  </td>
+
+  <td>
+    {% if row.IsBase %}
+      <span class="badge text-bg-success">Base</span>
+    {% else %}
+      <span class="badge text-bg-secondary">Custom</span>
+    {% endif %}
+  </td>
+
+  <td class="text-end">
+    {% if row.IsBase %}
+      <button type="button"
+              class="btn btn-sm btn-outline-secondary"
+              disabled>
+        <i class="fas fa-lock me-1"></i>
+        Locked
+      </button>
+    {% else %}
+      <button type="button"
+              class="btn btn-sm btn-outline-danger delete-solution-btn"
+              data-id="{{ row.ID }}"
+              data-delete-url="{% url 'solution_delete' %}">
+        <i class="fas fa-trash"></i>
+      </button>
+    {% endif %}
+  </td>
+</tr>
+{% empty %}
+<tr>
+  <td colspan="5" class="text-center text-muted py-4">
+    No solutions found.
+  </td>
+</tr>
+{% endfor %}

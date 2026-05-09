@@ -126,7 +126,13 @@ BBox plots GNSS1 vs GNSS2  and ROV1 vs ROV2 dx/dy plots
 Fixed an error in Daily recover statistics 
 Deployed and recovered by ROV now has date filters 
 ### Changed
-  
+## [2026.1.02.06] - 2026-05-07
+### Added
+Source lines plots above WD,GD and Density map added
+On Preplot page SHooting Template added and Also it is available in ROV page
+### Fixed
+ 
+### Changed  
 
   
 

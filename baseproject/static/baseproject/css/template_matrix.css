@@ -1,0 +1,352 @@
+/* ============================================================
+   Template Matrix / Production Status
+   ============================================================ */
+
+.vo-matrix-shell {
+  width: 100%;
+}
+
+/* Scroll container */
+.visual-offset-table-wrap {
+  height: 72vh;
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  background: #ffffff;
+}
+
+/* Main matrix table */
+.visual-offset-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  min-width: max-content;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Base cells */
+.visual-offset-table th,
+.visual-offset-table td {
+  min-width: 62px;
+  width: 62px;
+  height: 22px;
+  padding: 2px 5px;
+  text-align: center;
+  vertical-align: middle;
+  border-right: 1px solid rgba(40, 40, 40, 0.35);
+  border-bottom: 1px solid rgba(40, 40, 40, 0.35);
+}
+
+/* ============================================================
+   Sticky 3-row header
+   ============================================================ */
+
+.visual-offset-table thead th {
+  position: sticky;
+  font-weight: 900;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+}
+
+.visual-offset-table thead tr:nth-child(1) th {
+  top: 0;
+  z-index: 60;
+}
+
+.visual-offset-table thead tr:nth-child(2) th {
+  top: 22px;
+  z-index: 58;
+}
+
+.visual-offset-table thead tr:nth-child(3) th {
+  top: 44px;
+  z-index: 56;
+}
+
+/* ============================================================
+   Sticky left columns
+   ============================================================ */
+
+.visual-offset-table .vo-sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 50;
+  min-width: 78px;
+  width: 78px;
+  color: #111827;
+  font-weight: 900;
+}
+
+.visual-offset-table .vo-sticky-col-2 {
+  position: sticky;
+  left: 78px;
+  z-index: 49;
+  min-width: 128px;
+  width: 128px;
+  color: #111827;
+  font-weight: 900;
+  text-align: left;
+  padding-left: 7px;
+}
+
+.visual-offset-table thead .vo-sticky-col {
+  z-index: 90;
+}
+
+.visual-offset-table thead .vo-sticky-col-2 {
+  z-index: 88;
+}
+
+/* Top-left corners */
+.visual-offset-table .vo-corner {
+  background: #fff176 !important;
+}
+
+.visual-offset-table .vo-corner-2 {
+  background: #fde68a !important;
+}
+
+/* ============================================================
+   Header rows
+   ============================================================ */
+
+.visual-offset-table .vo-head-vessel {
+  background: #dbeafe;
+  color: #0f3b67;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.visual-offset-table .vo-head-seq {
+  background: #f8fafc;
+  color: #111827;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: normal;
+  line-height: 1.1;
+}
+
+.visual-offset-table .vo-head-sl {
+  background: #bbf7d0;
+  color: #052e16;
+  font-weight: 900;
+}
+
+/* Source header statuses */
+.visual-offset-table .vo-sl-all-deployed {
+  background: #86efac !important;
+  color: #052e16 !important;
+}
+
+.visual-offset-table .vo-sl-completed {
+  background: #166534 !important;
+  color: #ffffff !important;
+}
+
+/* ============================================================
+   Receiver line status colors
+   ============================================================ */
+
+/* White = preplot / not deployed */
+.visual-offset-table .vo-rline-preplot {
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+/* Yellow = fully deployed */
+.visual-offset-table .vo-rline-deployed {
+  background: #facc15 !important;
+  color: #111827 !important;
+}
+
+/* Green = source lines completed, ready for recovery */
+.visual-offset-table .vo-rline-ready-recovery {
+  background: #22c55e !important;
+  color: #052e16 !important;
+}
+
+/* Orange = recovered */
+.visual-offset-table .vo-rline-recovered {
+  background: #f59e0b !important;
+  color: #111827 !important;
+}
+
+/* ============================================================
+   Vessel column colors
+   ============================================================ */
+
+.visual-offset-table .vo-vessel-empty {
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+.visual-offset-table .vo-vessel-island-pride {
+  background: #dbeafe !important;
+  color: #0f172a !important;
+}
+
+.visual-offset-table .vo-vessel-olympic-artemis {
+  background: #ede9fe !important;
+  color: #0f172a !important;
+}
+
+.visual-offset-table .vo-vessel-armada8603 {
+  background: #dcfce7 !important;
+  color: #0f172a !important;
+}
+
+.visual-offset-table .vo-vessel-sanco-swift {
+  background: #ffedd5 !important;
+  color: #0f172a !important;
+}
+
+.visual-offset-table .vo-vessel-eagle-explorer {
+  background: #e0f2fe !important;
+  color: #0f172a !important;
+}
+
+/* ============================================================
+   Matrix cell states
+   ============================================================ */
+
+.visual-offset-table .vo-empty {
+  background: #ffffff;
+}
+
+/* Planned source cell */
+.visual-offset-table .vo-active {
+  background: #f5a623;
+  color: #111827;
+  font-weight: 800;
+}
+
+/* Source completed */
+.visual-offset-table .vo-completed {
+  background: #22c55e;
+  color: #052e16;
+  font-weight: 900;
+}
+
+/* ============================================================
+   Hover row + column
+   ============================================================ */
+
+.visual-offset-table tr.vo-hover-row td,
+.visual-offset-table tr.vo-hover-row .vo-rline,
+.visual-offset-table tr.vo-hover-row .vo-rline-vessel {
+  background-color: #fff3bf !important;
+}
+
+.visual-offset-table td.vo-hover-col,
+.visual-offset-table th.vo-hover-col {
+  background-color: #ffe8a3 !important;
+}
+
+/* Keep planned/completed cells stronger on hover */
+.visual-offset-table .vo-active.vo-hover-col,
+.visual-offset-table tr.vo-hover-row .vo-active {
+  background-color: #d97706 !important;
+}
+
+.visual-offset-table .vo-completed.vo-hover-col,
+.visual-offset-table tr.vo-hover-row .vo-completed {
+  background-color: #16a34a !important;
+}
+
+/* Keep receiver statuses readable on hover */
+.visual-offset-table .vo-rline-deployed.vo-hover-col,
+.visual-offset-table tr.vo-hover-row .vo-rline-deployed {
+  background-color: #eab308 !important;
+}
+
+.visual-offset-table .vo-rline-ready-recovery.vo-hover-col,
+.visual-offset-table tr.vo-hover-row .vo-rline-ready-recovery {
+  background-color: #16a34a !important;
+}
+
+.visual-offset-table .vo-rline-recovered.vo-hover-col,
+.visual-offset-table tr.vo-hover-row .vo-rline-recovered {
+  background-color: #d97706 !important;
+}
+
+/* ============================================================
+   Toolbar / legend
+   ============================================================ */
+
+.vo-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 0.85rem;
+  background: linear-gradient(135deg, #e8fff3, #eef6ff);
+}
+
+.vo-title {
+  font-size: 0.9rem;
+  font-weight: 900;
+  color: #0f5132;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vo-subtitle {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.vo-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.72rem;
+  color: #334155;
+}
+
+.vo-dot {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-right: 0.25rem;
+  border: 1px solid rgba(15, 23, 42, 0.25);
+  border-radius: 0.2rem;
+  vertical-align: middle;
+}
+
+.vo-dot-preplot {
+  background: #ffffff;
+}
+
+.vo-dot-deployed {
+  background: #facc15;
+}
+
+.vo-dot-ready {
+  background: #22c55e;
+}
+
+.vo-dot-recovered {
+  background: #f59e0b;
+}
+
+.vo-dot-plan {
+  background: #f5a623;
+}
+
+.vo-dot-source {
+  background: #22c55e;
+}
+
+/* Empty state */
+.vo-empty-message {
+  padding: 1.25rem !important;
+  text-align: center;
+  font-weight: 800;
+  background: #fff3cd;
+  color: #664d03;
+}

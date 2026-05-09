@@ -1,0 +1,258 @@
+.bp-page-shell {
+  padding-top: .75rem;
+}
+
+.bp-hero {
+  border-radius: 1rem;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(13, 110, 253, .16), transparent 28rem),
+    linear-gradient(135deg, rgba(4, 17, 34, .96), rgba(11, 44, 64, .94));
+  color: #f8fbff;
+}
+
+.bp-hero .text-muted { color: rgba(248, 251, 255, .72) !important; }
+
+.bp-hero-icon {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,.12);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.16);
+  font-size: 1.3rem;
+}
+
+.bp-action-btn {
+  border-radius: .75rem;
+  font-weight: 600;
+  box-shadow: 0 .45rem 1rem rgba(0,0,0,.18);
+}
+
+.bp-main-grid { align-items: flex-start; }
+
+.bp-panel {
+  border-radius: 1rem;
+  overflow: hidden;
+  background: var(--bs-body-bg);
+}
+
+.bp-card-header {
+  min-height: 4.25rem;
+  color: #fff;
+  background:
+    linear-gradient(135deg, rgba(20, 55, 95, .98), rgba(15, 92, 133, .96));
+  border-bottom: 0;
+}
+
+.bp-card-header-green {
+  background:
+    linear-gradient(135deg, rgba(16, 88, 68, .98), rgba(24, 135, 92, .94));
+}
+
+.bp-kicker {
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  font-size: .68rem;
+  color: rgba(255,255,255,.72);
+  font-weight: 700;
+  margin-bottom: .2rem;
+}
+
+.bp-tabs-wrap {
+  background: linear-gradient(180deg, rgba(13,110,253,.06), transparent);
+}
+
+.bp-nav-pills {
+  gap: .35rem;
+}
+
+.bp-nav-pills .nav-link {
+  border-radius: .75rem;
+  font-weight: 700;
+  font-size: .82rem;
+  color: var(--bs-secondary-color);
+  background: rgba(108,117,125,.09);
+  border: 1px solid rgba(108,117,125,.13);
+}
+
+.bp-nav-pills .nav-link:hover {
+  background: rgba(13,110,253,.11);
+  color: var(--bs-primary);
+}
+
+.bp-nav-pills .nav-link.active {
+  color: #fff;
+  background: linear-gradient(135deg, #0d6efd, #0aa2c0);
+  border-color: transparent;
+  box-shadow: 0 .45rem 1rem rgba(13,110,253,.22);
+}
+
+.bp-nav-pills-right .nav-link.active {
+  background: linear-gradient(135deg, #198754, #20c997);
+  box-shadow: 0 .45rem 1rem rgba(25,135,84,.22);
+}
+
+.bp-tab-content {
+  padding: .85rem;
+}
+
+.bp-map-shell {
+  border: 1px solid rgba(108,117,125,.18);
+  border-radius: 1rem;
+  overflow: hidden;
+  background: rgba(108,117,125,.06);
+  min-height: 72vh;
+}
+
+#preplot-map-div {
+  height: 72vh;
+  min-height: 520px;
+}
+
+.bp-point-scroll {
+  height: 55vh;
+  border: 1px solid rgba(108,117,125,.18);
+  border-radius: .8rem;
+  overflow: auto;
+}
+
+.bp-empty-mini {
+  border: 1px dashed rgba(108,117,125,.35);
+  border-radius: .85rem;
+  padding: 1rem;
+  color: var(--bs-secondary-color);
+  background: rgba(108,117,125,.06);
+}
+
+.bp-page-shell .card,
+.bp-page-shell .table {
+  --bs-card-border-radius: 1rem;
+}
+
+.bp-page-shell table thead th,
+.bp-page-shell .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bs-tertiary-bg, #f8f9fa);
+  white-space: nowrap;
+}
+
+.bp-page-shell .table-responsive,
+.bp-page-shell .table-scroll {
+  scrollbar-width: thin;
+}
+
+.bp-page-shell input[type="color"] {
+  min-width: 2.5rem;
+  min-height: 2rem;
+  padding: .15rem;
+  border-radius: .55rem;
+}
+
+.seis-empty-state {
+  min-height: 52vh;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: var(--bs-secondary-color);
+}
+
+.seis-empty-state-icon {
+  width: 4rem;
+  height: 4rem;
+  display: grid;
+  place-items: center;
+  margin: 0 auto .75rem;
+  border-radius: 1.25rem;
+  background: rgba(13,110,253,.1);
+  color: var(--bs-primary);
+  font-size: 1.5rem;
+}
+
+@media (max-width: 1199.98px) {
+  #leftpreplotColumn,
+  #rightpreplotColumn {
+    width: 100%;
+  }
+  #preplot-map-div {
+    height: 65vh;
+    min-height: 420px;
+  }
+}
+
+
+/* 2026-05-03 compact layout fix
+   Keep original functionality but stop panels/maps/tables from reserving huge blank space. */
+.bp-main-grid {
+  align-items: flex-start !important;
+}
+
+.bp-panel {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.bp-panel > .card-body,
+.bp-panel .tab-content,
+.bp-panel .tab-pane {
+  min-height: 0 !important;
+}
+
+.bp-tab-content {
+  padding: .65rem !important;
+}
+
+.bp-map-shell {
+  min-height: 0 !important;
+  height: auto !important;
+  min-height: 70vh;
+  max-height: none !important;
+  overflow: hidden;
+}
+
+#preplot-map-div {
+  height: 42vh !important;
+  min-height: 320px !important;
+  max-height: 520px !important;
+  overflow: hidden !important;
+}
+
+#preplot-map-div .bk-root,
+#preplot-map-div .bk,
+#preplot-map-div canvas {
+  max-width: 100% !important;
+}
+
+.bp-point-scroll {
+  height: 34vh !important;
+  min-height: 260px !important;
+  max-height: 440px !important;
+  overflow: auto !important;
+}
+
+#leftpreplotColumn .bp-panel,
+#rightpreplotColumn .bp-panel {
+  margin-bottom: 0 !important;
+}
+
+#leftpreplotColumn > .mt-3 {
+  margin-top: .75rem !important;
+}
+
+.bp-page-shell .card-body {
+  min-height: 0 !important;
+}
+
+@media (max-width: 1199.98px) {
+  #preplot-map-div {
+    height: 38vh !important;
+    min-height: 300px !important;
+  }
+  .bp-point-scroll {
+    height: 32vh !important;
+    min-height: 240px !important;
+  }
+}

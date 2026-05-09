@@ -1,10 +1,203 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<!-- ================= NOAR SPS LOAD MODAL ================= -->
+<div class="modal fade"
+     id="noarLoadSpsModal"
+     tabindex="-1"
+     aria-labelledby="noarLoadSpsModalLabel"
+     aria-hidden="true">
+
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+
+            <form id="noar-load-sps-form"
+                  method="post"
+                  enctype="multipart/form-data"
+                  data-load-url="{% url 'noar:noar_load_sps' %}">
+
+                {% csrf_token %}
+
+                <!-- HEADER -->
+                <div class="modal-header bg-dark text-white">
+
+                    <h5 class="modal-title"
+                        id="noarLoadSpsModalLabel">
+
+                        <i class="fas fa-folder-open me-2"></i>
+                        Load SPS Files
+
+                    </h5>
+
+                    <button type="button"
+                            class="btn-close btn-close-white"
+                            data-bs-dismiss="modal"
+                            aria-label="Close"></button>
+
+                </div>
+
+                <!-- BODY -->
+                <div class="modal-body">
+
+                    <div class="row g-3">
+
+                        <!-- FILES -->
+                        <div class="col-12">
+
+                            <label class="form-label fw-semibold">
+                                SPS File / Files
+                            </label>
+
+                            <input type="file"
+                                   class="form-control"
+                                   id="noar-sps-files"
+                                   name="files"
+                                   multiple
+                                   required>
+
+                            <div class="form-text">
+                                Select one or many SPS files
+                            </div>
+
+                        </div>
+
+                        <!-- SPS REVISION -->
+                        <div class="col-md-6">
+
+                            <label class="form-label fw-semibold">
+                                SPS Revision
+                            </label>
+
+                            <select class="form-select"
+                                    id="noar-sps-revision"
+                                    name="sps_revision_id"
+                                    required>
+
+                                {% for rev in sps_revisions %}
+
+                                    <option value="{{ rev.id }}"
+                                            {% if rev.default_format %}selected{% endif %}>
+
+                                        {{ rev.rev_name }}
+
+                                    </option>
+
+                                {% endfor %}
+
+                            </select>
+
+                        </div>
+
+                        <!-- YEAR -->
+                        <div class="col-md-6">
+
+                            <label class="form-label fw-semibold">
+                                Year
+                            </label>
+
+                            <input type="number"
+                                   class="form-control"
+                                   id="noar-sps-year"
+                                   name="year"
+                                   min="1990"
+                                   max="2100"
+                                   value="{{ current_year|default:2026 }}"
+                                   required>
+
+                        </div>
+
+                        <!-- NODE VESSEL -->
+                        <div class="col-md-6">
+
+                            <label class="form-label fw-semibold">
+                                Node Vessel
+                            </label>
+
+                            <select class="form-select"
+                                    id="noar-node-vessel"
+                                    name="node_vessel_fk"
+                                    required>
+
+                                <option value="">
+                                    Select vessel...
+                                </option>
+
+                                {% for vessel in project_fleet %}
+
+                                    {% if vessel.vessel_type == "Node" %}
+
+                                        <option value="{{ vessel.id }}">
+
+                                            {{ vessel.vessel_name }}
+
+                                        </option>
+
+                                    {% endif %}
+
+                                {% endfor %}
+
+                            </select>
+
+                        </div>
+
+                        <!-- SOLUTION -->
+                        <div class="col-md-6">
+
+                            <label class="form-label fw-semibold">
+                                Solution
+                            </label>
+
+                            <select class="form-select"
+                                    id="noar-solution"
+                                    name="solution_fk">
+
+                                <option value="">
+                                    Default / Auto
+                                </option>
+
+                                {% for solution in solutions %}
+
+                                    <option value="{{ solution.ID }}">
+
+                                        {{ solution.Solution }}
+
+                                    </option>
+
+                                {% endfor %}
+
+                            </select>
+
+                        </div>
+
+                    </div>
+
+                    <!-- STATUS -->
+                    <div id="noar-load-sps-status"
+                         class="alert d-none mt-3 mb-0"></div>
+
+                </div>
+
+                <!-- FOOTER -->
+                <div class="modal-footer">
+
+                    <button type="button"
+                            class="btn btn-secondary"
+                            data-bs-dismiss="modal">
+
+                        Cancel
+
+                    </button>
+
+                    <button type="submit"
+                            class="btn btn-warning"
+                            id="noar-load-sps-submit">
+
+                        <i class="fas fa-upload me-2"></i>
+                        Load SPS
+
+                    </button>
+
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+</div>

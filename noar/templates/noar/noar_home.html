@@ -24,7 +24,7 @@
             <!-- BUTTONS -->
             <button type="button"
                     class="btn btn-warning float-end me-2"
-                    title="Load NOAR data"
+                    title="Load SPS"
                     id="btn-noar-load">
                 <i class="fas fa-folder-open"></i>
             </button>
@@ -40,139 +40,114 @@
     </div>
 
     <!-- ===== MAIN LAYOUT ===== -->
-    <div class="row">
+    <div class="noar-split-wrap" id="noar-split-wrap">
 
-        <!-- ================= LEFT COLUMN ================= -->
-        <div class="col-4" id="left-noar-col">
+        <!-- ================= LEFT PANEL ================= -->
+        <aside class="noar-left-panel" id="left-noar-col">
 
-            <!-- RESIZE BUTTON -->
-            <div class="d-flex align-items-center mb-2">
-                <div class="flex-grow-1"></div>
-                <div class="flex-grow-1 text-end">
-                    <button type="button"
-                            class="btn btn-sm float-end"
-                            id="toggle-left-noar-btn">
-                        <i class="fas fa-expand" id="left-noar-toggle-icon"></i>
-                    </button>
-                </div>
-            </div>
-
-            <!-- LINES CARD -->
-            <div class="card shadow-sm">
-
-                <div class="card-header bg-dark text-white">
+            <div class="noar-panel-toolbar">
+                <div>
                     <strong>
                         <i class="fas fa-route me-2"></i>RLSolution Lines
                     </strong>
                 </div>
 
-                <div class="card-body p-2">
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        id="toggle-left-noar-btn"
+                        title="Collapse / expand left panel">
+                    <i class="fas fa-expand" id="left-noar-toggle-icon"></i>
+                </button>
+            </div>
 
-                    <input type="text"
-                           class="form-control form-control-sm mb-2"
-                           id="noar-line-filter"
-                           placeholder="Filter line...">
+            <div class="noar-panel-body">
 
-                    <div class="table-responsive noar-left-table-scroll">
+                <input type="text"
+                       class="form-control form-control-sm mb-2"
+                       id="noar-line-filter"
+                       placeholder="Filter line...">
 
-                        <table class="table table-sm table-hover table-striped mb-0">
-
-                            <thead class="table-dark sticky-top">
-                                <tr>
-                                    <th>Line</th>
-                                    <th class="text-end">FSP</th>
-                                    <th class="text-end">LSP</th>
-                                </tr>
-                            </thead>
-
-                            <tbody id="noar-lines-tbody">
-                                <tr>
-                                    <td colspan="3" class="text-center text-muted py-3">
-                                        RLSolution lines will be loaded here
-                                    </td>
-                                </tr>
-                            </tbody>
-
-                        </table>
-
-                    </div>
-
+                <div class="table-responsive noar-left-table-scroll">
                 </div>
 
             </div>
 
-        </div>
-        <!-- END LEFT -->
+        </aside>
 
-        <!-- ================= RIGHT COLUMN ================= -->
-        <div class="col-8 show collapse" id="right-noar-col">
+        <!-- RESIZER LIKE SVP -->
+        <div class="noar-split-resizer" id="noar-split-resizer"></div>
 
-            <!-- TOP BAR WITH PILLS + RESIZE -->
-            <div class="d-flex align-items-center mb-2">
+        <!-- ================= RIGHT PANEL ================= -->
+        <main class="noar-right-panel" id="right-noar-col">
 
-                <div class="flex-grow-1"></div>
+            <!-- TOP BAR WITH PILLS -->
+            <div class="noar-right-toolbar">
 
-                <!-- PILLS -->
-                <div>
-                    <ul class="nav nav-pills mb-3" id="noar-pills-tab" role="tablist">
+                <ul class="nav nav-pills" id="noar-pills-tab" role="tablist">
 
-                        <li class="nav-item">
-                            <button class="nav-link active"
-                                    id="noar-map-tab"
-                                    data-bs-toggle="pill"
-                                    data-bs-target="#noar-map"
-                                    type="button">
-                                <i class="fas fa-map me-2"></i>MAP
-                            </button>
-                        </li>
+                    <li class="nav-item">
+                        <button class="nav-link active"
+                                id="noar-map-tab"
+                                data-bs-toggle="pill"
+                                data-bs-target="#noar-map"
+                                type="button"
+                                role="tab"
+                                aria-controls="noar-map"
+                                aria-selected="true">
+                            <i class="fas fa-map me-2"></i>MAP
+                        </button>
+                    </li>
 
-                        <li class="nav-item">
-                            <button class="nav-link"
-                                    id="noar-table-tab"
-                                    data-bs-toggle="pill"
-                                    data-bs-target="#noar-table"
-                                    type="button">
-                                <i class="fas fa-table me-2"></i>TABLE
-                            </button>
-                        </li>
+                    <li class="nav-item">
+                        <button class="nav-link"
+                                id="noar-table-tab"
+                                data-bs-toggle="pill"
+                                data-bs-target="#noar-table"
+                                type="button"
+                                role="tab"
+                                aria-controls="noar-table"
+                                aria-selected="false">
+                            <i class="fas fa-table me-2"></i>TABLE
+                        </button>
+                    </li>
 
-                        <li class="nav-item">
-                            <button class="nav-link"
-                                    id="noar-config-tab"
-                                    data-bs-toggle="pill"
-                                    data-bs-target="#noar-config"
-                                    type="button">
-                                <i class="fas fa-gears me-2"></i>CONFIG
-                            </button>
-                        </li>
+                    <li class="nav-item">
+                        <button class="nav-link"
+                                id="noar-config-tab"
+                                data-bs-toggle="pill"
+                                data-bs-target="#noar-config"
+                                type="button"
+                                role="tab"
+                                aria-controls="noar-config"
+                                aria-selected="false">
+                            <i class="fas fa-gears me-2"></i>CONFIG
+                        </button>
+                    </li>
 
-                    </ul>
-                </div>
+                </ul>
 
-                <!-- RIGHT RESIZE BUTTON -->
-                <div class="flex-grow-1 text-end">
-                    <button type="button"
-                            class="btn btn-sm float-end"
-                            id="toggle-right-noar-btn">
-                        <i class="fas fa-expand" id="right-noar-toggle-icon"></i>
-                    </button>
-                </div>
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        id="toggle-right-noar-btn"
+                        title="Maximize right panel">
+                    <i class="fas fa-expand" id="right-noar-toggle-icon"></i>
+                </button>
 
             </div>
 
             <!-- ===== TAB CONTENT ===== -->
-            <div class="tab-content" id="noar-pills-tabContent">
+            <div class="tab-content noar-tab-content" id="noar-pills-tabContent">
 
                 <!-- MAP TAB -->
                 <div class="tab-pane fade show active"
                      id="noar-map"
-                     role="tabpanel">
+                     role="tabpanel"
+                     aria-labelledby="noar-map-tab">
 
-                    <div class="w-100 bokeh-light-scope"
-                         id="noar-map-container"
-                         style="height: 80vh;">
+                    <div class="w-100 bokeh-light-scope noar-fill-panel"
+                         id="noar-map-container">
 
-                        <div class="d-flex align-items-center justify-content-center h-100 text-muted border rounded">
+                        <div class="noar-empty-state">
                             Select line to load NOAR map
                         </div>
 
@@ -183,13 +158,13 @@
                 <!-- TABLE TAB -->
                 <div class="tab-pane fade"
                      id="noar-table"
-                     role="tabpanel">
+                     role="tabpanel"
+                     aria-labelledby="noar-table-tab">
 
                     <div id="noar-table-container"
-                         class="border rounded p-3"
-                         style="height: 80vh; overflow:auto;">
+                         class="noar-fill-panel border rounded">
 
-                        <div class="text-center text-muted mt-5">
+                        <div class="noar-empty-state">
                             Select line to load table
                         </div>
 
@@ -200,13 +175,13 @@
                 <!-- CONFIG TAB -->
                 <div class="tab-pane fade"
                      id="noar-config"
-                     role="tabpanel">
+                     role="tabpanel"
+                     aria-labelledby="noar-config-tab">
 
                     <div id="noar-config-container"
-                         class="border rounded p-3"
-                         style="height: 80vh; overflow:auto;">
+                         class="noar-fill-panel border rounded">
 
-                        <div class="text-center text-muted mt-5">
+                        <div class="noar-empty-state">
                             NOAR configuration will be here
                         </div>
 
@@ -216,17 +191,16 @@
 
             </div>
 
-        </div>
-        <!-- END RIGHT -->
+        </main>
 
     </div>
 
 </div>
 
-<!-- JS -->
-<script src="{% static 'noar/js/noar_layout.js' %}"></script>
+{% include "noar/modals/load_sps_modal.html" %}
 
 {% endblock %}
+
 {% block extra_js %}
-    <script type="module" src="{% static 'noar/js/init.js' %}"></script>
+<script type="module" src="{% static 'noar/js/init.js' %}"></script>
 {% endblock %}

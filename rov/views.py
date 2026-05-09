@@ -28,6 +28,7 @@ from rov.dsrclass import DSRDB
 from rov.bbox_graphics import BlackBoxGraphics
 from django.core.cache import cache
 from utils.decorators import log_action
+from baseproject.utils.project_template_db import ProjectTemplateDB
 from utils.audit import audit_event
 # Create your views here.
 @login_required
@@ -2216,3 +2217,63 @@ def rov_dsr_speed_heading_map_json(request):
     )
 
     return JsonResponse(item, safe=False)
+
+@login_required
+def rov_project_template_matrix_html(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({
+            "ok": False,
+            "error": "No active project",
+        }, status=400)
+
+    try:
+        ptdb = ProjectTemplateDB(project.db_path)
+        sl_order_mode = request.GET.get(
+            "sl_order_mode",
+            "custom_split",
+        )
+
+        sl_split_value = request.GET.get(
+            "sl_split_value",
+            17721,
+        )
+
+        left_group_order = request.GET.get(
+            "left_group_order",
+            "desc",
+        )
+
+        right_group_order = request.GET.get(
+            "right_group_order",
+            "desc",
+        )
+        matrix_data = ptdb.visual_offset_status_table_data()
+        """
+        matrix_data = ptdb.visual_offset_status_table_data(
+            sl_order_mode=sl_order_mode,
+            sl_split_value=sl_split_value,
+            left_group_order=left_group_order,
+            right_group_order=right_group_order,
+        )
+        """
+        html = render_to_string(
+            "baseproject/partials/project_template_status_matrix.html",
+            matrix_data,
+            request=request,
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "html": html,
+            "sl_count": matrix_data.get("sl_count", 0),
+            "rline_count": matrix_data.get("rline_count", 0),
+        })
+
+    except Exception as exc:
+        return JsonResponse({
+            "ok": False,
+            "error": str(exc),
+        }, status=500)

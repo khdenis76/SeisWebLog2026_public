@@ -1,67 +1,232 @@
-/* ===== NOAR LAYOUT (same as ROV style) ===== */
+/* =========================================================
+   MAIN SPLIT LAYOUT
+========================================================= */
 
-.noar-wrapper {
-    height: calc(100vh - 60px);
+.noar-split-wrap {
+    height: calc(100vh - 145px);
+    min-height: 600px;
+
+    display: grid;
+
+    grid-template-columns:
+        minmax(260px, 360px)
+        7px
+        minmax(0, 1fr);
+
+    gap: 0;
+
     overflow: hidden;
 }
 
-/* LEFT PANEL */
-.noar-left {
-    width: 280px;   /* 🔧 adjust if needed */
-    min-width: 280px;
-    max-width: 280px;
-    overflow-y: auto;
-    border-right: 1px solid #dee2e6;
-    background: #f8f9fa;
+/* LEFT COLLAPSED */
+.noar-split-wrap.noar-left-collapsed {
+    grid-template-columns:
+        0
+        7px
+        minmax(0, 1fr);
 }
 
-/* RIGHT PANEL */
-.noar-right {
-    flex-grow: 1;
+/* RIGHT MAXIMIZED */
+.noar-split-wrap.noar-right-maximized {
+    grid-template-columns:
+        0
+        7px
+        minmax(0, 1fr);
+}
+
+/* =========================================================
+   LEFT PANEL
+========================================================= */
+
+.noar-left-panel {
+    min-width: 0;
+
     overflow: hidden;
+
+    background: #ffffff;
+
+    border: 1px solid #dee2e6;
+    border-right: none;
+
+    border-radius: 0.5rem 0 0 0.5rem;
+
+    display: flex;
+    flex-direction: column;
 }
 
-.noar-right-body {
-    height: calc(100vh - 140px);
+/* =========================================================
+   RIGHT PANEL
+========================================================= */
+
+.noar-right-panel {
+    min-width: 0;
+
+    overflow: hidden;
+
+    background: #ffffff;
+
+    border: 1px solid #dee2e6;
+
+    border-radius: 0 0.5rem 0.5rem 0;
+
+    display: flex;
+    flex-direction: column;
+}
+
+/* =========================================================
+   RESIZER
+========================================================= */
+
+.noar-split-resizer {
+    cursor: col-resize;
+
+    background: #e9ecef;
+
+    border-top: 1px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.noar-split-resizer:hover {
+    background: #ced4da;
+}
+
+/* =========================================================
+   TOOLBARS
+========================================================= */
+
+.noar-panel-toolbar,
+.noar-right-toolbar {
+    min-height: 44px;
+
+    padding: 0.45rem 0.6rem;
+
+    border-bottom: 1px solid #dee2e6;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    gap: 0.5rem;
+
+    background: #ffffff;
+}
+
+/* =========================================================
+   LEFT BODY
+========================================================= */
+
+.noar-panel-body {
+    flex: 1;
+
+    min-height: 0;
+
+    padding: 0.5rem;
+
+    overflow: hidden;
+
+    display: flex;
+    flex-direction: column;
+}
+
+/* =========================================================
+   TABLE SCROLL
+========================================================= */
+
+.noar-left-table-scroll {
+    flex: 1;
+
+    min-height: 0;
+
     overflow: auto;
 }
 
-/* TABLE SCROLL */
-.noar-table-scroll {
-    max-height: calc(100vh - 200px);
-    overflow-y: auto;
+/* =========================================================
+   TAB CONTENT
+========================================================= */
+
+.noar-tab-content {
+    flex: 1;
+
+    min-height: 0;
+
+    overflow: hidden;
 }
 
-/* SELECTED ROW */
-.noar-line-row {
-    cursor: pointer;
-}
-
-.noar-line-row.active {
-    background: #0d6efd !important;
-    color: white;
-    font-weight: 600;
-}
-
-/* PLACEHOLDER */
-.noar-placeholder {
+.noar-tab-content > .tab-pane {
     height: 100%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    color: #6c757d;
-}
-.noar-left-table-scroll {
-    max-height: calc(100vh - 230px);
-    overflow-y: auto;
+
+    overflow: hidden;
 }
 
-.noar-line-row {
+/* =========================================================
+   FILL PANELS
+========================================================= */
+
+.noar-fill-panel {
+    height: 100%;
+
+    min-height: 0;
+
+    overflow: auto;
+
+    padding: 0.5rem;
+}
+
+/* =========================================================
+   EMPTY STATES
+========================================================= */
+
+.noar-empty-state {
+    height: 100%;
+
+    min-height: 250px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    color: #6c757d;
+
+    border: 1px dashed #ced4da;
+
+    border-radius: 0.5rem;
+
+    background: #f8f9fa;
+}
+
+/* =========================================================
+   BOKEH
+========================================================= */
+
+.bokeh-light-scope {
+    width: 100%;
+    height: 100%;
+}
+
+/* =========================================================
+   TABLE FIXES
+========================================================= */
+
+#noar-lines-tbody tr {
     cursor: pointer;
 }
 
-.noar-line-row.active {
-    background-color: #0d6efd !important;
-    color: white;
-    font-weight: 600;
+#noar-lines-tbody tr:hover {
+    background: #edf4ff;
+}
+
+/* =========================================================
+   NAV PILLS
+========================================================= */
+
+.noar-right-toolbar .nav-pills .nav-link {
+    padding: 0.35rem 0.8rem;
+}
+
+/* =========================================================
+   STICKY HEADER
+========================================================= */
+
+.sticky-top {
+    z-index: 5;
 }

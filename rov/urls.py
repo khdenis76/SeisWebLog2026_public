@@ -42,4 +42,5 @@ urlpatterns = [
     path("recdb/primary/histograms/",load_recdb_primary_histograms,name="load_recdb_primary_histograms",),
     path("api/map/dsr-rov/<str:mode>/", rov_dsr_rov_map_json, name="rov_dsr_rov_map_json"),
     path("api/dsr-speed-heading-map/",rov_dsr_speed_heading_map_json,name="rov_dsr_speed_heading_map_json",),
+   path("project-template/matrix-html/",rov_project_template_matrix_html,name="rov_project_template_matrix_html",),
 ]

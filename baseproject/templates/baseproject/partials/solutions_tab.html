@@ -1,10 +1,105 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="card border-0 shadow-sm mt-2">
+
+  <div class="card-header bg-white">
+    <div class="d-flex justify-content-between align-items-center">
+
+      <div>
+        <div class="fw-bold">
+          <i class="fas fa-list-check me-2 text-success"></i>
+          Solutions
+        </div>
+
+        <div class="small text-muted">
+          Manage positioning / operation solutions used in project database.
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="card-body">
+
+    <form id="solutionAddForm"
+          class="row g-2 align-items-end mb-3"
+          data-add-url="{% url 'solution_add' %}">
+
+      {% csrf_token %}
+
+      <div class="col-md-4">
+        <label class="form-label small mb-1">
+          New solution
+        </label>
+
+        <input type="text"
+               name="solution"
+               class="form-control form-control-sm"
+               placeholder="Example: Acoustic QC">
+      </div>
+
+      <div class="col-md-5">
+        <label class="form-label small mb-1">
+          Comments
+        </label>
+
+        <input type="text"
+               name="comments"
+               class="form-control form-control-sm"
+               placeholder="Optional comments">
+      </div>
+
+      <div class="col-auto">
+        <button type="submit"
+                class="btn btn-success btn-sm">
+          <i class="fas fa-plus me-1"></i>
+          Add Solution
+        </button>
+      </div>
+
+    </form>
+
+    <div id="solutionMessage"
+         class="small mb-2"></div>
+
+    <div class="table-scroll border rounded"
+         style="max-height:70vh; overflow:auto;">
+
+      <table class="table table-sm table-hover align-middle mb-0">
+
+        <thead class="table-light sticky-top">
+          <tr>
+
+            <th style="width:80px;">
+              ID
+            </th>
+
+            <th style="width:260px;">
+              Solution
+            </th>
+
+            <th>
+              Comments
+            </th>
+
+            <th style="width:120px;">
+              Type
+            </th>
+
+            <th style="width:120px;"
+                class="text-end">
+              Action
+            </th>
+
+          </tr>
+        </thead>
+
+        <tbody id="bp-solutions-tbody">
+          {% include "baseproject/partials/solutions_table_body.html" %}
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
+</div>

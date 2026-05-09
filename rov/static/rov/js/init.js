@@ -34,6 +34,7 @@ import {initEOLReport} from "./eol_report.js";
 import {initRECDBHistogramCharts} from "./initRECDBHistogram.js";
 import {initROVDepRecLoad} from "./initROVDepRecLoad.js";
 import {initDSRSpeedHeadingMap} from "./initDSRSpeedHeadingMap.js";
+import {initProjectTemplateMatrixLazy} from "./initProjectTemplateMatrixLazy.js";
 
 
 
@@ -73,6 +74,7 @@ export function initAllJSForRovUpload() {
   initRECDBHistogramCharts();
   initROVDepRecLoad();
   initDSRSpeedHeadingMap();
+  initProjectTemplateMatrixLazy();
 
 
     // GNSS QC

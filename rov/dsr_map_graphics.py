@@ -1131,6 +1131,233 @@ class DSRMapPlots:
 
         return layout
 
+    def make_map_multi_layers_datashader(
+            self,
+            *,
+            rp_df=None,
+            dsr_df=None,
+            sm_df=None,
+            rec_db_df=None,
+            title="PROJECT PROGRESS MAP",
+            layers=None,
+            show_preplot=True,
+            show_shapes=True,
+            show_sm=True,
+            show_tiles=False,
+            plot_width=1300,
+            plot_height=800,
+            canvas_width=1600,
+            canvas_height=1000,
+            is_show=False,
+            save_html_path=None,
+    ):
+        import numpy as np
+        import pandas as pd
+        import datashader as ds
+        import datashader.transfer_functions as tf
+        import colorcet as cc
+
+        from bokeh.embed import json_item
+        from bokeh.models import Range1d, Legend, LegendItem
+        from bokeh.plotting import figure, save, output_file
+
+        if layers is None:
+            layers = []
+
+        df_map = {
+            "rp": rp_df,
+            "preplot": rp_df,
+            "dsr": dsr_df,
+            "sm": sm_df,
+            "rec": rec_db_df,
+            "rec_db": rec_db_df,
+        }
+
+        def _clean_df(df, x_col, y_col, where=None):
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            if x_col not in df.columns or y_col not in df.columns:
+                return pd.DataFrame()
+
+            out = df.copy()
+
+            if where:
+                try:
+                    out = out.query(where, engine="python")
+                except Exception as e:
+                    print(f"[Datashader map] Layer filter failed: {where} -> {e}")
+
+            out[x_col] = pd.to_numeric(out[x_col], errors="coerce")
+            out[y_col] = pd.to_numeric(out[y_col], errors="coerce")
+            out = out.dropna(subset=[x_col, y_col])
+
+            return out
+
+        # ---------------------------------------------------------
+        # Collect global bounds from all visible layers
+        # ---------------------------------------------------------
+        bounds_x = []
+        bounds_y = []
+
+        prepared_layers = []
+
+        for layer in layers:
+            df_key = layer.get("df")
+            df = df_map.get(df_key)
+
+            if df is None or df.empty:
+                continue
+
+            x_col = layer.get("x_col")
+            y_col = layer.get("y_col")
+            where = layer.get("where")
+
+            ldf = _clean_df(df, x_col, y_col, where)
+
+            if ldf.empty:
+                continue
+
+            bounds_x.extend([ldf[x_col].min(), ldf[x_col].max()])
+            bounds_y.extend([ldf[y_col].min(), ldf[y_col].max()])
+
+            prepared_layers.append((layer, ldf))
+
+        if show_preplot and rp_df is not None and not rp_df.empty:
+            x_col = "Easting" if "Easting" in rp_df.columns else None
+            y_col = "Northing" if "Northing" in rp_df.columns else None
+
+            if x_col and y_col:
+                tmp = _clean_df(rp_df, x_col, y_col)
+                if not tmp.empty:
+                    bounds_x.extend([tmp[x_col].min(), tmp[x_col].max()])
+                    bounds_y.extend([tmp[y_col].min(), tmp[y_col].max()])
+
+        if not bounds_x or not bounds_y:
+            p = figure(
+                title=title,
+                width=plot_width,
+                height=plot_height,
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+            )
+            p.text(x=[0], y=[0], text=["No data for Datashader map"])
+            return p if is_show else json_item(p)
+
+        x_min, x_max = float(min(bounds_x)), float(max(bounds_x))
+        y_min, y_max = float(min(bounds_y)), float(max(bounds_y))
+
+        pad_x = max((x_max - x_min) * 0.03, 10.0)
+        pad_y = max((y_max - y_min) * 0.03, 10.0)
+
+        x_range = (x_min - pad_x, x_max + pad_x)
+        y_range = (y_min - pad_y, y_max + pad_y)
+
+        p = figure(
+            title=title,
+            width=plot_width,
+            height=plot_height,
+            x_range=Range1d(*x_range),
+            y_range=Range1d(*y_range),
+            match_aspect=True,
+            tools="pan,wheel_zoom,box_zoom,reset,save",
+            active_scroll="wheel_zoom",
+        )
+
+        p.xaxis.axis_label = "Easting"
+        p.yaxis.axis_label = "Northing"
+
+        if show_tiles:
+            # Only use this if your coordinates are already Web Mercator.
+            p.add_tile("CartoDB Positron")
+
+        cvs = ds.Canvas(
+            plot_width=canvas_width,
+            plot_height=canvas_height,
+            x_range=x_range,
+            y_range=y_range,
+        )
+
+        legend_items = []
+
+        # ---------------------------------------------------------
+        # Optional preplot as normal Bokeh dots
+        # ---------------------------------------------------------
+        if show_preplot and rp_df is not None and not rp_df.empty:
+            if "Easting" in rp_df.columns and "Northing" in rp_df.columns:
+                pre = _clean_df(rp_df, "Easting", "Northing")
+                if not pre.empty:
+                    r = p.scatter(
+                        x=pre["Easting"],
+                        y=pre["Northing"],
+                        size=2,
+                        color="gray",
+                        alpha=0.35,
+                        marker="circle",
+                        name="Preplot",
+                    )
+                    legend_items.append(LegendItem(label="Preplot", renderers=[r]))
+
+        # ---------------------------------------------------------
+        # Datashader raster layers
+        # ---------------------------------------------------------
+        for layer, ldf in prepared_layers:
+            name = layer.get("name", "Layer")
+            x_col = layer.get("x_col")
+            y_col = layer.get("y_col")
+            color = layer.get("color", "blue")
+            alpha = float(layer.get("alpha", 0.9))
+            color_col = layer.get("color_col")
+
+            if color_col and color_col in ldf.columns:
+                ldf[color_col] = ldf[color_col].astype(str).fillna("Unknown").astype("category")
+                agg = cvs.points(ldf, x_col, y_col, agg=ds.count_cat(color_col))
+
+                cats = list(ldf[color_col].cat.categories)
+                palette = list(cc.glasbey_dark)
+                color_key = {
+                    cat: palette[i % len(palette)]
+                    for i, cat in enumerate(cats)
+                }
+
+                img = tf.shade(
+                    agg,
+                    color_key=color_key,
+                    how="eq_hist",
+                )
+            else:
+                agg = cvs.points(ldf, x_col, y_col, agg=ds.count())
+                img = tf.shade(
+                    agg,
+                    cmap=[color],
+                    how="eq_hist",
+                )
+
+            img = tf.dynspread(img, threshold=0.5, max_px=2)
+
+            rgba = np.asarray(img.data)
+
+            renderer = p.image_rgba(
+                image=[rgba],
+                x=x_range[0],
+                y=y_range[0],
+                dw=x_range[1] - x_range[0],
+                dh=y_range[1] - y_range[0],
+                alpha=alpha,
+                name=name,
+            )
+
+            legend_items.append(LegendItem(label=name, renderers=[renderer]))
+
+        if legend_items:
+            legend = Legend(items=legend_items, location="top_left", click_policy="hide")
+            p.add_layout(legend, "right")
+
+        if save_html_path:
+            output_file(str(save_html_path), title=title)
+            save(p)
+
+        return p if is_show else json_item(p)
     def make_map_multi_layers(
             self,
             rp_df: Optional[pd.DataFrame] = None,

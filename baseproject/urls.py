@@ -2,7 +2,13 @@
 from django.urls import path
 
 from .views import *
+from . import views_project_templates
 from .views_logs import log_viewer, export_logs_csv, export_logs_txt
+from baseproject.solutions_views import (
+    solutions_tab,
+    solution_add,
+    solution_delete,
+)
 
 urlpatterns = [
     path("", base_project_settings_view, name="base_project_settings"),
@@ -43,5 +49,11 @@ urlpatterns = [
     path("logs/", log_viewer, name="log_viewer"),
     path("logs/export/csv/", export_logs_csv, name="export_logs_csv"),
     path("logs/export/txt/", export_logs_txt, name="export_logs_txt"),
+    path("project-template/excel-sheets/",views_project_templates.project_template_excel_sheets,name="project_template_excel_sheets",),
+    path("project-template/excel-columns/",views_project_templates.project_template_excel_columns,name="project_template_excel_columns",),
+    path("project-template/excel-save/",views_project_templates.project_template_excel_save,name="project_template_excel_save",),
+    path("solutions-tab/", solutions_tab, name="solutions_tab"),
+    path("solutions/add/", solution_add, name="solution_add"),
+    path("solutions/delete/", solution_delete, name="solution_delete"),
 
 ]

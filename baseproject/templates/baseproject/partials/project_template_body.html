@@ -1,10 +1,16 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+{% for r in rows %}
+    <tr>
+        <td><input type="checkbox" class="project-template-checkbox" val="{{ r.ID }}"></td>
+        <td>{{ r.FirstSL }}</td>
+        <td>{{ r.LastSL }}</td>
+        <td>{{ r.LNum }}</td>
+        <td>{{ r.RLine }}</td>
+    </tr>
+{% empty %}
+    <tr class="table-warning">
+        <td colspan="5" class="text-center fw-semibold">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            No project template data found
+        </td>
+    </tr>
+{% endfor %}

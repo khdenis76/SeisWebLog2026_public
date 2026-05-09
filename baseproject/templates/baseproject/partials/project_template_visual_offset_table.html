@@ -1,10 +1,46 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="visual-offset-table-wrap">
+  <table class="table table-sm table-bordered visual-offset-table mb-0">
+    <thead>
+      <tr>
+        <th class="vo-sticky-col vo-corner">
+          RLine
+        </th>
+
+        {% for sl in sl_lines %}
+          <th class="vo-sticky-head">
+            {{ sl }}
+          </th>
+        {% endfor %}
+      </tr>
+    </thead>
+
+    <tbody>
+      {% for r in rows %}
+        <tr>
+          <th class="vo-sticky-col"
+              title="FirstSL: {{ r.first_sl }} | LastSL: {{ r.last_sl }} | LNum: {{ r.lnum }} | Tier: {{ r.tier }}">
+            {{ r.rline }}
+          </th>
+
+          {% for c in r.cells %}
+            {% if c.active %}
+              <td class="vo-cell vo-active"
+                  title="RLine {{ r.rline }} | SL {{ c.sl }} | Range {{ r.first_sl }} - {{ r.last_sl }}">
+                ---
+              </td>
+            {% else %}
+              <td class="vo-cell"></td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+      {% empty %}
+        <tr class="table-warning">
+          <td colspan="999" class="text-center fw-semibold py-4">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            No project template data found
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

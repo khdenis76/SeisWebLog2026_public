@@ -51,6 +51,17 @@
         <i class="fa-solid fa-table me-1"></i> Line Summary
     </button>
   </li>
+  <li class="nav-item" role="presentation">
+        <button
+               class="nav-link"
+               id="source-bathy-map-tab"
+               data-bs-toggle="pill"
+               data-bs-target="#source-bathy-map-pane"
+               type="button"
+               role="tab">
+               <i class="fas fa-mountain me-1"></i> Bathy / Density
+        </button>
+  </li>
 
 </ul>
 
@@ -75,7 +86,134 @@
     </div>
   </div>
 </div>
+<!--Bathymetry-->
+<div
+  class="tab-pane fade"
+  id="source-bathy-map-pane"
+  role="tabpanel"
+  aria-labelledby="source-bathy-map-tab"
+  data-options-url="{% url 'source_bathy_map_options' %}"
+  data-generate-url="{% url 'source_generate_bathy_map' %}">
 
+  <div class="card border-0 shadow-sm mb-2">
+    <div class="card-body p-2">
+
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label small mb-1">Map type</label>
+          <select id="source-bathy-map-type" class="form-select form-select-sm">
+            <option value="bathymetry_3d">Bathymetry 3D Surface</option>
+            <option value="sp_density_3d">SP Density 3D Surface</option>
+            <option value="gun_depth_3d">Gun Depth 3D Surface</option>
+          </select>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label small mb-1">FireCode</label>
+          <select id="source-bathy-fire-code" class="form-select form-select-sm">
+            <option value="A">A</option>
+          </select>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label small mb-1">Cell size, m</label>
+          <input id="source-bathy-cell-size" type="number" class="form-control form-control-sm" value="100" min="5" step="5">
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label small mb-1">Algorithm</label>
+          <select id="source-bathy-algorithm" class="form-select form-select-sm">
+            <option value="average">Average</option>
+            <option value="nearest">Nearest</option>
+            <option value="invdistnn">Inverse Distance NN</option>
+            <option value="invdist">Inverse Distance</option>
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label small mb-1">Clip shape</label>
+          <select id="source-bathy-shape" class="form-select form-select-sm">
+            <option value="">No shape clipping</option>
+          </select>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label small mb-1">Color scale</label>
+          <select id="source-bathy-colorscale" class="form-select form-select-sm">
+            <option value="Earth">Earth</option>
+            <option value="Viridis">Viridis</option>
+            <option value="Turbo">Turbo</option>
+            <option value="Jet">Jet</option>
+            <option value="YlGnBu">YlGnBu</option>
+          </select>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label small mb-1">Vertical exaggeration</label>
+          <input id="source-bathy-ve" type="number" class="form-control form-control-sm" value="3" min="0.1" step="0.5">
+        </div>
+        <div class="col-md-3">
+  <label class="form-label small mb-1">Export</label>
+  <div class="d-flex flex-wrap gap-2 small">
+    <label class="form-check-label">
+      <input id="source-bathy-export-tif" class="form-check-input me-1" type="checkbox" checked>
+      TIF
+    </label>
+    <label class="form-check-label">
+      <input id="source-bathy-export-html" class="form-check-input me-1" type="checkbox" checked>
+      HTML
+    </label>
+    <label class="form-check-label">
+      <input id="source-bathy-export-png" class="form-check-input me-1" type="checkbox">
+      PNG
+    </label>
+  </div>
+</div>
+        <div class="col-md-3">
+          <button id="source-bathy-generate-btn" class="btn btn-sm btn-primary w-100">
+            <i class="fas fa-play me-1"></i> Generate map
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="source-bathy-status" class="small text-muted mb-2"></div>
+
+  <div id="source-bathy-result" class="card border-0 shadow-sm d-none">
+  <div class="card-header py-2 d-flex justify-content-between align-items-center">
+    <div>
+      <i class="fas fa-globe me-1"></i>
+      <span id="source-bathy-result-title">Map</span>
+    </div>
+
+    <div class="d-flex gap-2">
+      <a
+        id="source-bathy-open-link"
+        class="btn btn-sm btn-outline-secondary disabled"
+        href="#"
+        target="_blank">
+        Open HTML
+      </a>
+    </div>
+  </div>
+
+  <div class="card-body p-0 overflow-hidden">
+
+    <div id="source-bathy-plotly"
+     style="
+       width:100%;
+       height:calc(100vh - 260px);
+       min-height:700px;
+       resize:vertical;
+       overflow:hidden;
+     ">
+     </div>
+
+  </div>
+</div>
+</div>
 
   <!-- Statistics -->
 <div class="tab-pane fade" id="statistics" role="tabpanel">

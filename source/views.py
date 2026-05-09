@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from pathlib import Path
 
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect
@@ -12,12 +13,129 @@ from core.models import UserSettings,SPSRevision
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 import re
-
+import plotly.io as pio
 from utils.decorators import log_action
 from .source_data import SourceData   # adjust path
 from .source_map_graph import SourceMapGraphics
+from source.sps_bathymetry_gdal_graphics import SPSBathymetryGDALGraphics
+def _generate_source_bathymetry_map(
+    *,
+    g,
+    output_dir: Path,
+    fire_code: str,
+    cell_size: float,
+    shape_filename: str | None,
+    algorithm: str,
+    colorscale: str,
+    vertical_exaggeration: float,
+    export_tif: bool,
+    export_html: bool,
+    export_png: bool,
+    depth_field: str = "WaterDepth",
+    map_title: str = "Bathymetry 3D Surface",
+    file_prefix: str = "sps_bathy",
+) -> dict:
+    raw_dem = output_dir / f"{file_prefix}_dem_{fire_code}_{cell_size:g}m.tif"
+    clipped_dem = output_dir / f"{file_prefix}_dem_{fire_code}_{cell_size:g}m_clipped.tif"
+    hillshade_tif = output_dir / f"{file_prefix}_hillshade_{fire_code}_{cell_size:g}m.tif"
+    hillshade_png = output_dir / f"{file_prefix}_hillshade_{fire_code}_{cell_size:g}m.png"
+    surface_html = output_dir / f"{file_prefix}_3d_{fire_code}_{cell_size:g}m.html"
 
+    stats = g.make_dem_geotiff_from_sps(
+        output_tif=str(raw_dem),
+        fire_code=fire_code,
+        depth_field=depth_field,
+        cell_size=cell_size,
+        algorithm=algorithm,
+    )
 
+    dem_for_products = str(raw_dem)
+
+    if shape_filename:
+        dem_for_products = g.clip_raster_by_shape(
+            input_tif=str(raw_dem),
+            output_tif=str(clipped_dem),
+            shape_filename=shape_filename,
+        )
+
+    if export_png:
+        g.make_hillshade_from_dem(
+            dem_tif=dem_for_products,
+            output_tif=str(hillshade_tif),
+            output_png=str(hillshade_png),
+        )
+
+    html_path = str(surface_html) if export_html else None
+
+    fig = g.make_3d_surface_from_dem(
+        dem_tif=dem_for_products,
+        save_html=html_path,
+        colorscale=colorscale,
+        vertical_exaggeration=vertical_exaggeration,
+        max_grid_size=500,
+        is_show=False,
+    )
+
+    fig.update_layout(
+        title=f"{map_title} | {depth_field} | FireCode={fire_code} | cell={cell_size:g}m"
+    )
+
+    return {
+        "map_title": map_title,
+        "plotly_json": pio.to_json(fig),
+        "html_path": html_path,
+        "tif_path": dem_for_products if export_tif else None,
+        "png_path": str(hillshade_png) if export_png else None,
+        "stats": {
+            **stats,
+            "depth_field": depth_field,
+            "dem_for_products": dem_for_products,
+            "shape_filename": shape_filename,
+        },
+    }
+def _generate_source_density_map(
+    *,
+    g,
+    output_dir: Path,
+    fire_code: str,
+    cell_size: float,
+    shape_filename: str | None,
+    colorscale: str,
+    vertical_exaggeration: float,
+    export_tif: bool,
+    export_html: bool,
+) -> dict:
+    density_tif = output_dir / f"sps_density_{fire_code}_{cell_size:g}m.tif"
+    density_html = output_dir / f"sps_density_{fire_code}_{cell_size:g}m_3d.html"
+
+    stats = g.make_sp_density_grid(
+        output_tif=str(density_tif),
+        fire_code=fire_code,
+        cell_size=cell_size,
+        shape_filename=shape_filename,
+    )
+
+    final_tif = stats["clipped_density_tif"] or stats["density_tif"]
+
+    html_path = str(density_html) if export_html else None
+
+    fig = g.make_3d_density_surface_from_raster(
+        density_tif=final_tif,
+        save_html=html_path,
+        colorscale=colorscale,
+        vertical_exaggeration=vertical_exaggeration,
+        max_grid_size=500,
+        is_show=False,
+    )
+
+    return {
+        "map_title": "SP Density 3D Surface",
+        "plotly_json": pio.to_json(fig),
+        "html_path": html_path,
+        "tif_path": final_tif if export_tif else None,
+        "png_path": None,
+        "stats": stats,
+    }
 @login_required
 @log_action("open source home", object_type="SOU")
 def source_home(request):
@@ -851,3 +969,140 @@ def source_shot_line_summary_tbody(request):
         "tbody_html": tbody_html,
         "count": len(rows),
     })
+@login_required
+@log_action("generate options for bathy/density map", object_type="SOU")
+def source_bathy_map_options(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    g = SPSBathymetryGDALGraphics(project.db_path)
+
+    with g._connect() as conn:
+        shapes = conn.execute("""
+            SELECT FileName, FullName
+            FROM project_shapes
+            WHERE FileCheck = 1
+            ORDER BY FileName;
+        """).fetchall()
+
+        fire_codes = conn.execute("""
+            SELECT FireCode, COUNT(*) AS n
+            FROM SPSolution
+            WHERE FireCode IS NOT NULL
+              AND FireCode != ''
+            GROUP BY FireCode
+            ORDER BY FireCode;
+        """).fetchall()
+
+    return JsonResponse({
+        "ok": True,
+        "shapes": [
+            {
+                "filename": row["FileName"],
+                "fullname": row["FullName"],
+            }
+            for row in shapes
+        ],
+        "fire_codes": [
+            {
+                "fire_code": row["FireCode"],
+                "count": row["n"],
+            }
+            for row in fire_codes
+        ],
+    })
+
+
+@login_required
+@log_action("generate bathy/density map", object_type="SOU")
+def source_generate_bathy_map(request):
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required."}, status=405)
+
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    data = json.loads(request.body.decode("utf-8"))
+
+    map_type = data.get("map_type", "bathymetry_3d")
+    fire_code = data.get("fire_code", "A")
+    shape_filename = data.get("shape_filename") or None
+    cell_size = float(data.get("cell_size", 100))
+    algorithm = data.get("algorithm", "average")
+    colorscale = data.get("colorscale", "Earth")
+    vertical_exaggeration = float(data.get("vertical_exaggeration", 3))
+
+    export_tif = bool(data.get("export_tif", True))
+    export_html = bool(data.get("export_html", True))
+    export_png = bool(data.get("export_png", False))
+
+    output_dir = Path(project.reports_dir) / "source_maps"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    g = SPSBathymetryGDALGraphics(project.db_path)
+    g.ensure_sps_indexes()
+
+    if map_type == "bathymetry_3d":
+        result = _generate_source_bathymetry_map(
+            g=g,
+            output_dir=output_dir,
+            fire_code=fire_code,
+            cell_size=cell_size,
+            shape_filename=shape_filename,
+            algorithm=algorithm,
+            colorscale=colorscale,
+            vertical_exaggeration=vertical_exaggeration,
+            export_tif=export_tif,
+            export_html=export_html,
+            export_png=export_png,
+        )
+        return JsonResponse({"ok": True, **result})
+
+    if map_type == "sp_density_3d":
+        result = _generate_source_density_map(
+            g=g,
+            output_dir=output_dir,
+            fire_code=fire_code,
+            cell_size=cell_size,
+            shape_filename=shape_filename,
+            colorscale=colorscale,
+            vertical_exaggeration=vertical_exaggeration,
+            export_tif=export_tif,
+            export_html=export_html,
+        )
+        return JsonResponse({"ok": True, **result})
+    if map_type == "gun_depth_3d":
+        result = _generate_source_bathymetry_map(
+            g=g,
+            output_dir=output_dir,
+            fire_code=fire_code,
+            cell_size=cell_size,
+            shape_filename=shape_filename,
+            algorithm=algorithm,
+            colorscale=colorscale,
+            vertical_exaggeration=vertical_exaggeration,
+            export_tif=export_tif,
+            export_html=export_html,
+            export_png=export_png,
+            depth_field="PointDepth",
+            map_title="Gun Depth 3D Surface",
+            file_prefix="sps_gun_depth",
+        )
+        return JsonResponse({"ok": True, **result})
+
+    return JsonResponse(
+        {"ok": False, "error": f"Unknown map type: {map_type}"},
+        status=400,
+    )

@@ -1,107 +1,127 @@
+<div class="bp-panel card border-0 shadow-sm">
+  <div class="card-header bp-card-header bp-card-header-green d-flex align-items-center justify-content-between">
+    <div>
+      <div class="bp-kicker">Visual workspace</div>
+      <h5 class="mb-0"><i class="fas fa-map-location-dot me-2"></i>Project Map & Data</h5>
+    </div>
+    <button type="button"
+            class="btn btn-sm btn-outline-light"
+            data-bs-toggle="collapse"
+            data-bs-target="#leftpreplotColumn"
+            aria-expanded="true"
+            onclick="$('#rightpreplotColumn').toggleClass('col-xl-12 col-xl-8'); $('#rightexpandIcon').toggleClass('fa-compress fa-expand'); $('#leftpreplotColumn').toggle();">
+      <i class="fas fa-expand" id="rightexpandIcon"></i>
+    </button>
+  </div>
 
-<div class="card shadow">
-            <div class="card-header bg-success clearfix">
-                <button type="button"
-                     class="btn btn-sm float-end"
-                     data-bs-toggle="collapse"
-                     data-bs-target="#leftpreplotColumn"
-                     aria-expanded="true"
-                     onclick="$('#rightpreplotColumn').toggleClass('col-12 col-8')
-                              $('#rightexpandIcon').toggleClass('fa-compress fa-expand');
-                              $('#leftpreplotColumn').toggle()
-                     ">
-                 <i class="fas fa-expand" id="rightexpandIcon"></i>
-           </button>
-            </div><!--End of card header-->
-            <div class="card-body">
-               <ul class="nav nav-pills mb-1" id="pills-tab" role="tablist">
-  <li class="nav-item" role="presentation">
-    <button class="nav-link active" id="pills-map-tab" data-bs-toggle="pill" data-bs-target="#pills-map-page" type="button" role="tab" aria-controls="pills-map-page" aria-selected="true">
-        <i class="fas fa-map pe-2 text-success"> </i> PROJECT MAP
-    </button>
-  </li>
-  <li class="nav-item" role="presentation">
-    <button class="nav-link" id="pills-header-tab" data-bs-toggle="pill" data-bs-target="#pills-header-page" type="button" role="tab" aria-controls="pills-header-page" aria-selected="false">
-        <i class="fas fa-header me-2 text-success"></i> SPS Headers
-    </button>
-  </li>
-  <li class="nav-item" role="presentation">
-    <button class="nav-link" id="pills-shapes-tab" data-bs-toggle="pill" data-bs-target="#pills-shapes-page" type="button" role="tab" aria-controls="pills-shapes-page" aria-selected="false">
-        <i class="fas fa-shapes text-success"></i> Shapes</button>
-  </li>
-  <li class="nav-item" role="presentation">
-    <button class="nav-link" id="pills-vessels-tab" data-bs-toggle="pill" data-bs-target="#pills-vessels-page" type="button" role="tab" aria-controls="pills-vessels-page" aria-selected="false">
-        <i class="fas fa-ship me-2 text-success"></i> Vessels
-    </button>
-  </li>
-  <li class="nav-item" role="presentation">
-    <button class="nav-link" id="rl-points-tab" data-bs-toggle="pill" data-bs-target="#rl-points-page" type="button" role="tab" aria-controls="rl-points-page" aria-selected="false">
-        <i class="fas fa-map-location me-2"></i>RL
-    </button>
-  </li>
-  <li class="nav-item" role="presentation">
-    <button class="nav-link" id="sl-points-tab" data-bs-toggle="pill" data-bs-target="#sl-points-page" type="button" role="tab" aria-controls="sl-points-page" aria-selected="false">
-        <i class="fas fa-bomb text-danger me-2"></i>SL
-    </button>
-  </li>
+  <div class="card-body pb-2">
+    <ul class="nav nav-pills bp-nav-pills bp-nav-pills-right" id="pills-tab" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="pills-map-tab" data-bs-toggle="pill" data-bs-target="#pills-map-page" type="button" role="tab" aria-controls="pills-map-page" aria-selected="true">
+          <i class="fas fa-map pe-2"></i>PROJECT MAP
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pills-header-tab" data-bs-toggle="pill" data-bs-target="#pills-header-page" type="button" role="tab" aria-controls="pills-header-page" aria-selected="false">
+          <i class="fas fa-header me-2"></i>SPS Headers
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pills-shapes-tab" data-bs-toggle="pill" data-bs-target="#pills-shapes-page" type="button" role="tab" aria-controls="pills-shapes-page" aria-selected="false">
+          <i class="fas fa-shapes me-2"></i>Shapes
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pills-matrix-tab" data-bs-toggle="pill" data-bs-target="#pills-matrix-page" type="button" role="tab" aria-controls="pills-matrix-page" aria-selected="false">
+          <i class="fas fa-shapes me-2"></i>Matrix
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pills-vessels-tab" data-bs-toggle="pill" data-bs-target="#pills-vessels-page" type="button" role="tab" aria-controls="pills-vessels-page" aria-selected="false">
+          <i class="fas fa-ship me-2"></i>Vessels
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="rl-points-tab" data-bs-toggle="pill" data-bs-target="#rl-points-page" type="button" role="tab" aria-controls="rl-points-page" aria-selected="false">
+          <i class="fas fa-map-location me-2"></i>RL
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="sl-points-tab" data-bs-toggle="pill" data-bs-target="#sl-points-page" type="button" role="tab" aria-controls="sl-points-page" aria-selected="false">
+          <i class="fas fa-bomb me-2"></i>SL
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+  <button class="nav-link"
+          id="pills-solutions-tab"
+          data-bs-toggle="pill"
+          data-bs-target="#pills-solutions-page"
+          type="button"
+          role="tab"
+          aria-controls="pills-solutions-page"
+          aria-selected="false">
+    <i class="fas fa-list-check me-2"></i>Solutions(NOAR only)
+  </button>
+</li>
+    </ul>
+  </div>
 
-</ul>
+  <div class="card-body tab-content pt-0" id="pills-tabContent">
+    <div class="tab-pane fade show active" id="pills-map-page" role="tabpanel" aria-labelledby="pills-map-tab" tabindex="0" style="height: 100vh">
+
+        <div class="w-100 bokeh-light-scope" style="height: 70vh;" id="preplot-map-div">
+          {% if pp_map_script and pp_map_div %}
+            {{ pp_map_script|safe }}
+            {{ pp_map_div|safe }}
+          {% else %}
+            <div class="seis-empty-state">
+              <div>
+                <div class="seis-empty-state-icon"><i class="fas fa-map"></i></div>
+                <div class="fw-semibold mb-1">Plot is not available</div>
+                <div class="text-muted small">Upload preplot files or refresh the project map to render the latest view.</div>
+              </div>
             </div>
-            <div class="card-body tab-content mb-0" id="pills-tabContent">
-                     <div class="tab-pane fade show active" id="pills-map-page" role="tabpanel" aria-labelledby="pills-map-tab" tabindex="0">
-                       <div class="w-100" style="height: 70vh" id="preplot-map-div">
-                         {% if pp_map_script and pp_map_div %}
-                                          {{ pp_map_script|safe }}
-                                          {{ pp_map_div|safe }}
-                         {% else %}
-                                    <div class="seis-empty-state">
-                           <div>
-                             <div class="seis-empty-state-icon"><i class="fas fa-map"></i></div>
-                             <div class="fw-semibold mb-1">Plot is not available</div>
-                             <div class="text-muted small">Upload preplot files or refresh the project map to render the latest view.</div>
-                           </div>
-                         </div>
-                          {% endif %}
-                       </div>
-                     </div>
-                     <div class="tab-pane fade" id="pills-header-page" role="tabpanel" aria-labelledby="pills-header-tab" tabindex="0">
-                         {% include "baseproject/partials/headers.html" %}
-                     </div>
-                     <div class="tab-pane fade" id="pills-shapes-page" role="tabpanel" aria-labelledby="pills-shapes-tab" tabindex="0">
-                         {% include "baseproject/partials/shapes.html" %}
-                     </div>
-                     <div class="tab-pane fade" id="pills-vessels-page" role="tabpanel" aria-labelledby="pills-vessels-tab" tabindex="0">
-                         {%  include 'baseproject/partials/project_fleet_panel.html' %}
-                     </div>
-                     <div class="tab-pane fade" id="rl-points-page" role="tabpanel" aria-labelledby="rl-points-tab" tabindex="0">
-                         <div class="clearfix">
-                             <button class="btn btn-danger float-end me-2"
-                                     id="rpDeleteBtn"
-                                     data-delete-url="{% url 'rp_points_delete' %}">
-                             >
-                                 <i class="fas fa-trash me-2"></i> DELETE SELECTED
-                             </button>
-                         </div>
-                         <div class="w-100 table-scroll" id="rl-points-div" style="height:50vh">
+          {% endif %}
+        </div>
 
-                         </div>
-                     </div>
-                     <div class="tab-pane fade" id="sl-points-page" role="tabpanel" aria-labelledby="sl-points-tab" tabindex="0">
-                         <div class="clearfix">
-                             <button class="btn btn-danger float-end me-2"
-                                     id="spDeleteBtn"
-                                     data-delete-url="{% url 'sp_points_delete' %}">
-                             >
-                                 <i class="fas fa-trash me-2"></i> DELETE SELECTED
-                             </button>
-                         </div>
-                         <div class="w-100 table-scroll" id="sl-points-div" style="height:50vh">
+    </div>
 
-                         </div>
-                     </div>
+    <div class="tab-pane fade" id="pills-header-page" role="tabpanel" aria-labelledby="pills-header-tab" tabindex="0">
+      {% include "baseproject/partials/headers.html" %}
+    </div>
 
-            </div>
-        </div><!--End of right card-->
+    <div class="tab-pane fade" id="pills-shapes-page" role="tabpanel" aria-labelledby="pills-shapes-tab" tabindex="0">
+      {% include "baseproject/partials/shapes.html" %}
+    </div>
+    <div class="tab-pane fade" id="pills-matrix-page" role="tabpanel" aria-labelledby="pills-matrix-tab" tabindex="0">
+       <div class="table-scroll border rounded w-100" style="height: 70vh; overflow: auto;">
+             {{ template_matrix|safe }}
+       </div>
+    </div>
 
+    <div class="tab-pane fade" id="pills-vessels-page" role="tabpanel" aria-labelledby="pills-vessels-tab" tabindex="0">
+      {% include 'baseproject/partials/project_fleet_panel.html' %}
+    </div>
 
+    <div class="tab-pane fade" id="rl-points-page" role="tabpanel" aria-labelledby="rl-points-tab" tabindex="0">
+      <div class="clearfix mb-2">
+        <button class="btn btn-danger float-end me-2" id="rpDeleteBtn" data-delete-url="{% url 'rp_points_delete' %}">
+          <i class="fas fa-trash me-2"></i>DELETE SELECTED
+        </button>
+      </div>
+      <div class="w-100 table-scroll bp-point-scroll" id="rl-points-div"></div>
+    </div>
 
+    <div class="tab-pane fade" id="sl-points-page" role="tabpanel" aria-labelledby="sl-points-tab" tabindex="0">
+      <div class="clearfix mb-2">
+        <button class="btn btn-danger float-end me-2" id="spDeleteBtn" data-delete-url="{% url 'sp_points_delete' %}">
+          <i class="fas fa-trash me-2"></i>DELETE SELECTED
+        </button>
+      </div>
+      <div class="w-100 table-scroll bp-point-scroll" id="sl-points-div"></div>
+    </div>
+       <div class="tab-pane fade" id="pills-solutions-page" role="tabpanel" aria-labelledby="pills-solutions-tab" tabindex="0">
+               {% include "baseproject/partials/solutions_tab.html" %}
+       </div>
+    </div>
+</div>

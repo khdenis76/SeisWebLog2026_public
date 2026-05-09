@@ -1,10 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<!-- table header for project templates -->
+<div class="table-scroll border rounded" id="template_table_div">
+       <table class="table table-hover table-sm table-striped mb-0" id="template_table">
+           <thead>
+              <th><input type="checkbox" id="common_template_checkbox"></th>
+              <th title="First Source Line in the template"> From SL</th>
+              <th title="Last Source Line in the template"> To SL</th>
+              <th title="Total number of source lines per template"> Num of SL</th>
+              <th title="Receiver Line">RX</th>
+           </thead>
+           <tbody id="template_body">
+              {{ prj_temp_list|safe }}
+           </tbody>
+       </table>
+</div>

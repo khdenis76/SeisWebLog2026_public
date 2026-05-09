@@ -16,6 +16,11 @@ import {initRLLineClick} from "./rlLineClick.js";
 import {initSLLineClick} from "./slLineClick.js";
 import {initThemeToggle} from "./initThemeToggle.js";
 import {initProjectFleetPanel} from "./initProjectFleetPanel.js";
+import {initProjectTemplateLoader} from "./initProjectTemplateLoader.js";
+import {initVisualOffsetTable} from "./initVisualOffsetTable.js";
+import {initBaseProjectSolutions} from "./initBaseProjectSolutions.js";
+import {initSolutionsTab} from "./initSolutionsTab.js";
+
 
 
 export function initAllJSForBaseproject() {
@@ -39,6 +44,10 @@ export function initAllJSForBaseproject() {
   initSLLineClick();
   initThemeToggle();
   initProjectFleetPanel();
+  initProjectTemplateLoader();
+  initVisualOffsetTable();
+  initBaseProjectSolutions();
+  initSolutionsTab();
 
 
   initDeletePreplot([

@@ -1,5 +1,8 @@
-import {initNOARLayout} from "./noar_layout.js";
+import {initNoarLayout} from "./initNoarLayout.js";
+import {initNoarLoadSps} from "./initNoarLoadSps.js";
 
 document.addEventListener("DOMContentLoaded", () => {
-    initNOARLayout();
+     initNoarLayout();
+     initNoarLoadSps();
+
 });

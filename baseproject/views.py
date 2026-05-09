@@ -35,7 +35,8 @@ from .forms import BaseProjectUploadForm
 from django.http import JsonResponse
 from django.template.loader import render_to_string
 from bokeh.embed import components, json_item
-
+from baseproject.utils.project_template_db import ProjectTemplateDB
+from baseproject.utils.solutions_db import SolutionsDB
 
 @dataclass
 class ShapeFile:
@@ -96,8 +97,13 @@ def base_project_settings_view(request):
 
     }
     pdb = ProjectDB(project.db_path)
-    pgr =PreplotGraphics(project.db_path)
-
+    prjsol = SolutionsDB(project.db_path)
+    prjsol.ensure_table()
+    solutions = prjsol.list_solutions()
+    pgr = PreplotGraphics(project.db_path)
+    ptemp = ProjectTemplateDB(project.db_path)
+    data = ptemp.visual_offset_table_data()
+    template_matrix = render_to_string("baseproject/partials/project_template_visual_offset_table.html",data,request=request,)
 
     folders =pdb.get_folders()
     shp_list = get_shape_list(folders.shapes_folder)
@@ -122,6 +128,7 @@ def base_project_settings_view(request):
         show_scale_bar=True,  # or False
     )
     pp_map_script,pp_map_div = components(layout)
+    prj_temp_list = ptemp.render_table_body()
     return render(
         request,
         "baseproject/base_settings.html",
@@ -141,6 +148,9 @@ def base_project_settings_view(request):
             "rec_preplot_summary": summary.get("RLPreplot") or {},
             "pp_map_script":pp_map_script,
             "pp_map_div":pp_map_div,
+            "prj_temp_list":prj_temp_list,
+            "template_matrix":template_matrix,
+            'solutions':solutions,
         },
     )
 #================================================= UPLOAD SPS FILES====================================================

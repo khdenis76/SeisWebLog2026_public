@@ -4,12 +4,24 @@ CREATE TABLE  IF NOT EXISTS  Files (
                                 FileName TEXT UNIQUE,
                                 UNIQUE(FileName, ID)
                                );
+CREATE TABLE IF NOT EXISTS SPS_Files (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                FileName TEXT NOT NULL UNIQUE,
+                FileSize INTEGER DEFAULT 0,
+                FileType TEXT DEFAULT 'NOAR_R_SPS',
+                CreatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+            );
 --Create solution table
-CREATE TABLE  IF NOT EXISTS  Solutions (
-                                   ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                                   Solution TEXT NOT NULL,
-                                   UNIQUE(Solution)
-                                  );
+CREATE TABLE IF NOT EXISTS Solutions (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                Solution TEXT NOT NULL UNIQUE,
+                Comments TEXT DEFAULT '',
+                SpareInt1 INTEGER DEFAULT NULL,
+                SpareInt2 INTEGER DEFAULT NULL,
+                SpareText1 TEXT DEFAULT '',
+                SpareText2 TEXT DEFAULT '',
+                IsBase INTEGER NOT NULL DEFAULT 0
+            );
 CREATE TABLE  IF NOT EXISTS  project_vessels (
                            ID INTEGER PRIMARY KEY AUTOINCREMENT,
                            Name TEXT NOT NULL UNIQUE,
@@ -897,7 +909,7 @@ CREATE TABLE  IF NOT EXISTS  RLSolution (
         FileName_FK INTEGER,
         FOREIGN KEY (PPLine_FK) REFERENCES RLPreplot(ID) ON DELETE CASCADE,
         FOREIGN KEY (Solution_FK) REFERENCES Solutions(ID) ON DELETE CASCADE,
-        FOREIGN KEY (FileName_FK) REFERENCES Files(ID) ON DELETE CASCADE,
+        FOREIGN KEY (FileName_FK) REFERENCES SPS_Files(ID) ON DELETE CASCADE,
         UNIQUE(LineSolution),
         UNIQUE(ID,LineSolution));
 CREATE TABLE  IF NOT EXISTS  RPSolution (
@@ -998,7 +1010,7 @@ CREATE TABLE  IF NOT EXISTS  RPSolution (
 		FOREIGN KEY (PP_Point_FK) REFERENCES RPPreplot(ID) ON DELETE CASCADE,
 		FOREIGN KEY (Solution_FK) REFERENCES Solutions(ID) ON DELETE CASCADE,
 		FOREIGN KEY (PP_Line_FK) REFERENCES RLPreplot(ID) ON DELETE CASCADE,
-		FOREIGN KEY (File_FK) REFERENCES Files(ID) ON DELETE CASCADE);
+		FOREIGN KEY (File_FK) REFERENCES SPS_Files(ID) ON DELETE CASCADE);
 CREATE TABLE  IF NOT EXISTS  CSVLayers (
     ID INTEGER PRIMARY KEY,
     Name TEXT,
