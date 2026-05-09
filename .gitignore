@@ -38,7 +38,8 @@ rov/*.html
 rov/*_test.py
 *test*.py
 *test*.html
-
+#wheel
+*.whl
 
 
 
