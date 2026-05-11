@@ -1107,8 +1107,12 @@ def read_bbox_headers(request):
 def dsr_export_sm(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+
     if not project:
         return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
 
     dsrdb = DSRDB(project.db_path)
 
@@ -1120,54 +1124,98 @@ def dsr_export_sm(request):
     mode = (payload.get("mode") or "day").strip().lower()
     status = (payload.get("status") or "deployed").strip().lower()
     depth_mode = (payload.get("depth_mode") or "neg").strip().lower()
-    fmt = (payload.get("format") or "mass_nodes").strip().lower()
+    fmt = (payload.get("format") or "z_nodes").strip().lower()
     rovs = payload.get("rovs") or []
+    filename = (payload.get("filename") or "").strip()
+
+    always_primary_deployment = bool(
+        payload.get("always_primary_deployment", True)
+    )
+
+    line_from = (payload.get("line_from") or "").strip()
+    line_to = (payload.get("line_to") or "").strip()
+    station_from = (payload.get("station_from") or "").strip()
+    station_to = (payload.get("station_to") or "").strip()
+
+    has_line_station_filter = any([
+        line_from,
+        line_to,
+        station_from,
+        station_to,
+    ])
 
     if status not in ("deployed", "recovered"):
         return JsonResponse({"ok": False, "error": "Invalid status"}, status=400)
+
     if fmt not in ("z_nodes", "mass_nodes"):
         return JsonResponse({"ok": False, "error": "Invalid format"}, status=400)
+
     if depth_mode not in ("neg", "abs"):
         return JsonResponse({"ok": False, "error": "Invalid depth_mode"}, status=400)
+
     if not isinstance(rovs, list) or not rovs:
         return JsonResponse({"ok": False, "error": "Select at least one ROV"}, status=400)
+
+    for label, value in {
+        "Line from": line_from,
+        "Line to": line_to,
+        "Station from": station_from,
+        "Station to": station_to,
+    }.items():
+        if value and not value.isdigit():
+            return JsonResponse(
+                {"ok": False, "error": f"{label} must be a number"},
+                status=400,
+            )
 
     export_type = 0 if status == "deployed" else 1
     export_abs = 1 if depth_mode == "abs" else 0
     zexp = 1 if fmt == "z_nodes" else 0
 
     sm_folder = project.export_sm
+
     if not sm_folder:
         return JsonResponse({"ok": False, "error": "SM folder not configured"}, status=400)
 
-    # Build day range + optional ts range
     ts_from = None
     ts_to = None
+    first_day = None
+    last_day = None
 
     if mode == "day":
         first_day = (payload.get("day") or "").strip()
-        if not first_day:
-            return JsonResponse({"ok": False, "error": "Missing day"}, status=400)
-        last_day = None
-    else:
+
+        if not first_day and not has_line_station_filter:
+            return JsonResponse(
+                {"ok": False, "error": "Missing day or Line/Station filter"},
+                status=400,
+            )
+
+    elif mode == "interval":
         dt_from = (payload.get("from") or "").strip()
         dt_to = (payload.get("to") or "").strip()
-        if not dt_from or not dt_to:
-            return JsonResponse({"ok": False, "error": "Missing from/to"}, status=400)
 
-        # interval timestamps: "YYYY-MM-DDTHH:MM" -> "YYYY-MM-DD HH:MM:SS"
-        def _norm_dt(s: str) -> str:
-            s = s.replace("T", " ")
-            if len(s) == 16:
-                s += ":00"
-            return s
+        if (not dt_from or not dt_to) and not has_line_station_filter:
+            return JsonResponse(
+                {"ok": False, "error": "Missing from/to or Line/Station filter"},
+                status=400,
+            )
 
-        ts_from = _norm_dt(dt_from)
-        ts_to = _norm_dt(dt_to)
+        if dt_from and dt_to:
+            def _norm_dt(s: str) -> str:
+                s = s.replace("T", " ")
+                if len(s) == 16:
+                    s += ":00"
+                return s
 
-        # keep these for fallback/naming (not strictly required)
-        first_day = dt_from[:10]
-        last_day = dt_to[:10]
+            ts_from = _norm_dt(dt_from)
+            ts_to = _norm_dt(dt_to)
+
+            first_day = dt_from[:10]
+            last_day = dt_to[:10]
+
+    else:
+        return JsonResponse({"ok": False, "error": "Invalid export mode"}, status=400)
 
     result = dsrdb.export_dsr_to_sm(
         first_day=first_day,
@@ -1180,6 +1228,12 @@ def dsr_export_sm(request):
         mark_exported=True,
         ts_from=ts_from,
         ts_to=ts_to,
+        always_primary_deployment=always_primary_deployment,
+        line_from=line_from,
+        line_to=line_to,
+        station_from=station_from,
+        station_to=station_to,
+        filename=filename,
     )
 
     if "error" in result:
@@ -1191,66 +1245,71 @@ def dsr_export_sm(request):
         "file": result.get("success"),
         "filename": result.get("filename"),
         "rows": int(result.get("rows", 0)),
+        "mode": result.get("mode"),
+        "always_primary_deployment": result.get("always_primary_deployment"),
     })
 @require_POST
+@login_required
 def dsr_rovs_for_timeframe(request):
-    """
-    POST JSON:
-        {
-            "mode": "day" | "interval",
-            "day": "YYYY-MM-DD",              # required if mode=day
-            "from": "YYYY-MM-DDTHH:MM",       # required if mode=interval
-            "to":   "YYYY-MM-DDTHH:MM"
-        }
-
-    Returns:
-        {
-            "rovs": ["ROV1", "ROV2"],
-            "count": 2
-        }
-    """
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except Exception:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    mode = payload.get("mode", "day")
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
+
     if not project:
         return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    mode = (payload.get("mode") or "day").strip().lower()
+    status = (payload.get("status") or "deployed").strip().lower()
+
+    line_from = (payload.get("line_from") or "").strip()
+    line_to = (payload.get("line_to") or "").strip()
+    station_from = (payload.get("station_from") or "").strip()
+    station_to = (payload.get("station_to") or "").strip()
+
+    if status not in ("deployed", "recovered"):
+        return JsonResponse({"error": "Invalid status"}, status=400)
+
+    for label, value in {
+        "Line from": line_from,
+        "Line to": line_to,
+        "Station from": station_from,
+        "Station to": station_to,
+    }.items():
+        if value and not value.isdigit():
+            return JsonResponse({"error": f"{label} must be a number"}, status=400)
+
     try:
-        # Get current project DB path (adapt to your project structure)
         dsrdb = DSRDB(project.db_path)
 
-        if mode == "day":
-            day = payload.get("day")
-            rovs = dsrdb.get_rovs_for_timeframe(
-                mode="day",
-                day=day,
-            )
-        else:
-            dt_from = payload.get("from")
-            dt_to = payload.get("to")
-            rovs = dsrdb.get_rovs_for_timeframe(
-                mode="interval",
-                dt_from=dt_from,
-                dt_to=dt_to,
-            )
+        rovs = dsrdb.get_rovs_for_timeframe(
+            mode=mode,
+            status=status,
+            day=payload.get("day"),
+            dt_from=payload.get("from"),
+            dt_to=payload.get("to"),
+            line_from=line_from,
+            line_to=line_to,
+            station_from=station_from,
+            station_to=station_to,
+        )
 
         return JsonResponse({
+            "ok": True,
             "rovs": rovs,
             "count": len(rovs),
         })
 
-    except ValueError as e:
-        # raised from DSRDB validation
-        return JsonResponse({"error": str(e)}, status=400)
-
     except Exception as e:
         return JsonResponse(
-            {"error": f"Failed to load ROV list: {str(e)}"},
-            status=500
+            {"error": f"Failed to load ROV list: {e}"},
+            status=500,
         )
 @require_POST
 @login_required

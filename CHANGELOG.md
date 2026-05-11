@@ -133,6 +133,14 @@ On Preplot page SHooting Template added and Also it is available in ROV page
 ### Fixed
  
 ### Changed  
+## [2026.1.02.07] - 2026-05-07
+### Added
+Production Monitor view added. 
+In SM export added option to export only prime deployment cooordinates and filter by line,point
+### Fixed
+Export deployment coordinates fixed 
+ 
+### Changed  
 
   
 

@@ -815,26 +815,16 @@ class ProjectTemplateDB:
         """
         Build matrix data for Template Matrix / Production Status.
 
-        Important group logic:
-            Source groups define real display order.
+        Receiver line colors:
+            white  = preplot / not deployed
+            yellow = fully deployed
+            green  = all source lines completed, ready for recovery
+            blue   = partially retrieved
+            orange = fully recovered
 
-            Example:
-                Group 1: 10 -> 1 DESC
-                Group 2: 20 -> 11 DESC
-
-                FirstSL = 5
-                LastSL  = 14
-
-                Result:
-                5,4,3,2,1,14,13,12,11
-
-            If FirstSL and LastSL are inside SAME group:
-                Group 2: 48143 -> 39567 DESC
-                FirstSL = 48143
-                LastSL  = 43375
-
-                Result:
-                48143,48111,48079,...,43375
+        Matrix cells:
+            orange = planned source cell
+            green  = source line exists in SLSolution
         """
 
         self.ensure_schema()
@@ -843,9 +833,6 @@ class ProjectTemplateDB:
         try:
             cur = conn.cursor()
 
-            # ------------------------------------------------------------
-            # Source lines from SLPreplot
-            # ------------------------------------------------------------
             raw_sl_lines = [
                 int(row["Line"])
                 for row in cur.execute("""
@@ -857,9 +844,6 @@ class ProjectTemplateDB:
 
             raw_sl_set = set(raw_sl_lines)
 
-            # ------------------------------------------------------------
-            # Load SL groups
-            # ------------------------------------------------------------
             group_rows = [
                 dict(row)
                 for row in cur.execute("""
@@ -893,15 +877,8 @@ class ProjectTemplateDB:
                 lo = min(start_line, end_line)
                 hi = max(start_line, end_line)
 
-                group_lines = [
-                    sl for sl in raw_sl_set
-                    if lo <= sl <= hi
-                ]
-
-                group_lines = sorted(
-                    group_lines,
-                    reverse=(direction == "desc"),
-                )
+                group_lines = [sl for sl in raw_sl_set if lo <= sl <= hi]
+                group_lines = sorted(group_lines, reverse=(direction == "desc"))
 
                 groups.append({
                     "group_no": group_no,
@@ -913,9 +890,6 @@ class ProjectTemplateDB:
 
             groups.sort(key=lambda x: x["group_no"])
 
-            # ------------------------------------------------------------
-            # Global SL header order
-            # ------------------------------------------------------------
             sl_lines = []
             used_sl = set()
 
@@ -937,34 +911,6 @@ class ProjectTemplateDB:
                 return None
 
             def build_sl_list_by_groups(first_sl, last_sl):
-                """
-                Expand FirstSL -> LastSL using configured SL groups.
-
-                Rules:
-                    - If FirstSL and LastSL are in same group:
-                        take FirstSL -> LastSL in group order
-
-                    - First group:
-                        take FirstSL -> end of that group
-
-                    - Middle groups:
-                        take full group
-
-                    - Last group:
-                        take start of that group -> LastSL
-
-                Example:
-                    Group 1 = [24217, ..., 17721]
-                    Group 2 = [48143, ..., 39567]
-
-                    FirstSL = 20217
-                    LastSL  = 45903
-
-                    Result:
-                        20217 ... 17721
-                        48143 ... 45903
-                """
-
                 first_sl = int(first_sl)
                 last_sl = int(last_sl)
 
@@ -989,7 +935,6 @@ class ProjectTemplateDB:
 
                     selected = []
 
-                    # FirstSL and LastSL are in the same group
                     if group_no == first_group_no and group_no == last_group_no:
                         if first_sl in lines and last_sl in lines:
                             i1 = lines.index(first_sl)
@@ -1000,19 +945,16 @@ class ProjectTemplateDB:
                             else:
                                 selected = lines[i2:i1 + 1]
 
-                    # First group: FirstSL -> end of group
                     elif group_no == first_group_no:
                         if first_sl in lines:
                             i1 = lines.index(first_sl)
                             selected = lines[i1:]
 
-                    # Last group: start of group -> LastSL
                     elif group_no == last_group_no:
                         if last_sl in lines:
                             i2 = lines.index(last_sl)
                             selected = lines[:i2 + 1]
 
-                    # Middle groups: full group
                     else:
                         selected = lines
 
@@ -1023,9 +965,6 @@ class ProjectTemplateDB:
 
                 return output
 
-            # ------------------------------------------------------------
-            # Template rows
-            # ------------------------------------------------------------
             template_rows = [
                 dict(row)
                 for row in cur.execute("""
@@ -1044,9 +983,6 @@ class ProjectTemplateDB:
                 """).fetchall()
             ]
 
-            # ------------------------------------------------------------
-            # Completed source lines
-            # ------------------------------------------------------------
             completed_sl_lines = {
                 int(row["Line"])
                 for row in cur.execute("""
@@ -1056,9 +992,6 @@ class ProjectTemplateDB:
                 """).fetchall()
             }
 
-            # ------------------------------------------------------------
-            # SL vessel + production seq list
-            # ------------------------------------------------------------
             sl_vessel_map = {}
             sl_seq_values = {}
 
@@ -1112,9 +1045,6 @@ class ProjectTemplateDB:
                 for line, seq_set in sl_seq_values.items()
             }
 
-            # ------------------------------------------------------------
-            # Receiver line status
-            # ------------------------------------------------------------
             rline_status = {}
             rline_vessel_map = {}
 
@@ -1136,6 +1066,7 @@ class ProjectTemplateDB:
                     "retrieved_pct": retrieved_pct,
                     "is_deployed": deployed_pct >= 100,
                     "is_recovered": retrieved_pct >= 100,
+                    "is_partial_retrieved": retrieved_pct > 0 and retrieved_pct < 100,
                 }
 
                 rline_vessel_map[line] = row["Vessel_name"] or ""
@@ -1146,9 +1077,6 @@ class ProjectTemplateDB:
                 if status.get("is_deployed")
             }
 
-            # ------------------------------------------------------------
-            # Build matrix rows
-            # ------------------------------------------------------------
             sl_required_rlines = {sl: set() for sl in sl_lines}
             table_rows = []
 
@@ -1183,9 +1111,12 @@ class ProjectTemplateDB:
                 status = rline_status.get(rline, {})
                 rline_deployed = bool(status.get("is_deployed"))
                 rline_recovered = bool(status.get("is_recovered"))
+                rline_partial_retrieved = bool(status.get("is_partial_retrieved"))
 
                 if rline_recovered:
                     rline_status_class = "vo-rline-recovered"
+                elif rline_partial_retrieved:
+                    rline_status_class = "vo-rline-partial-recovered"
                 elif all_completed:
                     rline_status_class = "vo-rline-ready-recovery"
                 elif rline_deployed:
@@ -1217,15 +1148,13 @@ class ProjectTemplateDB:
                     "all_completed": all_completed,
                     "rline_deployed": rline_deployed,
                     "rline_recovered": rline_recovered,
+                    "rline_partial_retrieved": rline_partial_retrieved,
                     "rline_status_class": rline_status_class,
                     "deployed_pct": status.get("deployed_pct", 0),
                     "retrieved_pct": status.get("retrieved_pct", 0),
                     "cells": cells,
                 })
 
-            # ------------------------------------------------------------
-            # Build SL headers
-            # ------------------------------------------------------------
             sl_headers = []
             prev_group_no = None
 

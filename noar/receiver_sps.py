@@ -496,13 +496,19 @@ class ReceiverSPS:
             base_date = datetime(year, 1, 1)
             timestamp = base_date
 
-        line_point = line * 1_000_000 + point
-        tier_line_point = tier * 1_000_000_000_000 + line_point
-        line_point_idx = line_point * 10 + point_idx
-        line_point_idx_sol = line_point_idx * 10 + int(solution_fk)
+        line_point, tier_line_point, line_point_idx, line_point_idx_sol = (
+            self._build_receiver_keys(
+                line=line,
+                point=point,
+                point_idx=point_idx,
+                tier=tier,
+                solution_fk=solution_fk,
+                line_mask=line_mask,
+            )
+        )
 
         return {
-            "LineName_FK": 0,
+            "LineName_FK": None,
             "Line": line,
             "PP_Point_FK": None,
             "PP_Line_FK": None,
@@ -605,6 +611,64 @@ class ReceiverSPS:
             "Attempt": attempt,
         }
 
+    def _build_receiver_keys(
+            self,
+            *,
+            line: int,
+            point: int,
+            point_idx: int,
+            tier: int,
+            solution_fk: int,
+            line_mask: str,
+    ):
+        """
+        Build unique receiver keys based on rl_mask.
+
+        Example:
+            rl_mask = AAAAALLLLPPPPEE
+
+        L-count = 4
+        P-count = 4
+
+        LinePoint:
+            line * 10^P_count + point
+
+        TierLinePoint:
+            tier * 10^(L_count + P_count) + LinePoint
+
+        LinePointIdx:
+            LinePoint * 10^PointIdx_digits + PointIdx
+
+        LinePointIdxSol:
+            LinePointIdx * 10^Solution_digits + Solution_FK
+        """
+
+        if not line_mask:
+            raise ValueError("Receiver line mask is required.")
+
+        line_digits = line_mask.count("L")
+        point_digits = line_mask.count("P")
+
+        if line_digits <= 0 or point_digits <= 0:
+            raise ValueError(f"Invalid receiver line mask: {line_mask}")
+
+        point_scalar = 10 ** point_digits
+        tier_scalar = 10 ** (line_digits + point_digits)
+
+        # Usually PointIdx is one digit, but make it safe
+        point_idx_digits = max(1, len(str(abs(int(point_idx or 0)))))
+        point_idx_scalar = 10 ** point_idx_digits
+
+        solution_digits = max(1, len(str(abs(int(solution_fk or 0)))))
+        solution_scalar = 10 ** solution_digits
+
+        line_point = int(line) * point_scalar + int(point)
+        tier_line_point = int(tier) * tier_scalar + line_point
+        line_point_idx = line_point * point_idx_scalar + int(point_idx)
+        line_point_idx_sol = line_point_idx * solution_scalar + int(solution_fk)
+
+        return line_point, tier_line_point, line_point_idx, line_point_idx_sol
+
     def _parse_line_name(self, line_name: str, line_mask: str | None):
         """
         Receiver mask example:
@@ -615,40 +679,31 @@ class ReceiverSPS:
         P = point number
         E = suffix
 
-        For receiver SPS loading we use:
+        For receiver SPS:
             L -> Line
+            Seq -> 1
+            Attempt -> ""
 
-        Point still comes from SPSRevision point_start/point_end,
-        not from mask.
+        Point is still taken from SPSRevision point_start/point_end.
         """
 
         if not line_mask:
             return 0, 1, ""
 
-        def extract(mask_char, default=""):
-            if mask_char not in line_mask:
-                return default
+        if "L" not in line_mask:
+            return 0, 1, ""
 
-            start = line_mask.index(mask_char)
-            end = line_mask.rfind(mask_char) + 1
+        start = line_mask.index("L")
+        end = line_mask.rfind("L") + 1
 
-            if start >= len(line_name):
-                return default
-
-            return line_name[start:end].strip()
-
-        line_txt = extract("L", "0")
-        suffix = extract("E", "")
+        line_txt = line_name[start:end].strip()
 
         try:
             line = int(line_txt)
         except Exception:
             line = 0
 
-        seq = 1
-        attempt = suffix
-
-        return line, seq, attempt
+        return line, 1, ""
 
     def _flush_rpsolution(self, conn, rows):
         columns = [
@@ -757,7 +812,74 @@ class ReceiverSPS:
             for row in rows
         ]
 
-        conn.executemany(sql, values)
+        try:
+            conn.executemany(sql, values)
+
+        except Exception as exc:
+            print("\n[ReceiverSPS] ERROR in _flush_rpsolution")
+            print(f"[ReceiverSPS] Error type: {type(exc).__name__}")
+            print(f"[ReceiverSPS] Error: {exc}")
+            print(f"[ReceiverSPS] Rows count: {len(rows)}")
+            print(f"[ReceiverSPS] Columns count: {len(columns)}")
+            print(f"[ReceiverSPS] SQL columns: {columns}")
+
+            # Check current RPSolution schema
+            try:
+                table_info = conn.execute("PRAGMA table_info(RPSolution)").fetchall()
+                db_columns = [row["name"] for row in table_info]
+                print(f"[ReceiverSPS] DB columns count: {len(db_columns)}")
+                print(f"[ReceiverSPS] DB columns: {db_columns}")
+
+                missing_in_db = [c for c in columns if c not in db_columns]
+                extra_in_db = [c for c in db_columns if c not in columns and c != "ID"]
+
+                print(f"[ReceiverSPS] Missing in DB: {missing_in_db}")
+                print(f"[ReceiverSPS] Extra in DB: {extra_in_db}")
+
+            except Exception as schema_exc:
+                print(f"[ReceiverSPS] Could not inspect RPSolution schema: {schema_exc}")
+
+            # Try row-by-row to find exact bad row
+            for idx, row in enumerate(rows):
+                one_value = tuple(row.get(col) for col in columns)
+
+                try:
+                    conn.execute(sql, one_value)
+
+                except Exception as row_exc:
+                    print("\n[ReceiverSPS] BAD ROW FOUND")
+                    print(f"[ReceiverSPS] Row index in chunk: {idx}")
+                    print(f"[ReceiverSPS] Row error type: {type(row_exc).__name__}")
+                    print(f"[ReceiverSPS] Row error: {row_exc}")
+
+                    print("[ReceiverSPS] Important keys:")
+                    for key in [
+                        "Line",
+                        "Point",
+                        "PointIdx",
+                        "LinePoint",
+                        "LinePointIdx",
+                        "LinePointIdxSol",
+                        "PP_Point_FK",
+                        "PP_Line_FK",
+                        "File_FK",
+                        "Solution_FK",
+                    ]:
+                        print(f"    {key}: {row.get(key)}")
+
+                    print("[ReceiverSPS] Full row values:")
+                    for col, val in zip(columns, one_value):
+                        print(f"    {col}: {repr(val)}")
+
+                    try:
+                        fk_check = conn.execute("PRAGMA foreign_key_check").fetchall()
+                        print(f"[ReceiverSPS] FK check: {[dict(x) for x in fk_check]}")
+                    except Exception as fk_exc:
+                        print(f"[ReceiverSPS] Could not run foreign_key_check: {fk_exc}")
+
+                    raise row_exc
+
+            raise exc
 
     def _flush_rlsolution(self, conn, line_stats):
         for stat in line_stats.values():

@@ -1855,81 +1855,100 @@ WHERE Area IS NOT NULL
 
     def get_rovs_for_timeframe(
             self,
-            mode: str = "day",
-            day: str | None = None,
-            dt_from: str | None = None,
-            dt_to: str | None = None,
-            table: str = "DSR",
-            rov_deploy_col: str = "ROV",
-            rov_recover_col: str = "ROV1",
-            ts_deploy_col: str = "TimeStamp",
-            ts_recover_col: str = "TimeStamp1",
-    ) -> list[str]:
-        """
-        Return unique sorted list of ROV names for selected timeframe, combining:
-          - deployment: DSR.ROV filtered by DSR.TimeStamp
-          - recovery:   DSR.ROV1 filtered by DSR.TimeStamp1
+            mode="day",
+            status="deployed",
+            day=None,
+            dt_from=None,
+            dt_to=None,
+            line_from=None,
+            line_to=None,
+            station_from=None,
+            station_to=None,
+    ):
+        import sqlite3
 
-        mode:
-          - "day": day='YYYY-MM-DD'
-          - "interval": dt_from/dt_to from datetime-local ('YYYY-MM-DDTHH:MM') or 'YYYY-MM-DD HH:MM[:SS]'
-        """
-        mode = (mode or "day").strip().lower()
+        status = (status or "deployed").lower()
 
-        def _norm_dt(s: str) -> str:
-            s = (s or "").strip()
-            if not s:
-                raise ValueError("Empty datetime string")
-            if "T" in s:
-                s = s.replace("T", " ")
-            if len(s) == 16:  # 'YYYY-MM-DD HH:MM'
+        if status == "recovered":
+            rov_col = "ROV1"
+            ts_col = "TimeStamp1"
+        else:
+            rov_col = "ROV"
+            ts_col = "TimeStamp"
+
+        where = [
+            f"TRIM(COALESCE({rov_col}, '')) <> ''"
+        ]
+
+        params = []
+
+        def _norm_dt(s):
+            s = (s or "").replace("T", " ").strip()
+            if len(s) == 16:
                 s += ":00"
             return s
 
-        if mode == "day":
-            if not day:
-                raise ValueError("day is required when mode='day'")
-            ts_from = f"{day} 00:00:00"
-            import datetime as _dt
-            d0 = _dt.datetime.strptime(day, "%Y-%m-%d")
-            d1 = d0 + _dt.timedelta(days=1)
-            ts_to = d1.strftime("%Y-%m-%d 00:00:00")
-        else:
-            if not dt_from or not dt_to:
-                raise ValueError("dt_from and dt_to are required when mode='interval'")
-            ts_from, ts_to = _norm_dt(dt_from), _norm_dt(dt_to)
+        if mode == "day" and day:
+            where.append(f"DATE({ts_col}) = DATE(?)")
+            params.append(day)
+
+        elif mode == "interval" and dt_from and dt_to:
+            where.append(f"{ts_col} >= ?")
+            where.append(f"{ts_col} <= ?")
+            params.extend([
+                _norm_dt(dt_from),
+                _norm_dt(dt_to),
+            ])
+
+        def _clean_int(value):
+            value = str(value or "").strip()
+            if not value:
+                return None
+            return int(value)
+
+        lf = _clean_int(line_from)
+        lt = _clean_int(line_to)
+        sf = _clean_int(station_from)
+        st = _clean_int(station_to)
+
+        if lf is not None and lt is None:
+            lt = lf
+
+        if lt is not None and lf is None:
+            lf = lt
+
+        if sf is not None and st is None:
+            st = sf
+
+        if st is not None and sf is None:
+            sf = st
+
+        if lf is not None and lt is not None:
+            if lf > lt:
+                lf, lt = lt, lf
+
+            where.append("CAST(Line AS INTEGER) BETWEEN ? AND ?")
+            params.extend([lf, lt])
+
+        if sf is not None and st is not None:
+            if sf > st:
+                sf, st = st, sf
+
+            where.append("CAST(Station AS INTEGER) BETWEEN ? AND ?")
+            params.extend([sf, st])
 
         sql = f"""
-        WITH deploy AS (
-            SELECT TRIM({rov_deploy_col}) AS rov
-            FROM {table}
-            WHERE {ts_deploy_col} IS NOT NULL
-              AND TRIM({ts_deploy_col}) <> ''
-              AND {ts_deploy_col} >= ?
-              AND {ts_deploy_col} < ?
-              AND {rov_deploy_col} IS NOT NULL
-              AND TRIM({rov_deploy_col}) <> ''
-        ),
-        rec AS (
-            SELECT TRIM({rov_recover_col}) AS rov
-            FROM {table}
-            WHERE {ts_recover_col} IS NOT NULL
-              AND TRIM({ts_recover_col}) <> ''
-              AND {ts_recover_col} >= ?
-              AND {ts_recover_col} < ?
-              AND {rov_recover_col} IS NOT NULL
-              AND TRIM({rov_recover_col}) <> ''
-        )
-        SELECT rov FROM deploy
-        UNION
-        SELECT rov FROM rec
-        ORDER BY rov
+            SELECT DISTINCT TRIM({rov_col}) AS rov
+            FROM DSR
+            WHERE {" AND ".join(where)}
+            ORDER BY TRIM({rov_col})
         """
 
         with self._connect() as conn:
-            rows = conn.execute(sql, (ts_from, ts_to, ts_from, ts_to)).fetchall()
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(sql, params).fetchall()
 
-        return [r["rov"] for r in rows]
+        return [r["rov"] for r in rows if r["rov"]]
 
     def get_daily_recovery(
             self,
@@ -1988,163 +2007,44 @@ WHERE Area IS NOT NULL
 
     def export_dsr_to_sm(
             self,
-            first_day: str,
-            last_day: str | None = None,
-            rovs: list[str] | None = None,
-            export_type: int = 0,  # 0=DEPLOY, 1=RECOVERY
-            export_abs: int = 0,  # 1 => abs(depth)
-            zexp: int = 0,  # 1 => "SURVEY:1.4,..." lines
-            output_dir: str | None = None,
-            mark_exported: bool = True,
-            table: str = "DSR",
-            ts_from: str | None = None,  # "YYYY-MM-DD HH:MM:SS" (optional)
-            ts_to: str | None = None,  # "YYYY-MM-DD HH:MM:SS" (optional)
+            first_day=None,
+            last_day=None,
+            rovs=None,
+            export_type=0,
+            export_abs=0,
+            zexp=0,
+            output_dir=None,
+            mark_exported=False,
+            ts_from=None,
+            ts_to=None,
+            always_primary_deployment=True,
+            line_from=None,
+            line_to=None,
+            station_from=None,
+            station_to=None,
+            filename=None,
+            table="DSR",
     ):
-        """
-        Export from DSR table to SM format and SAVE to disk.
+        import csv
+        import re
+        import sqlite3
+        from pathlib import Path
+        import datetime as _dt
 
-        If ts_from/ts_to are provided -> exports by exact timestamp interval:
-            deploy: TimeStamp
-            recovery: TimeStamp1
-        Otherwise exports by Day/Day1 range.
-
-        Returns:
-          {"success": "<full_path>", "rows": N, "filename": "<name>"}
-          or {"error": "<message>"}
-        """
-
-        # ---- choose columns by export_type ----
         def _safe_file_part(s: str) -> str:
             s = (s or "").strip()
-            # replace Windows-illegal filename chars:  \ / : * ? " < > |
             for ch in ['\\', '/', ':', '*', '?', '"', '<', '>', '|']:
                 s = s.replace(ch, "-")
-            # also avoid trailing dots/spaces
-            s = s.rstrip(" .")
-            return s or "export"
+            return s.rstrip(" .") or "export"
 
-        if int(export_type) == 0:
-            FieldDate = "Day"
-            FieldROV = "ROV"
-            TimeStamp = "TimeStamp"
-            PrimaryEasting = "PrimaryEasting"
-            PrimaryNorthing = "PrimaryNorthing"
-            PrimaryElevation = "PrimaryElevation"
-            mode_txt = "DEPLOYED"
-            op_tag = "deploy"
-        else:
-            FieldDate = "Day1"
-            FieldROV = "ROV1"
-            TimeStamp = "TimeStamp1"
-            PrimaryEasting = "PrimaryEasting1"
-            PrimaryNorthing = "PrimaryNorthing1"
-            PrimaryElevation = "PrimaryElevation1"
-            mode_txt = "RETRIEVED"
-            op_tag = "recovery"
+        def _clean_int(value):
+            value = str(value or "").strip()
+            if not value:
+                return None
+            if not value.isdigit():
+                raise ValueError(f"Invalid numeric filter value: {value}")
+            return int(value)
 
-        # ---- output folder ----
-        if output_dir is None:
-            output_dir = (
-                    getattr(getattr(self, "prj", None), "SM_Folder", None)
-                    or getattr(getattr(self, "project", None), "SM_Folder", None)
-                    or getattr(self, "sm_folder", None)
-            )
-        if not output_dir:
-            return {"error": "SM output folder not set. Pass output_dir or set self.prj.SM_Folder / self.sm_folder."}
-
-        out_dir = Path(output_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        # ---- build WHERE: timestamp interval OR day range ----
-        day_where = ""
-        day_params = []
-        ts_where = ""
-        ts_params = []
-        label = ""
-
-        if ts_from and ts_to:
-            # exact timestamp interval (preferred when user selects time frame)
-            ts_where = f" AND {TimeStamp} >= ? AND {TimeStamp} < ?"
-            ts_params = [ts_from, ts_to]
-            day_where = "1=1"
-            label = f"{ts_from[:16].replace(' ', '_')}-{ts_to[:16].replace(' ', '_')}"
-            label = _safe_file_part(label)
-
-        else:
-            # day/day-range
-            def _parse_day(d: str) -> datetime.date:
-                return _dt.datetime.strptime(d, "%Y-%m-%d").date()
-
-            try:
-                if last_day and str(last_day).strip() and str(last_day).strip() != "0":
-                    d0 = _parse_day(first_day)
-                    d1 = _parse_day(str(last_day).strip())
-                    if d1 < d0:
-                        d0, d1 = d1, d0
-                    first_day_n = d0.strftime("%Y-%m-%d")
-                    last_day_n = d1.strftime("%Y-%m-%d")
-                    day_where = f"{FieldDate} BETWEEN ? AND ?"
-                    day_params = [first_day_n, last_day_n]
-                    label = f"{first_day_n}_{last_day_n}"
-                else:
-                    day_where = f"{FieldDate} = ?"
-                    day_params = [first_day]
-                    label = first_day
-            except Exception as e:
-                return {"error": f"Bad day format: {e}"}
-
-        # ---- rovs filter ----
-        rovs = rovs or []
-        rovs = [r.strip() for r in rovs if r and r.strip()]
-        rov_where = ""
-        rov_params: list[str] = []
-        rov_tag = "ALL"
-        if rovs:
-            placeholders = ",".join(["?"] * len(rovs))
-            rov_where = f" AND TRIM({FieldROV}) IN ({placeholders})"
-            rov_params = rovs
-            rov_tag = "_".join([r.replace(" ", "_") for r in rovs])
-            rov_tag = _safe_file_part(rov_tag)
-
-        # ---- query ----
-        sql = f"""
-        SELECT
-            ID,
-            Node,
-            TRIM(Line) AS Line,
-            TRIM(Station) AS Station,
-            CAST(NULLIF({PrimaryEasting}, '')  AS REAL) AS Easting,
-            CAST(NULLIF({PrimaryNorthing}, '') AS REAL) AS Northing,
-            CAST(NULLIF({PrimaryElevation}, '') AS REAL) AS Depth,
-            {FieldDate} AS D,
-            {TimeStamp} AS TS
-        FROM {table}
-        WHERE {day_where}
-          AND {TimeStamp} IS NOT NULL AND TRIM({TimeStamp}) <> ''
-          AND {FieldROV}  IS NOT NULL AND TRIM({FieldROV}) <> ''
-          {ts_where}
-          {rov_where}
-        ORDER BY Line, Station, {TimeStamp}
-        """
-
-        params = [*day_params, *ts_params, *rov_params]
-
-        try:
-            with self._connect() as conn:
-                rows = conn.execute(sql, params).fetchall()
-                if not rows:
-                    return {"error": "No data for selected filters (DSR query returned empty)."}
-
-                if mark_exported:
-                    conn.executemany(
-                        f"UPDATE {table} SET isEXported = 1 WHERE ID = ?",
-                        [(r["ID"],) for r in rows],
-                    )
-                    conn.commit()
-        except Exception as e:
-            return {"error": f"export_dsr_to_sm: sqlite error: {e}"}
-
-        # ---- helpers ----
         def _mmddyyyy(day_value) -> str:
             s = ("" if day_value is None else str(day_value)).strip()
             if not s:
@@ -2159,26 +2059,258 @@ WHERE Area IS NOT NULL
             s = ("" if ts_value is None else str(ts_value)).strip()
             if not s:
                 return ""
+
             base = s.split(".")[0]
-            try:
-                dt0 = _dt.datetime.strptime(base, "%Y-%m-%d %H:%M:%S")
-                return dt0.strftime("%H%M%S")
-            except Exception:
-                if " " in base:
-                    t = base.split(" ", 1)[1]
-                    return t.replace(":", "")[:6]
-                return ""
 
-        # ---- write file ----
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    dt0 = _dt.datetime.strptime(base, fmt)
+                    return dt0.strftime("%H%M%S")
+                except Exception:
+                    pass
+
+            if " " in base:
+                return base.split(" ", 1)[1].replace(":", "")[:6]
+
+            if "T" in base:
+                return base.split("T", 1)[1].replace(":", "")[:6]
+
+            return ""
+
+        rovs = [str(r).strip() for r in (rovs or []) if str(r).strip()]
+
+        if not rovs:
+            return {"error": "No ROVs selected"}
+
+        if output_dir is None:
+            return {"error": "Missing output_dir"}
+
+        has_line_station_filter = any([
+            line_from,
+            line_to,
+            station_from,
+            station_to,
+        ])
+
+        if not first_day and not ts_from and not ts_to and not has_line_station_filter:
+            return {"error": "Missing date/time or Line/Station filter"}
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # ---------------------------------------------------------
+        # Status controls ROV column, timestamp column, MODE
+        # ---------------------------------------------------------
+        if int(export_type) == 0:
+            field_date = "Day"
+            rov_col = "ROV"
+            ts_col = "TimeStamp"
+            mode_txt = "DEPLOYED"
+            op_tag = "deploy"
+            export_flag_col = "isExported"
+        else:
+            field_date = "Day1"
+            rov_col = "ROV1"
+            ts_col = "TimeStamp1"
+            mode_txt = "RETRIEVED"
+            op_tag = "recovery"
+            export_flag_col = "isRecExported"
+
+        # ---------------------------------------------------------
+        # Coordinates only
+        # ---------------------------------------------------------
+        if always_primary_deployment:
+            x_col = "PrimaryEasting"
+            y_col = "PrimaryNorthing"
+            z_col = "PrimaryElevation"
+            coord_tag = "primary_deployment_coords"
+        else:
+            if int(export_type) == 0:
+                x_col = "PrimaryEasting"
+                y_col = "PrimaryNorthing"
+                z_col = "PrimaryElevation"
+                coord_tag = "deployment"
+            else:
+                x_col = "PrimaryEasting1"
+                y_col = "PrimaryNorthing1"
+                z_col = "PrimaryElevation1"
+                coord_tag = "recovery"
+
+        where = [
+            f"{x_col} IS NOT NULL",
+            f"{y_col} IS NOT NULL",
+            f"{z_col} IS NOT NULL",
+            f"{ts_col} IS NOT NULL",
+            f"TRIM({ts_col}) <> ''",
+            f"{rov_col} IS NOT NULL",
+            f"TRIM({rov_col}) <> ''",
+        ]
+        params = []
+
+        # ---------------------------------------------------------
+        # Date/time filter optional when line/station is selected
+        # ---------------------------------------------------------
+        if ts_from and ts_to:
+            where.append(f"{ts_col} >= ?")
+            where.append(f"{ts_col} < ?")
+            params.extend([ts_from, ts_to])
+            label = f"{ts_from[:16].replace(' ', '_')}-{ts_to[:16].replace(' ', '_')}"
+            label = _safe_file_part(label)
+
+        elif first_day and last_day:
+            where.append(f"{field_date} BETWEEN ? AND ?")
+            params.extend([first_day, last_day])
+            label = f"{first_day}_{last_day}"
+
+        elif first_day:
+            where.append(f"{field_date} = ?")
+            params.append(first_day)
+            label = first_day
+
+        else:
+            label = "selected_lines"
+
+        # ---------------------------------------------------------
+        # ROV filter
+        # ---------------------------------------------------------
+        placeholders = ",".join(["?"] * len(rovs))
+        where.append(f"TRIM({rov_col}) IN ({placeholders})")
+        params.extend(rovs)
+
+        rov_tag = "_".join([r.replace(" ", "_") for r in rovs])
+        rov_tag = _safe_file_part(rov_tag)
+
+        # ---------------------------------------------------------
+        # Line / Station filter
+        # ---------------------------------------------------------
+        try:
+            lf = _clean_int(line_from)
+            lt = _clean_int(line_to)
+            sf = _clean_int(station_from)
+            st = _clean_int(station_to)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+        if lf is not None and lt is None:
+            lt = lf
+        if lt is not None and lf is None:
+            lf = lt
+        if sf is not None and st is None:
+            st = sf
+        if st is not None and sf is None:
+            sf = st
+
+        if lf is not None and lt is not None:
+            if lf > lt:
+                lf, lt = lt, lf
+            where.append("CAST(Line AS INTEGER) BETWEEN ? AND ?")
+            params.extend([lf, lt])
+
+        if sf is not None and st is not None:
+            if sf > st:
+                sf, st = st, sf
+            where.append("CAST(Station AS INTEGER) BETWEEN ? AND ?")
+            params.extend([sf, st])
+
+        where_sql = " AND ".join(where)
+
+        filter_label_parts = []
+
+        if lf is not None and lt is not None:
+            filter_label_parts.append(f"L{lf}" if lf == lt else f"L{lf}-{lt}")
+
+        if sf is not None and st is not None:
+            filter_label_parts.append(f"S{sf}" if sf == st else f"S{sf}-{st}")
+
+        filter_label = "_".join(filter_label_parts)
+
+        # ---------------------------------------------------------
+        # SQL
+        # ---------------------------------------------------------
+        sql = f"""
+            SELECT
+                ID,
+                Node,
+                TRIM(Line) AS Line,
+                TRIM(Station) AS Station,
+                CAST(NULLIF({x_col}, '') AS REAL) AS Easting,
+                CAST(NULLIF({y_col}, '') AS REAL) AS Northing,
+                CAST(NULLIF({z_col}, '') AS REAL) AS Depth,
+                {field_date} AS D,
+                {ts_col} AS TS,
+                {rov_col} AS ROVName
+            FROM {table}
+            WHERE {where_sql}
+            ORDER BY
+                CAST(Line AS INTEGER),
+                CAST(Station AS INTEGER),
+                {ts_col}
+        """
+
+        try:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(sql, params).fetchall()
+
+                if not rows:
+                    return {
+                        "error": (
+                            "No DSR rows found for selected export filters. "
+                            f"Status={mode_txt}, ROV column={rov_col}, "
+                            f"Timestamp column={ts_col}, coordinates={x_col}/{y_col}/{z_col}"
+                        )
+                    }
+
+                if mark_exported:
+                    try:
+                        conn.executemany(
+                            f"UPDATE {table} SET {export_flag_col} = 1 WHERE ID = ?",
+                            [(r["ID"],) for r in rows],
+                        )
+                        conn.commit()
+                    except Exception:
+                        pass
+
+        except Exception as exc:
+            return {"error": f"export_dsr_to_sm: sqlite error: {exc}"}
+
+        # ---------------------------------------------------------
+        # Output filename
+        # ---------------------------------------------------------
+        if filename:
+            safe_filename = str(filename).strip()
+            safe_filename = re.sub(r'[<>:"/\\|?*]+', "_", safe_filename)
+            if not safe_filename.lower().endswith(".csv"):
+                safe_filename += ".csv"
+            out_filename = safe_filename
+        else:
+            if int(zexp) == 1:
+                parts = [label, rov_tag, "zexp_SM"]
+            else:
+                parts = [label, rov_tag, op_tag, "SM"]
+
+            if filter_label:
+                parts.insert(-1, filter_label)
+
+            if always_primary_deployment:
+                parts.insert(-1, coord_tag)
+
+            out_filename = "_".join(parts) + ".csv"
+            out_filename = _safe_file_part(out_filename)
+
+        out_path = output_dir / out_filename
+
+        # ---------------------------------------------------------
+        # Z-NODES EXPORT FORMAT
+        # ---------------------------------------------------------
         if int(zexp) == 1:
-            filename = f"{label}_{rov_tag}_zexp_SM.csv"
-            out_path = out_dir / filename
-
             with out_path.open("w", encoding="utf-8", newline="\n") as f:
                 for r in rows:
                     node = (r["Node"] or "").strip()
+
                     node1 = node
                     serial = "290000001"
+
                     if node:
                         parts = node.split(" ")
                         if len(parts) >= 2:
@@ -2186,13 +2318,14 @@ WHERE Area IS NOT NULL
                             serial = parts[1]
 
                     depth = float(r["Depth"] or 0.0)
+
                     if int(export_abs) == 1:
                         depth = abs(depth)
 
                     line = r["Line"] or ""
                     station = r["Station"] or ""
-                    e = float(r["Easting"] or 0.0)
-                    n = float(r["Northing"] or 0.0)
+                    easting = float(r["Easting"] or 0.0)
+                    northing = float(r["Northing"] or 0.0)
                     day_str = _mmddyyyy(r["D"])
                     hhmmss = _hhmmss(r["TS"])
 
@@ -2204,37 +2337,60 @@ WHERE Area IS NOT NULL
                         f"STATION:{station},"
                         "CF:,"
                         f"MODE:{mode_txt},"
-                        f"EASTING:{e:.1f},"
-                        f"NORTHING:{n:.1f},"
+                        f"EASTING:{easting:.1f},"
+                        f"NORTHING:{northing:.1f},"
                         f"DEPTH:{depth:.1f},"
                         f"DAY:{day_str},"
                         f"HHMMSS:{hhmmss},"
                         "survey\n"
                     )
 
-            return {"success": str(out_path), "rows": len(rows), "filename": out_path.name}
+            return {
+                "success": str(out_path),
+                "rows": len(rows),
+                "filename": out_path.name,
+                "format": "zexp",
+                "mode": mode_txt,
+                "rov_col": rov_col,
+                "ts_col": ts_col,
+                "x_col": x_col,
+                "y_col": y_col,
+                "z_col": z_col,
+                "always_primary_deployment": bool(always_primary_deployment),
+            }
 
-        # normal CSV
-        exp_name = ["QRCODE", "RFID", "LINE", "STATION", "CF", "MODE",
-                    "EASTING", "NORTHING", "DEPTH", "DAY", "HHMMSS"]
-
-        filename = f"{label}_{rov_tag}_{op_tag}_SM.csv"
-        out_path = out_dir / filename
+        # ---------------------------------------------------------
+        # NORMAL SM CSV FORMAT
+        # ---------------------------------------------------------
+        headers = [
+            "QRCODE",
+            "RFID",
+            "LINE",
+            "STATION",
+            "CF",
+            "MODE",
+            "EASTING",
+            "NORTHING",
+            "DEPTH",
+            "DAY",
+            "HHMMSS",
+        ]
 
         with out_path.open("w", encoding="utf-8-sig", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(exp_name)
+            writer = csv.writer(f)
+            writer.writerow(headers)
 
             for r in rows:
                 depth = float(r["Depth"] or 0.0)
+
                 if int(export_abs) == 1:
                     depth = abs(depth)
 
-                w.writerow([
-                    (r["Node"] or ""),
+                writer.writerow([
+                    r["Node"] or "",
                     "",
-                    (r["Line"] or ""),
-                    (r["Station"] or ""),
+                    r["Line"] or "",
+                    r["Station"] or "",
                     "",
                     mode_txt,
                     f"{float(r['Easting'] or 0.0):.1f}",
@@ -2244,7 +2400,19 @@ WHERE Area IS NOT NULL
                     _hhmmss(r["TS"]),
                 ])
 
-        return {"success": str(out_path), "rows": len(rows), "filename": out_path.name}
+        return {
+            "success": str(out_path),
+            "rows": len(rows),
+            "filename": out_path.name,
+            "format": "normal_csv",
+            "mode": mode_txt,
+            "rov_col": rov_col,
+            "ts_col": ts_col,
+            "x_col": x_col,
+            "y_col": y_col,
+            "z_col": z_col,
+            "always_primary_deployment": bool(always_primary_deployment),
+        }
 
     def _read_header_lines(self, header_file_path):
         if not header_file_path:

@@ -6,16 +6,22 @@
   width: 100%;
 }
 
-/* Scroll container */
+/* ============================================================
+   Scroll container
+   ============================================================ */
+
 .visual-offset-table-wrap {
   height: 72vh;
   overflow: auto;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #94a3b8;
   border-radius: 0.75rem;
   background: #ffffff;
 }
 
-/* Main matrix table */
+/* ============================================================
+   Main matrix table
+   ============================================================ */
+
 .visual-offset-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -26,17 +32,21 @@
   white-space: nowrap;
 }
 
-/* Base cells */
+/* ============================================================
+   Base cells
+   ============================================================ */
+
 .visual-offset-table th,
 .visual-offset-table td {
   min-width: 62px;
   width: 62px;
-  height: 22px;
+  height: 28px;
   padding: 2px 5px;
   text-align: center;
   vertical-align: middle;
-  border-right: 1px solid rgba(40, 40, 40, 0.35);
-  border-bottom: 1px solid rgba(40, 40, 40, 0.35);
+
+  border-right: 1px solid rgba(15, 23, 42, 0.18);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.18);
 }
 
 /* ============================================================
@@ -47,6 +57,7 @@
   position: sticky;
   font-weight: 900;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+  border-bottom: 2px solid rgba(15, 23, 42, 0.35);
 }
 
 .visual-offset-table thead tr:nth-child(1) th {
@@ -55,12 +66,12 @@
 }
 
 .visual-offset-table thead tr:nth-child(2) th {
-  top: 22px;
+  top: 28px;
   z-index: 58;
 }
 
 .visual-offset-table thead tr:nth-child(3) th {
-  top: 44px;
+  top: 56px;
   z-index: 56;
 }
 
@@ -72,22 +83,31 @@
   position: sticky;
   left: 0;
   z-index: 50;
-  min-width: 78px;
-  width: 78px;
+
+  min-width: 88px;
+  width: 88px;
+
   color: #111827;
   font-weight: 900;
+
+  box-shadow: 2px 0 4px rgba(0,0,0,.06);
 }
 
 .visual-offset-table .vo-sticky-col-2 {
   position: sticky;
-  left: 78px;
+  left: 88px;
   z-index: 49;
-  min-width: 128px;
-  width: 128px;
+
+  min-width: 150px;
+  width: 150px;
+
   color: #111827;
   font-weight: 900;
+
   text-align: left;
   padding-left: 7px;
+
+  box-shadow: 2px 0 4px rgba(0,0,0,.06);
 }
 
 .visual-offset-table thead .vo-sticky-col {
@@ -98,7 +118,10 @@
   z-index: 88;
 }
 
-/* Top-left corners */
+/* ============================================================
+   Top-left corners
+   ============================================================ */
+
 .visual-offset-table .vo-corner {
   background: #fff176 !important;
 }
@@ -133,7 +156,18 @@
   font-weight: 900;
 }
 
-/* Source header statuses */
+/* ============================================================
+   Group separators
+   ============================================================ */
+
+.visual-offset-table .vo-group-start {
+  border-left: 4px solid #111827 !important;
+}
+
+/* ============================================================
+   Source header statuses
+   ============================================================ */
+
 .visual-offset-table .vo-sl-all-deployed {
   background: #86efac !important;
   color: #052e16 !important;
@@ -160,13 +194,19 @@
   color: #111827 !important;
 }
 
-/* Green = source lines completed, ready for recovery */
+/* Green = ready for recovery */
 .visual-offset-table .vo-rline-ready-recovery {
   background: #22c55e !important;
   color: #052e16 !important;
 }
 
-/* Orange = recovered */
+/* Blue = partially recovered */
+.visual-offset-table .vo-rline-partial-recovered {
+  background: #3b82f6 !important;
+  color: #ffffff !important;
+}
+
+/* Orange = fully recovered */
 .visual-offset-table .vo-rline-recovered {
   background: #f59e0b !important;
   color: #111827 !important;
@@ -216,14 +256,14 @@
 
 /* Planned source cell */
 .visual-offset-table .vo-active {
-  background: #f5a623;
+  background: #fbbf24;
   color: #111827;
   font-weight: 800;
 }
 
 /* Source completed */
 .visual-offset-table .vo-completed {
-  background: #22c55e;
+  background: #4ade80;
   color: #052e16;
   font-weight: 900;
 }
@@ -231,6 +271,14 @@
 /* ============================================================
    Hover row + column
    ============================================================ */
+
+.visual-offset-table tbody tr:hover td {
+  background-color: rgba(59,130,246,.06);
+}
+
+.visual-offset-table tbody td:hover {
+  background-color: rgba(59,130,246,.14) !important;
+}
 
 .visual-offset-table tr.vo-hover-row td,
 .visual-offset-table tr.vo-hover-row .vo-rline,
@@ -243,7 +291,10 @@
   background-color: #ffe8a3 !important;
 }
 
-/* Keep planned/completed cells stronger on hover */
+/* ============================================================
+   Keep strong hover colors
+   ============================================================ */
+
 .visual-offset-table .vo-active.vo-hover-col,
 .visual-offset-table tr.vo-hover-row .vo-active {
   background-color: #d97706 !important;
@@ -254,7 +305,10 @@
   background-color: #16a34a !important;
 }
 
-/* Keep receiver statuses readable on hover */
+/* ============================================================
+   Receiver status hover colors
+   ============================================================ */
+
 .visual-offset-table .vo-rline-deployed.vo-hover-col,
 .visual-offset-table tr.vo-hover-row .vo-rline-deployed {
   background-color: #eab308 !important;
@@ -263,6 +317,11 @@
 .visual-offset-table .vo-rline-ready-recovery.vo-hover-col,
 .visual-offset-table tr.vo-hover-row .vo-rline-ready-recovery {
   background-color: #16a34a !important;
+}
+
+.visual-offset-table .vo-rline-partial-recovered.vo-hover-col,
+.visual-offset-table tr.vo-hover-row .vo-rline-partial-recovered {
+  background-color: #2563eb !important;
 }
 
 .visual-offset-table .vo-rline-recovered.vo-hover-col,
@@ -279,11 +338,18 @@
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+
   padding: 0.55rem 0.75rem;
   margin-bottom: 0.5rem;
+
   border: 1px solid rgba(15, 23, 42, 0.10);
   border-radius: 0.85rem;
-  background: linear-gradient(135deg, #e8fff3, #eef6ff);
+
+  background: linear-gradient(
+      135deg,
+      #f8fafc 0%,
+      #eff6ff 100%
+  );
 }
 
 .vo-title {
@@ -304,17 +370,22 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
+
   font-size: 0.72rem;
   color: #334155;
 }
 
 .vo-dot {
   display: inline-block;
+
   width: 0.75rem;
   height: 0.75rem;
+
   margin-right: 0.25rem;
+
   border: 1px solid rgba(15, 23, 42, 0.25);
   border-radius: 0.2rem;
+
   vertical-align: middle;
 }
 
@@ -330,23 +401,32 @@
   background: #22c55e;
 }
 
+.vo-dot-partial {
+  background: #3b82f6;
+}
+
 .vo-dot-recovered {
   background: #f59e0b;
 }
 
 .vo-dot-plan {
-  background: #f5a623;
+  background: #fbbf24;
 }
 
 .vo-dot-source {
-  background: #22c55e;
+  background: #4ade80;
 }
 
-/* Empty state */
+/* ============================================================
+   Empty state
+   ============================================================ */
+
 .vo-empty-message {
   padding: 1.25rem !important;
   text-align: center;
+
   font-weight: 800;
+
   background: #fff3cd;
   color: #664d03;
 }

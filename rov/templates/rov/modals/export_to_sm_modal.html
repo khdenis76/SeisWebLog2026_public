@@ -2,7 +2,6 @@
   <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
     <div class="modal-content">
 
-      <!-- Header (colorful) -->
       <div class="modal-header sm-modal-header">
         <div class="w-100">
           <div class="d-flex align-items-center justify-content-between">
@@ -14,7 +13,7 @@
             </span>
           </div>
           <small class="opacity-75 d-block mt-1">
-            Choose time range, node status, format, and ROV list. Export returns your CSV.
+            Choose time range, node status, coordinate mode, format, ROV list, and optional Line/Station range.
           </small>
         </div>
 
@@ -89,6 +88,19 @@
                 </select>
               </div>
             </div>
+
+            <div class="form-check form-switch mt-3">
+              <input class="form-check-input"
+                     type="checkbox"
+                     id="sm-always-primary-deployment"
+                     checked>
+              <label class="form-check-label fw-semibold" for="sm-always-primary-deployment">
+                Always export Primary Deployment coordinates
+              </label>
+              <div class="text-muted small">
+                When checked, export uses PrimaryEasting, PrimaryNorthing, PrimaryElevation even if Recovered is selected.
+              </div>
+            </div>
           </div>
         </div>
 
@@ -114,6 +126,44 @@
                 <label class="form-label fw-semibold">File name (optional)</label>
                 <input class="form-control" id="sm-filename" placeholder="auto-generated if empty">
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LINE / STATION FILTER -->
+        <div class="sm-section">
+          <div class="sm-section-head">
+            <span class="sm-badge">
+              <span class="sm-dot" style="background:linear-gradient(135deg,#20c997,#198754); box-shadow:0 0 0 4px rgba(25,135,84,.14);"></span>
+              Line / Station filter
+            </span>
+          </div>
+
+          <div class="sm-section-body">
+            <div class="row g-3">
+              <div class="col-md-3">
+                <label class="form-label fw-semibold">Line from</label>
+                <input class="form-control" id="sm-line-from" placeholder="optional">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label fw-semibold">Line to</label>
+                <input class="form-control" id="sm-line-to" placeholder="optional">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label fw-semibold">Station from</label>
+                <input class="form-control" id="sm-station-from" placeholder="optional">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label fw-semibold">Station to</label>
+                <input class="form-control" id="sm-station-to" placeholder="optional">
+              </div>
+            </div>
+
+            <div class="text-muted small mt-2">
+              Leave empty to export all. For one Line or Station, fill only “from” or use the same value in both fields.
             </div>
           </div>
         </div>
@@ -146,7 +196,6 @@
 
       </div>
 
-      <!-- Footer -->
       <div class="modal-footer sm-modal-footer">
         <button type="button" class="btn btn-outline-secondary btn-sm-close" data-bs-dismiss="modal">
           Close
@@ -155,7 +204,8 @@
         <button type="button"
                 class="btn btn-sm-export"
                 id="sm2file-export-btn"
-                data-export-url="{% url 'dsr_export_sm' %}">
+                data-export-url="{% url 'dsr_export_sm' %}"
+                data-rovs-url="{% url 'dsr_rovs_for_timeframe' %}">
           <i class="fas fa-download me-2"></i>Export CSV
         </button>
       </div>
