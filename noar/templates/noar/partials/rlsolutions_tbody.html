@@ -1,0 +1,144 @@
+{% for row in rlsolutions %}
+<tr
+  class="noar-rlsolution-row {% if row.is_clicked %}table-primary{% endif %}"
+  data-rlsolution-id="{{ row.ID }}"
+  data-line="{{ row.Line }}"
+  data-line-name="{{ row.LineName|default:'' }}"
+  data-seq="{{ row.Seq|default:'' }}"
+  data-attempt="{{ row.Attempt|default:'' }}"
+  data-solution-id="{{ row.Solution_FK|default:'' }}"
+  data-solution="{{ row.Solution|default:'' }}"
+  data-tier="{{ row.Tier|default:'' }}"
+  data-tier-line="{{ row.TierLine|default:'' }}"
+  data-frp="{{ row.FRP|default:'' }}"
+  data-lrp="{{ row.LRP|default:'' }}"
+  data-srp="{{ row.SRP|default:'' }}"
+  data-erp="{{ row.ERP|default:'' }}"
+  data-vessel="{{ row.Vessel|default:'' }}"
+  data-point-count="{{ row.PointCount|default:0 }}"
+  data-percent-line="{{ row.PercentOfLineDone|default:0 }}"
+  data-seq-prod-count="{{ row.SeqProdCount|default:0 }}"
+  data-percent-seq="{{ row.PercentOFSeqDone|default:0 }}"
+  data-radial-min="{{ row.MinRadialOffset|default:0 }}"
+  data-radial-avg="{{ row.AvgRadialOffset|default:0 }}"
+  data-radial-max="{{ row.MaxRadialOffset|default:0 }}"
+  data-il-min="{{ row.MinILOffset|default:0 }}"
+  data-il-avg="{{ row.AvgILOffset|default:0 }}"
+  data-il-max="{{ row.MaxILOffset|default:0 }}"
+  data-xl-min="{{ row.MinXLOffset|default:0 }}"
+  data-xl-avg="{{ row.AvgXLOffset|default:0 }}"
+  data-xl-max="{{ row.MaxXLOffset|default:0 }}"
+  data-dx-min="{{ row.MindX|default:0 }}"
+  data-dx-avg="{{ row.AvgdX|default:0 }}"
+  data-dx-max="{{ row.MaxdX|default:0 }}"
+  data-dy-min="{{ row.MindY|default:0 }}"
+  data-dy-avg="{{ row.AvgdY|default:0 }}"
+  data-dy-max="{{ row.MaxdY|default:0 }}"
+  data-wd-min="{{ row.MinWaterDepth|default:0 }}"
+  data-wd-avg="{{ row.AvgWaterDepth|default:0 }}"
+  data-wd-max="{{ row.MaxWaterDepth|default:0 }}"
+  data-elev-min="{{ row.MinElevation|default:0 }}"
+  data-elev-avg="{{ row.AvgElevation|default:0 }}"
+  data-elev-max="{{ row.MaxElevation|default:0 }}"
+  data-is-recovered="{{ row.is_recovered|default:0 }}"
+  data-is-processed="{{ row.is_processed|default:0 }}"
+  data-is-fbloaded="{{ row.is_fbloaded|default:0 }}"
+  data-file-name="{{ row.FileName|default:'' }}"
+  style="cursor:pointer;"
+>
+  <td class="sticky-col sticky-col-1 fw-semibold">{{ row.Line|default:"" }}</td>
+  <td class="sticky-col sticky-col-2">{{ row.LineName|default:"" }}</td>
+  <td class="sticky-col sticky-col-3">{{ row.Seq|default:"" }}</td>
+
+  <td>{{ row.Attempt|default:"" }}</td>
+  <td>{{ row.Solution|default:"" }}</td>
+  <td>{{ row.Tier|default:"" }}</td>
+  <td>{{ row.TierLine|default:"" }}</td>
+  <td>{{ row.FRP|default:"" }}</td>
+  <td>{{ row.LRP|default:"" }}</td>
+  <td>{{ row.SRP|default:"" }}</td>
+  <td>{{ row.ERP|default:"" }}</td>
+  <td>{{ row.Vessel|default:"" }}</td>
+
+  <td>
+    {% if row.StartYear %}
+      {{ row.StartYear }}-{{ row.StartMonth|stringformat:"02d" }}-{{ row.StartDay|stringformat:"02d" }}
+      {{ row.StartHour|stringformat:"02d" }}:{{ row.StartMinute|stringformat:"02d" }}:{{ row.StartSecond|stringformat:"02d" }}
+    {% endif %}
+  </td>
+
+  <td>
+    {% if row.EndYear %}
+      {{ row.EndYear }}-{{ row.EndMonth|stringformat:"02d" }}-{{ row.EndDay|stringformat:"02d" }}
+      {{ row.EndHour|stringformat:"02d" }}:{{ row.EndMinute|stringformat:"02d" }}:{{ row.EndSecond|stringformat:"02d" }}
+    {% endif %}
+  </td>
+
+  <td>{{ row.PointCount|default:0 }}</td>
+  <td>{{ row.PercentOfLineDone|default:0|floatformat:1 }}</td>
+  <td>{{ row.SeqProdCount|default:0 }}</td>
+  <td>{{ row.PercentOFSeqDone|default:0|floatformat:1 }}</td>
+
+  <td>{{ row.MinRadialOffset|default:0|floatformat:2 }}</td>
+  <td>{{ row.AvgRadialOffset|default:0|floatformat:2 }}</td>
+  <td>{{ row.MaxRadialOffset|default:0|floatformat:2 }}</td>
+
+  <td>{{ row.MinILOffset|default:0|floatformat:2 }}</td>
+  <td>{{ row.AvgILOffset|default:0|floatformat:2 }}</td>
+  <td>{{ row.MaxILOffset|default:0|floatformat:2 }}</td>
+
+  <td>{{ row.MinXLOffset|default:0|floatformat:2 }}</td>
+  <td>{{ row.AvgXLOffset|default:0|floatformat:2 }}</td>
+  <td>{{ row.MaxXLOffset|default:0|floatformat:2 }}</td>
+
+  <td>{{ row.MindX|default:0|floatformat:2 }}</td>
+  <td>{{ row.AvgdX|default:0|floatformat:2 }}</td>
+  <td>{{ row.MaxdX|default:0|floatformat:2 }}</td>
+
+  <td>{{ row.MindY|default:0|floatformat:2 }}</td>
+  <td>{{ row.AvgdY|default:0|floatformat:2 }}</td>
+  <td>{{ row.MaxdY|default:0|floatformat:2 }}</td>
+
+  <td>{{ row.MinWaterDepth|default:0|floatformat:1 }}</td>
+  <td>{{ row.AvgWaterDepth|default:0|floatformat:1 }}</td>
+  <td>{{ row.MaxWaterDepth|default:0|floatformat:1 }}</td>
+
+  <td>{{ row.MinElevation|default:0|floatformat:1 }}</td>
+  <td>{{ row.AvgElevation|default:0|floatformat:1 }}</td>
+  <td>{{ row.MaxElevation|default:0|floatformat:1 }}</td>
+
+  <td>
+    {% if row.is_recovered %}
+      <span class="badge text-bg-success">Yes</span>
+    {% else %}
+      <span class="badge text-bg-secondary">No</span>
+    {% endif %}
+  </td>
+
+  <td>
+    {% if row.is_processed %}
+      <span class="badge text-bg-success">Yes</span>
+    {% else %}
+      <span class="badge text-bg-secondary">No</span>
+    {% endif %}
+  </td>
+
+  <td>
+    {% if row.is_fbloaded %}
+      <span class="badge text-bg-success">Yes</span>
+    {% else %}
+      <span class="badge text-bg-secondary">No</span>
+    {% endif %}
+  </td>
+
+  <td class="text-truncate" style="max-width: 180px;" title="{{ row.FileName|default:'' }}">
+    {{ row.FileName|default:"" }}
+  </td>
+</tr>
+{% empty %}
+<tr>
+  <td colspan="43" class="text-center text-muted py-3">
+    No RLSolutions loaded.
+  </td>
+</tr>
+{% endfor %}

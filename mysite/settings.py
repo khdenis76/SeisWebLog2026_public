@@ -28,7 +28,8 @@ INSTALLED_APPS = [
     'fleet.apps.FleetConfig',
     'reports.apps.ReportsConfig',
     "svp.apps.SvpConfig",
-    'noar.apps.NoarConfig'
+    'noar.apps.NoarConfig',
+    "production_monitor",
 ]
 
 MIDDLEWARE = [

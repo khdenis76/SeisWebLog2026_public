@@ -42,4 +42,5 @@ urlpatterns = [
     path("reports/", include("reports.urls")),
     path("svp/", include("svp.urls")),
     path('', include('core.urls')),
+    path('production-monitor/',include('production_monitor.urls'))
 ]

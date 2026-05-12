@@ -4,7 +4,7 @@
   "output_pattern": "{role}_{LLLLL}{SSSSS}_{index}.png",
   "rename_mode": "off",
   "single_config_only": true,
-  "skip_checked": false,
+  "skip_checked": true,
   "main_config": {
     "config_name": "main",
     "file_masks": [

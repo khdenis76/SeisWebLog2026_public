@@ -1,0 +1,243 @@
+<div class="vo-matrix-shell">
+
+  <!-- ===================================================== -->
+  <!-- Toolbar -->
+  <!-- ===================================================== -->
+
+  <div class="vo-toolbar">
+
+    <div>
+      <div class="vo-title">
+        <i class="fas fa-table-cells-large me-1"></i>
+        Template Matrix / Production Status
+      </div>
+
+      <div class="vo-subtitle">
+        {{ rline_count }} RLines × {{ sl_count }} Source Lines
+      </div>
+    </div>
+
+    <div class="vo-legend">
+      <span><i class="vo-dot vo-dot-preplot"></i> Preplot</span>
+      <span><i class="vo-dot vo-dot-deployed"></i> Fully deployed</span>
+      <span><i class="vo-dot vo-dot-ready"></i> Ready for recovery</span>
+      <span><i class="vo-dot vo-dot-recovered"></i> Recovered</span>
+      <span><i class="vo-dot vo-dot-plan"></i> Planned source cells</span>
+      <span><i class="vo-dot vo-dot-source"></i> Source completed</span>
+      <span><i class="vo-dot vo-dot-partial"></i> Partially recovered</span>
+    </div>
+
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- Matrix -->
+  <!-- ===================================================== -->
+
+  <div class="visual-offset-table-wrap">
+
+    <table class="visual-offset-table">
+
+      <!-- ================================================= -->
+      <!-- HEADER -->
+      <!-- ================================================= -->
+
+      <thead>
+
+        <!-- ============================================= -->
+        <!-- Vessel row -->
+        <!-- ============================================= -->
+
+        <tr>
+
+          <th class="vo-sticky-col vo-corner">
+            RLine
+          </th>
+
+          <th class="vo-sticky-col-2 vo-corner-2">
+            Vessel
+          </th>
+
+          {% for h in sl_headers %}
+            <th class="vo-head-vessel {{ h.vessel_class }} {% if h.is_group_start %} vo-group-start {% endif %}">
+                {{ h.vessel }}
+            </th>
+          {% endfor %}
+
+        </tr>
+
+        <!-- ============================================= -->
+        <!-- Sequence row -->
+        <!-- ============================================= -->
+
+        <tr>
+
+          <th class="vo-sticky-col vo-corner">
+            Seq
+          </th>
+
+          <th class="vo-sticky-col-2 vo-corner-2">
+            Production
+          </th>
+
+          {% for h in sl_headers %}
+            <th class="vo-head-seq
+                       {% if h.is_group_start %} vo-group-start {% endif %}"
+                title="SL {{ h.line }} | Production Seq: {{ h.seq|default:'-' }}">
+
+              {{ h.seq|default:"" }}
+
+            </th>
+          {% endfor %}
+
+        </tr>
+
+        <!-- ============================================= -->
+        <!-- Source line row -->
+        <!-- ============================================= -->
+
+        <tr>
+
+          <th class="vo-sticky-col vo-corner">
+            RLine
+          </th>
+
+          <th class="vo-sticky-col-2 vo-corner-2">
+            Vessel
+          </th>
+
+          {% for h in sl_headers %}
+            <th class="vo-head-sl
+                       {% if h.source_completed %}
+                         vo-sl-completed
+                       {% elif h.all_receivers_deployed %}
+                         vo-sl-all-deployed
+                       {% endif %}
+                       {% if h.is_group_start %}
+                         vo-group-start
+                       {% endif %}"
+
+                title="
+SL {{ h.line }}
+Vessel: {{ h.vessel|default:'-' }}
+Seq: {{ h.seq|default:'-' }}
+Required RLines: {{ h.required_rline_count }}
+Deployed RLines: {{ h.deployed_rline_count }}
+Group: {{ h.group_no }}
+">
+
+              {{ h.line }}
+
+            </th>
+          {% endfor %}
+
+        </tr>
+
+      </thead>
+
+      <!-- ================================================= -->
+      <!-- BODY -->
+      <!-- ================================================= -->
+
+      <tbody>
+
+        {% for r in rows %}
+
+          <tr>
+
+            <!-- ========================================= -->
+            <!-- Receiver line -->
+            <!-- ========================================= -->
+
+            <th class="vo-sticky-col
+                       vo-rline
+                       {{ r.rline_status_class }}"
+
+                title="
+RLine {{ r.rline }}
+Deployed: {{ r.deployed_pct }}%
+Retrieved: {{ r.retrieved_pct }}%
+FirstSL: {{ r.first_sl }}
+LastSL: {{ r.last_sl }}
+Planned: {{ r.planned_count }}
+Completed: {{ r.completed_count }}
+Tier: {{ r.tier }}
+">
+
+              {{ r.rline }}
+
+            </th>
+
+            <!-- ========================================= -->
+            <!-- Vessel -->
+            <!-- ========================================= -->
+
+            <th class="vo-sticky-col-2
+                       vo-rline-vessel
+                       {{ r.vessel_class }}"
+
+                title="
+RLine {{ r.rline }}
+Vessel: {{ r.vessel|default:'-' }}
+">
+
+              {{ r.vessel|default:"-" }}
+
+            </th>
+
+            <!-- ========================================= -->
+            <!-- Cells -->
+            <!-- ========================================= -->
+
+            {% for c in r.cells %}
+
+              {% if c.in_range %}
+
+                <td class="vo-cell
+                           {% if c.completed %}
+                             vo-completed
+                           {% else %}
+                             vo-active
+                           {% endif %}"
+
+                    title="
+RLine {{ r.rline }}
+SL {{ c.sl }}
+Range {{ r.first_sl }} → {{ r.last_sl }}
+">
+
+                  ---
+
+                </td>
+
+              {% else %}
+
+                <td class="vo-cell vo-empty"></td>
+
+              {% endif %}
+
+            {% endfor %}
+
+          </tr>
+
+        {% empty %}
+
+          <tr>
+            <td colspan="999"
+                class="vo-empty-message">
+
+              <i class="fas fa-exclamation-triangle me-2"></i>
+
+              No project template data found
+
+            </td>
+          </tr>
+
+        {% endfor %}
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+</div>

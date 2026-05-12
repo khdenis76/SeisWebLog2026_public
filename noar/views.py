@@ -23,25 +23,42 @@ def noar_home(request):
     project = user_settings.active_project
 
     if not project:
-        # No active project → go to project list
         return redirect("projects")
+
     if not project.can_view(request.user):
         raise PermissionDenied("You are not a member of this project.")
-    pdb=ProjectDB(project.db_path)
+
+    pdb = ProjectDB(project.db_path)
+
     sps_revisions = SPSRevision.objects.all().order_by("rev_name")
+
     prjsol = SolutionsDB(project.db_path)
     prjsol.ensure_table()
     solutions = prjsol.list_solutions()
+
     project_fleet = pdb.list_project_fleet()
 
+    receiver_sps = ReceiverSPS(project.db_path)
+
+    # Make sure tables exist before listing.
+    # Important: ensure_tables() currently recreates RPSolution,
+    # so use only ensure_rlsolution_table() here.
+    with receiver_sps._connect() as conn:
+        receiver_sps.ensure_sps_files_table(conn)
+        receiver_sps.ensure_rlsolution_table(conn)
+        receiver_sps.ensure_indexes(conn)
+
+    rlsolutions = receiver_sps.list_rlsolutions(
+        sort_by="Line",
+        sort_dir="asc",
+    )
 
     return render(request, "noar/noar_home.html", {
         "project": project,
-        "current_year": datetime.now().year,
-        "project_fleet": project_fleet,
-        "solutions": solutions,
         "sps_revisions": sps_revisions,
-
+        "solutions": solutions,
+        "project_fleet": project_fleet,
+        "rlsolutions": rlsolutions,
     })
 
 def noar_dashboard_api(request):

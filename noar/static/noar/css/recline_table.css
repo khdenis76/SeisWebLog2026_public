@@ -1,0 +1,199 @@
+/* =========================================================
+   RLSolutions Table
+========================================================= */
+
+.noar-rlsolutions-table-wrap {
+    position: relative;
+    overflow: auto;
+    max-height: 78vh;
+
+    border-top: 1px solid var(--bs-border-color);
+    background: var(--bs-body-bg);
+}
+
+/* =========================================================
+   Table
+========================================================= */
+
+.noar-rlsolutions-table {
+    white-space: nowrap;
+    font-size: 0.76rem;
+    margin-bottom: 0 !important;
+}
+
+.noar-rlsolutions-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+
+    background: var(--bs-light);
+    color: var(--bs-body-color);
+
+    border-bottom: 2px solid var(--bs-border-color);
+
+    font-weight: 600;
+    text-align: center;
+    vertical-align: middle;
+
+    padding: 0.45rem 0.5rem;
+}
+
+.noar-rlsolutions-table tbody td {
+    padding: 0.3rem 0.5rem;
+    vertical-align: middle;
+}
+
+/* =========================================================
+   Row Hover / Active
+========================================================= */
+
+.noar-rlsolution-row {
+    transition: background-color 0.08s linear;
+}
+
+.noar-rlsolution-row:hover {
+    background: var(--bs-tertiary-bg);
+}
+
+.noar-rlsolution-row.table-primary {
+    background: var(--bs-primary-bg-subtle);
+}
+
+.noar-rlsolution-row.table-primary td {
+    border-color: rgba(var(--bs-primary-rgb), 0.25);
+}
+
+/* =========================================================
+   Sticky Columns
+========================================================= */
+
+.noar-rlsolutions-table .sticky-col {
+    position: sticky;
+    z-index: 30;
+
+    background: var(--bs-body-bg);
+
+    border-right: 1px solid var(--bs-border-color);
+}
+
+.noar-rlsolutions-table thead .sticky-col {
+    z-index: 60;
+    background: var(--bs-light);
+}
+
+/* Line */
+.noar-rlsolutions-table .sticky-col-1 {
+    left: 0;
+    min-width: 90px;
+    width: 90px;
+    max-width: 90px;
+
+    font-weight: 600;
+}
+
+/* LineName */
+.noar-rlsolutions-table .sticky-col-2 {
+    left: 90px;
+    min-width: 160px;
+    width: 160px;
+    max-width: 160px;
+}
+
+/* Seq */
+.noar-rlsolutions-table .sticky-col-3 {
+    left: 250px;
+    min-width: 70px;
+    width: 70px;
+    max-width: 70px;
+}
+
+/* Sticky hover sync */
+.noar-rlsolution-row:hover .sticky-col {
+    background: var(--bs-tertiary-bg);
+}
+
+.noar-rlsolution-row.table-primary .sticky-col {
+    background: var(--bs-primary-bg-subtle);
+}
+
+/* =========================================================
+   Number Cells
+========================================================= */
+
+.noar-rlsolutions-table td:nth-child(n+15) {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* =========================================================
+   Status Badges
+========================================================= */
+
+.noar-rlsolutions-table .badge {
+    font-size: 0.68rem;
+    min-width: 42px;
+}
+
+/* =========================================================
+   File Column
+========================================================= */
+
+.noar-rlsolutions-table td.text-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* =========================================================
+   Scrollbars
+========================================================= */
+
+.noar-rlsolutions-table-wrap::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+}
+
+.noar-rlsolutions-table-wrap::-webkit-scrollbar-thumb {
+    background: rgba(120, 120, 120, 0.35);
+    border-radius: 10px;
+}
+
+.noar-rlsolutions-table-wrap::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 120, 120, 0.55);
+}
+
+.noar-rlsolutions-table-wrap::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* =========================================================
+   Compact Mode
+========================================================= */
+
+.noar-rlsolutions-card .card-body {
+    padding: 0;
+}
+
+.noar-rlsolutions-card .card-header {
+    background: var(--bs-body-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+/* =========================================================
+   Optional QC coloring helpers
+========================================================= */
+
+.noar-qc-good {
+    color: #198754;
+    font-weight: 600;
+}
+
+.noar-qc-warning {
+    color: #fd7e14;
+    font-weight: 600;
+}
+
+.noar-qc-bad {
+    color: #dc3545;
+    font-weight: 600;
+}

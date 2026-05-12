@@ -1,0 +1,30 @@
+<div class="card shadow-sm border-0 h-100 noar-rlsolutions-card">
+  <div class="card-header py-2 d-flex justify-content-between align-items-center">
+    <div>
+      <strong>RL Solutions</strong>
+      <span class="badge text-bg-secondary ms-1">
+        {{ rlsolutions|length }}
+      </span>
+    </div>
+
+    <button
+      type="button"
+      id="noar-refresh-rlsolutions"
+      class="btn btn-sm btn-outline-secondary"
+      title="Refresh RL Solutions"
+    >
+      <i class="fas fa-sync"></i>
+    </button>
+  </div>
+
+  <div class="card-body p-0">
+    <div
+      id="noar-rlsolutions-table-wrap"
+      class="table-responsive"
+      style="max-height: 78vh; overflow:auto;"
+      data-refresh-url="{#% url 'noar_rlsolutions_table' %#}"
+    >
+      {% include "noar/partials/rlsolutions_table.html" %}
+    </div>
+  </div>
+</div>

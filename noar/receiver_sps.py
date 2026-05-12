@@ -144,10 +144,131 @@ class ReceiverSPS:
     def ensure_tables(self, conn):
         self.ensure_sps_files_table(conn)
 
-        self.recreate_rlsolution_table(conn)
+        self.ensure_rlsolution_table(conn)
         self.recreate_rpsolution_table(conn)
 
         self.ensure_indexes(conn)
+
+    def ensure_rlsolution_table(self, conn):
+        """
+        Recreate RLSolution only when table is missing or schema is old.
+
+        Required changes:
+        - remove LineSolution dependency
+        - use Solution_FK as FK to Solutions.ID
+        - add is_recovered
+        - add is_processed
+        - add Min/Avg/Max QC fields
+        """
+
+        required_columns = {
+            "ID",
+            "PPLine_FK",
+            "File_FK",
+            "LineName",
+            "Line",
+            "Seq",
+            "Attempt",
+            "Tier",
+            "TierLine",
+            "FRP",
+            "LRP",
+            "StartX",
+            "StartY",
+            "EndX",
+            "EndY",
+            "SRP",
+            "ERP",
+            "Vessel",
+
+            "StartYear",
+            "StartMonth",
+            "StartJDay",
+            "StartDay",
+            "StartHour",
+            "StartMinute",
+            "StartSecond",
+            "StartMSecond",
+
+            "EndYear",
+            "EndMonth",
+            "EndJDay",
+            "EndDay",
+            "EndHour",
+            "EndMinute",
+            "EndSecond",
+            "EndMSecond",
+
+            "Solution_FK",
+
+            "PercentOfLineDone",
+            "SeqProdCount",
+            "PercentOFSeqDone",
+            "Count_All",
+
+            "is_clicked",
+            "is_recovered",
+            "is_processed",
+            "is_fbloaded",
+
+            "FileName_FK",
+
+            "MinRadialOffset",
+            "AvgRadialOffset",
+            "MaxRadialOffset",
+
+            "MinILOffset",
+            "AvgILOffset",
+            "MaxILOffset",
+
+            "MinXLOffset",
+            "AvgXLOffset",
+            "MaxXLOffset",
+
+            "MindX",
+            "AvgdX",
+            "MaxdX",
+
+            "MindY",
+            "AvgdY",
+            "MaxdY",
+
+            "MinWaterDepth",
+            "AvgWaterDepth",
+            "MaxWaterDepth",
+
+            "MinElevation",
+            "AvgElevation",
+            "MaxElevation",
+        }
+
+        row = conn.execute("""
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'RLSolution'
+        """).fetchone()
+
+        recreate = False
+
+        if not row:
+            recreate = True
+        else:
+            existing_columns = {
+                r["name"]
+                for r in conn.execute("PRAGMA table_info(RLSolution)").fetchall()
+            }
+
+            missing = required_columns - existing_columns
+
+            # Old table has LineSolution. New table should not depend on it.
+            has_old_linesolution = "LineSolution" in existing_columns
+
+            if missing or has_old_linesolution:
+                recreate = True
+
+        if recreate:
+            self.recreate_rlsolution_table(conn)
 
     def recreate_rlsolution_table(self, conn):
 
@@ -162,7 +283,6 @@ class ReceiverSPS:
 
                 LineName TEXT,
                 Line INTEGER,
-                LineSolution INTEGER NOT NULL,
 
                 Seq INTEGER DEFAULT 1,
                 Attempt TEXT,
@@ -202,19 +322,48 @@ class ReceiverSPS:
                 EndSecond REAL,
                 EndMSecond REAL,
 
-                Solution_FK INTEGER,
+                Solution_FK INTEGER NOT NULL,
 
-                PercentOfLineDone REAL,
-                SeqProdCount REAL,
-                PercentOFSeqDone REAL,
+                PercentOfLineDone REAL DEFAULT 0,
+                SeqProdCount REAL DEFAULT 0,
+                PercentOFSeqDone REAL DEFAULT 0,
 
                 Count_All INTEGER DEFAULT 0,
 
                 is_clicked INTEGER DEFAULT 0,
                 is_recovered INTEGER DEFAULT 0,
+                is_processed INTEGER DEFAULT 0,
                 is_fbloaded INTEGER DEFAULT 0,
 
                 FileName_FK INTEGER,
+
+                MinRadialOffset REAL DEFAULT 0,
+                AvgRadialOffset REAL DEFAULT 0,
+                MaxRadialOffset REAL DEFAULT 0,
+
+                MinILOffset REAL DEFAULT 0,
+                AvgILOffset REAL DEFAULT 0,
+                MaxILOffset REAL DEFAULT 0,
+
+                MinXLOffset REAL DEFAULT 0,
+                AvgXLOffset REAL DEFAULT 0,
+                MaxXLOffset REAL DEFAULT 0,
+
+                MindX REAL DEFAULT 0,
+                AvgdX REAL DEFAULT 0,
+                MaxdX REAL DEFAULT 0,
+
+                MindY REAL DEFAULT 0,
+                AvgdY REAL DEFAULT 0,
+                MaxdY REAL DEFAULT 0,
+
+                MinWaterDepth REAL DEFAULT 0,
+                AvgWaterDepth REAL DEFAULT 0,
+                MaxWaterDepth REAL DEFAULT 0,
+
+                MinElevation REAL DEFAULT 0,
+                AvgElevation REAL DEFAULT 0,
+                MaxElevation REAL DEFAULT 0,
 
                 FOREIGN KEY (PPLine_FK)
                     REFERENCES RLPreplot(ID)
@@ -232,8 +381,7 @@ class ReceiverSPS:
                     REFERENCES SPS_Files(ID)
                     ON DELETE CASCADE,
 
-                UNIQUE(LineSolution),
-                UNIQUE(ID, LineSolution)
+                UNIQUE(Line, Solution_FK)
             )
         """)
 
@@ -884,8 +1032,6 @@ class ReceiverSPS:
     def _flush_rlsolution(self, conn, line_stats):
         for stat in line_stats.values():
 
-            line_solution = stat["Line"] * 10 + stat["Solution_FK"]
-
             existing = conn.execute("""
                 SELECT ID
                 FROM RLSolution
@@ -894,6 +1040,71 @@ class ReceiverSPS:
                 stat["Line"],
                 stat["Solution_FK"],
             )).fetchone()
+
+            values = (
+                stat["PPLine_FK"],
+                stat["File_FK"],
+                str(stat["Line"]),
+                stat["Line"],
+                stat["Seq"],
+                stat["Attempt"],
+                stat["Tier"],
+                stat.get("TierLine"),
+                stat["FRP"],
+                stat["LRP"],
+                stat["StartX"],
+                stat["StartY"],
+                stat["EndX"],
+                stat["EndY"],
+                stat["SRP"],
+                stat["ERP"],
+                stat["Vessel"],
+                stat["StartYear"],
+                stat["StartMonth"],
+                stat["StartJDay"],
+                stat["StartDay"],
+                stat["StartHour"],
+                stat["StartMinute"],
+                stat["StartSecond"],
+                stat["StartMSecond"],
+                stat["EndYear"],
+                stat["EndMonth"],
+                stat["EndJDay"],
+                stat["EndDay"],
+                stat["EndHour"],
+                stat["EndMinute"],
+                stat["EndSecond"],
+                stat["EndMSecond"],
+                stat["Solution_FK"],
+                stat["PercentOfLineDone"],
+                stat.get("SeqProdCount", 0),
+                stat.get("PercentOFSeqDone", 0),
+                stat["Count_All"],
+                stat.get("is_recovered", 0),
+                stat.get("is_processed", 0),
+                stat["File_FK"],
+                stat.get("MinRadialOffset", 0),
+                stat.get("AvgRadialOffset", 0),
+                stat.get("MaxRadialOffset", 0),
+                stat.get("MinILOffset", 0),
+                stat.get("AvgILOffset", 0),
+                stat.get("MaxILOffset", 0),
+                stat.get("MinXLOffset", 0),
+                stat.get("AvgXLOffset", 0),
+                stat.get("MaxXLOffset", 0),
+                stat.get("MindX", 0),
+                stat.get("AvgdX", 0),
+                stat.get("MaxdX", 0),
+                stat.get("MindY", 0),
+                stat.get("AvgdY", 0),
+                stat.get("MaxdY", 0),
+                stat.get("MinWaterDepth", 0),
+                stat.get("AvgWaterDepth", 0),
+                stat.get("MaxWaterDepth", 0),
+                stat.get("MinElevation", 0),
+                stat.get("AvgElevation", 0),
+                stat.get("MaxElevation", 0),
+            )
 
             if existing:
                 rl_id = existing["ID"]
@@ -904,10 +1115,11 @@ class ReceiverSPS:
                         PPLine_FK = ?,
                         File_FK = ?,
                         LineName = ?,
-                        LineSolution = ?,
+                        Line = ?,
                         Seq = ?,
                         Attempt = ?,
                         Tier = ?,
+                        TierLine = ?,
                         FRP = ?,
                         LRP = ?,
                         StartX = ?,
@@ -933,48 +1145,37 @@ class ReceiverSPS:
                         EndMinute = ?,
                         EndSecond = ?,
                         EndMSecond = ?,
+                        Solution_FK = ?,
                         PercentOfLineDone = ?,
+                        SeqProdCount = ?,
+                        PercentOFSeqDone = ?,
                         Count_All = ?,
-                        FileName_FK = ?
+                        is_recovered = ?,
+                        is_processed = ?,
+                        FileName_FK = ?,
+                        MinRadialOffset = ?,
+                        AvgRadialOffset = ?,
+                        MaxRadialOffset = ?,
+                        MinILOffset = ?,
+                        AvgILOffset = ?,
+                        MaxILOffset = ?,
+                        MinXLOffset = ?,
+                        AvgXLOffset = ?,
+                        MaxXLOffset = ?,
+                        MindX = ?,
+                        AvgdX = ?,
+                        MaxdX = ?,
+                        MindY = ?,
+                        AvgdY = ?,
+                        MaxdY = ?,
+                        MinWaterDepth = ?,
+                        AvgWaterDepth = ?,
+                        MaxWaterDepth = ?,
+                        MinElevation = ?,
+                        AvgElevation = ?,
+                        MaxElevation = ?
                     WHERE ID = ?
-                """, (
-                    stat["PPLine_FK"],
-                    stat["File_FK"],
-                    str(stat["Line"]),
-                    line_solution,
-                    stat["Seq"],
-                    stat["Attempt"],
-                    stat["Tier"],
-                    stat["FRP"],
-                    stat["LRP"],
-                    stat["StartX"],
-                    stat["StartY"],
-                    stat["EndX"],
-                    stat["EndY"],
-                    stat["SRP"],
-                    stat["ERP"],
-                    stat["Vessel"],
-                    stat["StartYear"],
-                    stat["StartMonth"],
-                    stat["StartJDay"],
-                    stat["StartDay"],
-                    stat["StartHour"],
-                    stat["StartMinute"],
-                    stat["StartSecond"],
-                    stat["StartMSecond"],
-                    stat["EndYear"],
-                    stat["EndMonth"],
-                    stat["EndJDay"],
-                    stat["EndDay"],
-                    stat["EndHour"],
-                    stat["EndMinute"],
-                    stat["EndSecond"],
-                    stat["EndMSecond"],
-                    stat["PercentOfLineDone"],
-                    stat["Count_All"],
-                    stat["File_FK"],
-                    rl_id,
-                ))
+                """, values + (rl_id,))
 
             else:
                 cur = conn.execute("""
@@ -983,10 +1184,10 @@ class ReceiverSPS:
                         File_FK,
                         LineName,
                         Line,
-                        LineSolution,
                         Seq,
                         Attempt,
                         Tier,
+                        TierLine,
                         FRP,
                         LRP,
                         StartX,
@@ -1014,64 +1215,44 @@ class ReceiverSPS:
                         EndMSecond,
                         Solution_FK,
                         PercentOfLineDone,
+                        SeqProdCount,
+                        PercentOFSeqDone,
                         Count_All,
-                        FileName_FK
+                        is_recovered,
+                        is_processed,
+                        FileName_FK,
+                        MinRadialOffset,
+                        AvgRadialOffset,
+                        MaxRadialOffset,
+                        MinILOffset,
+                        AvgILOffset,
+                        MaxILOffset,
+                        MinXLOffset,
+                        AvgXLOffset,
+                        MaxXLOffset,
+                        MindX,
+                        AvgdX,
+                        MaxdX,
+                        MindY,
+                        AvgdY,
+                        MaxdY,
+                        MinWaterDepth,
+                        AvgWaterDepth,
+                        MaxWaterDepth,
+                        MinElevation,
+                        AvgElevation,
+                        MaxElevation
                     )
                     VALUES (
-                        ?, ?, ?, ?, ?,
-                        ?, ?, ?,
-                        ?, ?,
-                        ?, ?, ?, ?,
-                        ?, ?,
-                        ?,
-                        ?, ?, ?, ?,
-                        ?, ?, ?, ?,
-                        ?, ?, ?, ?,
-                        ?, ?, ?, ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?
                     )
-                """, (
-                    stat["PPLine_FK"],
-                    stat["File_FK"],
-                    str(stat["Line"]),
-                    stat["Line"],
-                    line_solution,
-                    stat["Seq"],
-                    stat["Attempt"],
-                    stat["Tier"],
-                    stat["FRP"],
-                    stat["LRP"],
-                    stat["StartX"],
-                    stat["StartY"],
-                    stat["EndX"],
-                    stat["EndY"],
-                    stat["SRP"],
-                    stat["ERP"],
-                    stat["Vessel"],
-                    stat["StartYear"],
-                    stat["StartMonth"],
-                    stat["StartJDay"],
-                    stat["StartDay"],
-                    stat["StartHour"],
-                    stat["StartMinute"],
-                    stat["StartSecond"],
-                    stat["StartMSecond"],
-                    stat["EndYear"],
-                    stat["EndMonth"],
-                    stat["EndJDay"],
-                    stat["EndDay"],
-                    stat["EndHour"],
-                    stat["EndMinute"],
-                    stat["EndSecond"],
-                    stat["EndMSecond"],
-                    stat["Solution_FK"],
-                    stat["PercentOfLineDone"],
-                    stat["Count_All"],
-                    stat["File_FK"],
-                ))
+                """, values)
 
                 rl_id = cur.lastrowid
 
@@ -1086,6 +1267,39 @@ class ReceiverSPS:
             ))
 
     def _update_line_stat(self, line_stats, row, pp_line, solution_fk):
+        """
+        Update one RLSolution summary row while loading RPSolution rows.
+
+        This builds line-level statistics for:
+        - first / last receiver point
+        - start / end time
+        - total loaded points
+        - percent of line completed
+        - min / avg / max Radial, Inline, Crossline offsets
+        - min / avg / max dX / dY to preplot
+        - min / avg / max WaterDepth and Elevation
+        """
+
+        def _safe_float(value):
+            try:
+                if value is None or value == "":
+                    return None
+                return float(value)
+            except Exception:
+                return None
+
+        def _min_avg_max(values):
+            clean = [v for v in values if v is not None]
+
+            if not clean:
+                return 0, 0, 0
+
+            return (
+                round(min(clean), 3),
+                round(sum(clean) / len(clean), 3),
+                round(max(clean), 3),
+            )
+
         line = row["Line"]
 
         if line not in line_stats:
@@ -1094,18 +1308,24 @@ class ReceiverSPS:
                 "PPLine_FK": pp_line["ID"],
                 "File_FK": row["File_FK"],
                 "Solution_FK": int(solution_fk),
+
                 "Seq": row["Seq"],
                 "Attempt": row.get("Attempt", ""),
                 "Tier": row["Tier"],
+                "TierLine": pp_line.get("TierLine"),
+
                 "FRP": row["Point"],
                 "LRP": row["Point"],
                 "SRP": row["Point"],
                 "ERP": row["Point"],
+
                 "StartX": row["Easting"],
                 "StartY": row["Northing"],
                 "EndX": row["Easting"],
                 "EndY": row["Northing"],
+
                 "Vessel": row["Vessel"],
+
                 "StartYear": row["Year"],
                 "StartMonth": row["Month"],
                 "StartJDay": row["JDay"],
@@ -1114,6 +1334,7 @@ class ReceiverSPS:
                 "StartMinute": row["Minute"],
                 "StartSecond": row["Second"],
                 "StartMSecond": row["Msecond"],
+
                 "EndYear": row["Year"],
                 "EndMonth": row["Month"],
                 "EndJDay": row["JDay"],
@@ -1122,34 +1343,150 @@ class ReceiverSPS:
                 "EndMinute": row["Minute"],
                 "EndSecond": row["Second"],
                 "EndMSecond": row["Msecond"],
+
                 "Count_All": 0,
                 "PlannedPoints": pp_line.get("Points", 0) or 0,
+
                 "PercentOfLineDone": 0,
+                "SeqProdCount": 0,
+                "PercentOFSeqDone": 0,
+
+                "is_recovered": 0,
+                "is_processed": 0,
+
+                "_radial_values": [],
+                "_il_values": [],
+                "_xl_values": [],
+                "_dx_values": [],
+                "_dy_values": [],
+                "_water_depth_values": [],
+                "_elevation_values": [],
+
+                "MinRadialOffset": 0,
+                "AvgRadialOffset": 0,
+                "MaxRadialOffset": 0,
+
+                "MinILOffset": 0,
+                "AvgILOffset": 0,
+                "MaxILOffset": 0,
+
+                "MinXLOffset": 0,
+                "AvgXLOffset": 0,
+                "MaxXLOffset": 0,
+
+                "MindX": 0,
+                "AvgdX": 0,
+                "MaxdX": 0,
+
+                "MindY": 0,
+                "AvgdY": 0,
+                "MaxdY": 0,
+
+                "MinWaterDepth": 0,
+                "AvgWaterDepth": 0,
+                "MaxWaterDepth": 0,
+
+                "MinElevation": 0,
+                "AvgElevation": 0,
+                "MaxElevation": 0,
             }
 
         stat = line_stats[line]
 
         stat["Count_All"] += 1
-        stat["LRP"] = row["Point"]
+        stat["SeqProdCount"] = stat["Count_All"]
 
-        if row["Point"] < stat["SRP"]:
-            stat["SRP"] = row["Point"]
+        point = row["Point"]
+
+        if point < stat["FRP"]:
+            stat["FRP"] = point
+
+        if point > stat["LRP"]:
+            stat["LRP"] = point
+
+        if point < stat["SRP"]:
+            stat["SRP"] = point
             stat["StartX"] = row["Easting"]
             stat["StartY"] = row["Northing"]
 
-        if row["Point"] > stat["ERP"]:
-            stat["ERP"] = row["Point"]
+            stat["StartYear"] = row["Year"]
+            stat["StartMonth"] = row["Month"]
+            stat["StartJDay"] = row["JDay"]
+            stat["StartDay"] = row["Day"]
+            stat["StartHour"] = row["Hour"]
+            stat["StartMinute"] = row["Minute"]
+            stat["StartSecond"] = row["Second"]
+            stat["StartMSecond"] = row["Msecond"]
+
+        if point > stat["ERP"]:
+            stat["ERP"] = point
             stat["EndX"] = row["Easting"]
             stat["EndY"] = row["Northing"]
 
-        stat["EndYear"] = row["Year"]
-        stat["EndMonth"] = row["Month"]
-        stat["EndJDay"] = row["JDay"]
-        stat["EndDay"] = row["Day"]
-        stat["EndHour"] = row["Hour"]
-        stat["EndMinute"] = row["Minute"]
-        stat["EndSecond"] = row["Second"]
-        stat["EndMSecond"] = row["Msecond"]
+            stat["EndYear"] = row["Year"]
+            stat["EndMonth"] = row["Month"]
+            stat["EndJDay"] = row["JDay"]
+            stat["EndDay"] = row["Day"]
+            stat["EndHour"] = row["Hour"]
+            stat["EndMinute"] = row["Minute"]
+            stat["EndSecond"] = row["Second"]
+            stat["EndMSecond"] = row["Msecond"]
+
+        for list_key, row_key in [
+            ("_radial_values", "RadialOffset"),
+            ("_il_values", "ILOffset"),
+            ("_xl_values", "XLOffset"),
+            ("_dx_values", "dX"),
+            ("_dy_values", "dY"),
+            ("_water_depth_values", "WaterDepth"),
+            ("_elevation_values", "Elevation"),
+        ]:
+            value = _safe_float(row.get(row_key))
+
+            if value is not None:
+                stat[list_key].append(value)
+
+        (
+            stat["MinRadialOffset"],
+            stat["AvgRadialOffset"],
+            stat["MaxRadialOffset"],
+        ) = _min_avg_max(stat["_radial_values"])
+
+        (
+            stat["MinILOffset"],
+            stat["AvgILOffset"],
+            stat["MaxILOffset"],
+        ) = _min_avg_max(stat["_il_values"])
+
+        (
+            stat["MinXLOffset"],
+            stat["AvgXLOffset"],
+            stat["MaxXLOffset"],
+        ) = _min_avg_max(stat["_xl_values"])
+
+        (
+            stat["MindX"],
+            stat["AvgdX"],
+            stat["MaxdX"],
+        ) = _min_avg_max(stat["_dx_values"])
+
+        (
+            stat["MindY"],
+            stat["AvgdY"],
+            stat["MaxdY"],
+        ) = _min_avg_max(stat["_dy_values"])
+
+        (
+            stat["MinWaterDepth"],
+            stat["AvgWaterDepth"],
+            stat["MaxWaterDepth"],
+        ) = _min_avg_max(stat["_water_depth_values"])
+
+        (
+            stat["MinElevation"],
+            stat["AvgElevation"],
+            stat["MaxElevation"],
+        ) = _min_avg_max(stat["_elevation_values"])
 
         planned = stat["PlannedPoints"]
 
@@ -1158,6 +1495,8 @@ class ReceiverSPS:
                 stat["Count_All"] / planned * 100.0,
                 2,
             )
+
+            stat["PercentOFSeqDone"] = stat["PercentOfLineDone"]
 
     def _load_rlpreplot_lookup(self, conn):
         rows = conn.execute("""
@@ -1257,3 +1596,196 @@ class ReceiverSPS:
                 continue
 
         return "latin1"
+
+    def list_rlsolutions(
+            self,
+            *,
+            search: str = "",
+            line_from: int | None = None,
+            line_to: int | None = None,
+            seq_from: int | None = None,
+            seq_to: int | None = None,
+            solution_fk: int | None = None,
+            sort_by: str = "Line",
+            sort_dir: str = "asc",
+    ) -> list[dict]:
+
+        conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+
+            allowed_sort = {
+                "Line": "rl.Line",
+                "LineName": "rl.LineName",
+                "Seq": "rl.Seq",
+                "Attempt": "rl.Attempt",
+                "Tier": "rl.Tier",
+                "TierLine": "rl.TierLine",
+                "FRP": "rl.FRP",
+                "LRP": "rl.LRP",
+                "SRP": "rl.SRP",
+                "ERP": "rl.ERP",
+                "Vessel": "rl.Vessel",
+                "Count_All": "rl.Count_All",
+                "PercentOfLineDone": "rl.PercentOfLineDone",
+                "PercentOFSeqDone": "rl.PercentOFSeqDone",
+                "AvgRadialOffset": "rl.AvgRadialOffset",
+                "AvgILOffset": "rl.AvgILOffset",
+                "AvgXLOffset": "rl.AvgXLOffset",
+                "AvgdX": "rl.AvgdX",
+                "AvgdY": "rl.AvgdY",
+                "AvgWaterDepth": "rl.AvgWaterDepth",
+                "AvgElevation": "rl.AvgElevation",
+                "Solution": "s.Solution",
+                "FileName": "f.FileName",
+            }
+
+            sort_column = allowed_sort.get(sort_by, "rl.Line")
+            sort_direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
+
+            where = []
+            params = []
+
+            if search:
+                where.append("""
+                    (
+                        CAST(rl.Line AS TEXT) LIKE ?
+                        OR COALESCE(rl.LineName, '') LIKE ?
+                        OR COALESCE(rl.Vessel, '') LIKE ?
+                        OR COALESCE(s.Solution, '') LIKE ?
+                        OR COALESCE(f.FileName, '') LIKE ?
+                    )
+                """)
+                s = f"%{search}%"
+                params.extend([s, s, s, s, s])
+
+            if line_from is not None:
+                where.append("rl.Line >= ?")
+                params.append(line_from)
+
+            if line_to is not None:
+                where.append("rl.Line <= ?")
+                params.append(line_to)
+
+            if seq_from is not None:
+                where.append("rl.Seq >= ?")
+                params.append(seq_from)
+
+            if seq_to is not None:
+                where.append("rl.Seq <= ?")
+                params.append(seq_to)
+
+            if solution_fk is not None:
+                where.append("rl.Solution_FK = ?")
+                params.append(solution_fk)
+
+            where_sql = ""
+            if where:
+                where_sql = "WHERE " + " AND ".join(where)
+
+            sql = f"""
+                SELECT
+                    rl.ID,
+
+                    rl.LineName,
+                    rl.Line,
+                    rl.Seq,
+                    rl.Attempt,
+                    rl.Tier,
+                    rl.TierLine,
+
+                    rl.FRP,
+                    rl.LRP,
+                    rl.SRP,
+                    rl.ERP,
+
+                    rl.Vessel,
+
+                    rl.StartYear,
+                    rl.StartMonth,
+                    rl.StartJDay,
+                    rl.StartDay,
+                    rl.StartHour,
+                    rl.StartMinute,
+                    rl.StartSecond,
+                    rl.StartMSecond,
+
+                    rl.EndYear,
+                    rl.EndMonth,
+                    rl.EndJDay,
+                    rl.EndDay,
+                    rl.EndHour,
+                    rl.EndMinute,
+                    rl.EndSecond,
+                    rl.EndMSecond,
+
+                    rl.PercentOfLineDone,
+                    rl.SeqProdCount,
+                    rl.PercentOFSeqDone,
+                    rl.Count_All,
+
+                    rl.is_clicked,
+                    rl.is_recovered,
+                    rl.is_processed,
+                    rl.is_fbloaded,
+
+                    rl.MinRadialOffset,
+                    rl.AvgRadialOffset,
+                    rl.MaxRadialOffset,
+
+                    rl.MinILOffset,
+                    rl.AvgILOffset,
+                    rl.MaxILOffset,
+
+                    rl.MinXLOffset,
+                    rl.AvgXLOffset,
+                    rl.MaxXLOffset,
+
+                    rl.MindX,
+                    rl.AvgdX,
+                    rl.MaxdX,
+
+                    rl.MindY,
+                    rl.AvgdY,
+                    rl.MaxdY,
+
+                    rl.MinWaterDepth,
+                    rl.AvgWaterDepth,
+                    rl.MaxWaterDepth,
+
+                    rl.MinElevation,
+                    rl.AvgElevation,
+                    rl.MaxElevation,
+
+                    rl.Solution_FK,
+                    s.Solution,
+                    s.Comments AS SolutionComments,
+
+                    rl.FileName_FK,
+                    f.FileName,
+
+                    COALESCE(rl.Count_All, 0) AS PointCount
+
+                FROM RLSolution rl
+
+                LEFT JOIN Solutions s
+                    ON s.ID = rl.Solution_FK
+
+                LEFT JOIN SPS_Files f
+                    ON f.ID = rl.FileName_FK
+
+                {where_sql}
+
+                ORDER BY
+                    {sort_column} {sort_direction},
+                    rl.Seq ASC,
+                    rl.Line ASC,
+                    rl.ID ASC
+            """
+
+            cur.execute(sql, params)
+            return [dict(row) for row in cur.fetchall()]
+
+        finally:
+            conn.close()

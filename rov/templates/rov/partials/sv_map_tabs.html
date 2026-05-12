@@ -19,18 +19,7 @@
           <i class="fa-solid fa-battery-car me-1"></i> Battery Life
         </button>
       </li>
-     <li class="nav-item" role="presentation">
-         <button class="nav-link lazy-template-matrix-tab"
-                 id="matrix-template-tab"
-                 data-bs-toggle="tab"
-                 data-bs-target="#matrix-template-pane"
-                 data-url="{% url 'rov_project_template_matrix_html' %}"
-                 data-target="matrix-template-pane"
-                 type="button"
-                 role="tab">
-             Template Matrix
-         </button>
-      </li>
+
       <li class="nav-item" role="presentation">
         <button class="nav-link pill-map"
                 data-bs-toggle="pill"
@@ -215,8 +204,7 @@
 </div>
             <div class="w-100 bokeh-light-scope" style="height: 100vh" id="bl2-map-container"></div>
        </div>
-       <div class="tab-pane fade" id="matrix-template-pane" role="tabpanel">
-       </div>
+
        <div class="tab-pane fade" id="dbd-prod-tab" role="tabpanel">
            {{ d_dep_script|safe }}
            <div class="w-100 bokeh-light-scope" style="height: 30vh" id="daily-dep-container">

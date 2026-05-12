@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}
+Production Monitor
+{% endblock %}
+
+{% block extra_head %}
+    <link rel="stylesheet" href="{% static 'production_monitor/css/template_matrix.css' %}">
+{% endblock %}
+
+{% block content %}
+
+<div class="container-fluid py-2">
+
+  <!-- ===================================================== -->
+  <!-- Header -->
+  <!-- ===================================================== -->
+
+  <div class="card border-0 shadow-sm mb-2">
+
+    <div class="card-body py-2 px-3">
+
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+
+        <div class="d-flex align-items-center gap-2">
+
+          <div class="fs-3 text-success">
+            <i class="fas fa-chart-line"></i>
+          </div>
+
+          <div>
+
+            <h4 class="mb-0 fw-bold">
+              Production Monitor
+            </h4>
+
+            <div class="small text-muted">
+              Receiver deployment / source production monitoring
+            </div>
+
+          </div>
+
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+
+          <button class="btn btn-outline-primary"
+                  onclick="window.location.reload()">
+
+            <i class="fas fa-rotate-right me-1"></i>
+            Refresh
+
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- Main content -->
+  <!-- ===================================================== -->
+
+  <div class="card border-0 shadow-sm">
+
+    <div class="card-header bg-white py-2">
+
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+
+        <div class="fw-bold">
+
+          <i class="fas fa-table-cells-large me-1"></i>
+          Production Matrix
+
+        </div>
+
+        <div class="small text-muted">
+
+          Live project production overview
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <div class="card-body p-2">
+
+      {% if matrix_html %}
+
+        {{ matrix_html|safe }}
+
+      {% else %}
+
+        <div class="alert alert-warning mb-0">
+
+          <i class="fas fa-triangle-exclamation me-2"></i>
+
+          No matrix data available.
+
+        </div>
+
+      {% endif %}
+
+    </div>
+
+  </div>
+
+</div>
+
+{% endblock %}

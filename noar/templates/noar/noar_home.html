@@ -4,7 +4,8 @@
 {% block title %}NOAR — {{ project.name }}{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'noar/css/noar.css' %}">
+    <link rel="stylesheet" href="{% static 'noar/css/noar.css' %}">
+    <link rel="stylesheet" href="{% static 'noar/css/recline_table.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -71,7 +72,7 @@
                 </div>
 
             </div>
-
+             {% include "noar/cards/rlsolutions_card.html" %}
         </aside>
 
         <!-- RESIZER LIKE SVP -->
