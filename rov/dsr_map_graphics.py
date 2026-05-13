@@ -1547,7 +1547,7 @@ class DSRMapPlots:
         if show_sm and dsr_df is not None and len(dsr_df) > 0:
             sm_df = dsr_df.copy()
             if "Status" in sm_df.columns:
-                sm_df = sm_df[sm_df["Status"] == "Deployed"].copy()
+                sm_df = sm_df[sm_df["Status"] != ""].copy()
             else:
                 sm_df = sm_df.iloc[0:0].copy()
 

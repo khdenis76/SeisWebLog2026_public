@@ -1069,7 +1069,328 @@ class DSRDB:
         except UnicodeDecodeError:
             return raw.decode("cp1252", errors="ignore")
 
-    def load_sm_file_to_db(
+    def load_sm_file_to_db(self, fname) -> dict:
+        """
+        Import SM_Export.csv and UPDATE existing DSR rows only.
+
+        Match rule:
+            DSR.Line    = SM Line
+            DSR.Station = SM Station
+            DSR.Node    = normalized Remote Unit OR AU QR Code
+
+        Remote Unit example:
+            SM Remote Unit = "297080001/13471"
+            DSR.Node       = "13471 297080001"
+        """
+
+
+        UPDATE_MAP = {
+            "Area": "Area",
+            "RemoteUnit": "RemoteUnit",
+            "AUQRCode": "AUQRCode",
+            "AURFID": "AURFID",
+            "CUSerialNumber": "CUSerialNumber",
+            "Status": "Status",
+            "DeploymentType": "DeploymentType",
+            "StartTimeEpoch": "StartTimeEpoch",
+            "StartTimeUTC": "StartTimeUTC",
+            "DeployTimeEpoch": "DeployTimeEpoch",
+            "DeployTimeUTC": "DeployTimeUTC",
+            "PickupTimeEpoch": "PickupTimeEpoch",
+            "PickupTimeUTC": "PickupTimeUTC",
+            "StopTimeEpoch": "StopTimeEpoch",
+            "StopTimeUTC": "StopTimeUTC",
+            "SPSX": "SPSX",
+            "SPSY": "SPSY",
+            "SPSZ": "SPSZ",
+            "ActualX": "ActualX",
+            "ActualY": "ActualY",
+            "ActualZ": "ActualZ",
+            "Deployed": "Deployed",
+            "PickedUp": "PickedUp",
+            "Archived": "Archived",
+            "DeviceID": "DeviceID",
+            "BinID": "BinID",
+            "ExpectedTraces": "ExpectedTraces",
+            "CollectedTraces": "CollectedTraces",
+            "DownloadedDatainMB": "DownloadedDatainMB",
+            "ExpectedDatainMB": "ExpectedDatainMB",
+            "DownloadError": "DownloadError",
+        }
+
+        def clean_col(c):
+            return re.sub(r"\W+", "", str(c)).strip()
+
+        def norm_text(v):
+            if v is None:
+                return None
+            s = str(v).strip()
+            if s == "" or s.lower() in {"nan", "none", "null"}:
+                return None
+            return s
+
+        def norm_remote_unit(v):
+            s = norm_text(v)
+            if not s or s == "-1":
+                return None
+
+            s = re.sub(r"\s+", " ", s)
+
+            if "/" in s:
+                parts = [p.strip() for p in s.split("/") if p.strip()]
+                if len(parts) == 2:
+                    return f"{parts[1]} {parts[0]}"
+
+            return s
+
+        def to_number_or_none(v):
+            s = norm_text(v)
+            if s is None or s == "-1":
+                return None
+            try:
+                return float(s)
+            except Exception:
+                return None
+
+        def to_int_or_none(v):
+            n = to_number_or_none(v)
+            if n is None:
+                return None
+            return int(n)
+
+        # ------------------------------------------------------------------
+        # 1. Read CSV
+        # ------------------------------------------------------------------
+        if isinstance(fname, (str, Path)):
+            p = Path(fname)
+            if not p.exists():
+                return {"error": f"File not found: {p}"}
+
+            encoding = self._detect_encoding(p)
+            sep = self._get_separator_from_file(p, encoding=encoding)
+            engine = "python" if sep == r"\s+" else "c"
+
+            try:
+                df = pd.read_csv(p, sep=sep, encoding=encoding, engine=engine)
+            except Exception as e:
+                return {"error": f"SM read_csv error: {e}"}
+        else:
+            text = self._read_uploaded_as_text(fname)
+            if not text.strip():
+                return {"error": "SM file is empty"}
+
+            sep = self._guess_sep_from_text(text[:4096])
+            engine = "python" if sep == r"\s+" else "c"
+
+            try:
+                df = pd.read_csv(io.StringIO(text), sep=sep, engine=engine)
+            except Exception as e:
+                return {"error": f"SM read_csv upload error: {e}"}
+
+        if df.empty:
+            return {"error": "SM file has no rows"}
+
+        rows_in_file_raw = len(df)
+        original_cols = list(df.columns)
+
+        # ------------------------------------------------------------------
+        # 2. Normalize columns
+        # ------------------------------------------------------------------
+        df.columns = [clean_col(c) for c in df.columns]
+
+        required = ["Line", "Station", "RemoteUnit", "AUQRCode"]
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            return {
+                "error": f"Missing required SM columns: {missing}",
+                "columns": original_cols,
+            }
+
+        df["Line"] = pd.to_numeric(df["Line"], errors="coerce")
+        df["Station"] = pd.to_numeric(df["Station"], errors="coerce")
+        df = df[df["Line"].notna() & df["Station"].notna()].copy()
+
+        if df.empty:
+            return {"error": "No valid Line/Station rows after parsing"}
+
+        df["Line"] = df["Line"].astype(int)
+        df["Station"] = df["Station"].astype(int)
+
+        df["RemoteUnitMatch"] = df["RemoteUnit"].apply(norm_remote_unit)
+        df["AUQRCodeMatch"] = df["AUQRCode"].apply(norm_text)
+
+        df = df[
+            df["RemoteUnitMatch"].notna() | df["AUQRCodeMatch"].notna()
+            ].copy()
+
+        if df.empty:
+            return {"error": "No valid Remote Unit or AU QR Code values"}
+
+        # Store normalized RemoteUnit in DSR
+        df["RemoteUnit"] = df["RemoteUnitMatch"]
+
+        # ------------------------------------------------------------------
+        # 3. Convert numeric fields
+        # ------------------------------------------------------------------
+        int_cols = [
+            "StartTimeEpoch",
+            "DeployTimeEpoch",
+            "PickupTimeEpoch",
+            "StopTimeEpoch",
+            "DeviceID",
+            "BinID",
+            "ExpectedTraces",
+            "CollectedTraces",
+            "DownloadedDatainMB",
+            "ExpectedDatainMB",
+            "DownloadError",
+        ]
+
+        real_cols = [
+            "SPSX",
+            "SPSY",
+            "SPSZ",
+            "ActualX",
+            "ActualY",
+            "ActualZ",
+        ]
+
+        for c in int_cols:
+            if c in df.columns:
+                df[c] = df[c].apply(to_int_or_none)
+
+        for c in real_cols:
+            if c in df.columns:
+                df[c] = df[c].apply(to_number_or_none)
+
+        # Keep only latest duplicated key from SM
+        df = df.drop_duplicates(
+            subset=["Line", "Station", "RemoteUnitMatch", "AUQRCodeMatch"],
+            keep="last",
+        ).copy()
+
+        # ------------------------------------------------------------------
+        # 4. Update DSR only where matched
+        # ------------------------------------------------------------------
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            dsr_cols = {
+                r["name"].lower(): r["name"]
+                for r in cur.execute("PRAGMA table_info(DSR)").fetchall()
+            }
+
+            set_cols = [
+                db_col
+                for sm_col, db_col in UPDATE_MAP.items()
+                if sm_col in df.columns and db_col.lower() in dsr_cols
+            ]
+
+            if not set_cols:
+                return {"error": "No SM columns available for DSR update"}
+
+            temp_cols = [
+                            "Line",
+                            "Station",
+                            "RemoteUnitMatch",
+                            "AUQRCodeMatch",
+                        ] + set_cols
+
+            cur.execute("DROP TABLE IF EXISTS temp_sm_update")
+
+            col_defs = [
+                "Line INTEGER",
+                "Station INTEGER",
+                "RemoteUnitMatch TEXT",
+                "AUQRCodeMatch TEXT",
+            ]
+
+            for c in set_cols:
+                if c in int_cols:
+                    col_defs.append(f"{c} INTEGER")
+                elif c in real_cols:
+                    col_defs.append(f"{c} REAL")
+                else:
+                    col_defs.append(f"{c} TEXT")
+
+            cur.execute(f"CREATE TEMP TABLE temp_sm_update ({', '.join(col_defs)})")
+
+            insert_sql = f"""
+                INSERT INTO temp_sm_update ({', '.join(temp_cols)})
+                VALUES ({', '.join(['?'] * len(temp_cols))})
+            """
+
+            rows = []
+            for _, r in df.iterrows():
+                rows.append(tuple(r.get(c) for c in temp_cols))
+
+            try:
+                cur.execute("BEGIN IMMEDIATE")
+                cur.executemany(insert_sql, rows)
+
+                match_where = """
+                    DSR.Line = s.Line
+                    AND DSR.Station = s.Station
+                    AND (
+                        TRIM(COALESCE(DSR.Node, '')) = TRIM(COALESCE(s.RemoteUnitMatch, ''))
+                        OR TRIM(COALESCE(DSR.Node, '')) = TRIM(COALESCE(s.AUQRCodeMatch, ''))
+                    )
+                """
+
+                existing_in_dsr = cur.execute(f"""
+                    SELECT COUNT(*)
+                    FROM DSR
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM temp_sm_update s
+                        WHERE {match_where}
+                    )
+                """).fetchone()[0]
+
+                set_clause = ", ".join([
+                    f"""{c} = (
+                        SELECT s.{c}
+                        FROM temp_sm_update s
+                        WHERE {match_where}
+                        LIMIT 1
+                    )"""
+                    for c in set_cols
+                ])
+
+                update_sql = f"""
+                    UPDATE DSR
+                    SET {set_clause}
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM temp_sm_update s
+                        WHERE {match_where}
+                    )
+                """
+
+                cur.execute(update_sql)
+                updated_rows = cur.execute("SELECT changes()").fetchone()[0]
+
+                conn.commit()
+
+            except Exception as e:
+                conn.rollback()
+                return {"error": f"DSR SM update failed: {e}"}
+
+            finally:
+                cur.execute("DROP TABLE IF EXISTS temp_sm_update")
+
+        return {
+            "success": True,
+            "rows_in_file_raw": rows_in_file_raw,
+            "unique_sm_rows": len(df),
+            "existing_in_dsr": int(existing_in_dsr),
+            "updated_rows": int(updated_rows),
+            "skipped_missing": int(len(df) - existing_in_dsr),
+            "match_rule": "Line + Station + DSR.Node equals normalized RemoteUnit or AUQRCode",
+            "updated_columns": set_cols,
+        }
+    def load_sm_file_to_db2(
             self,
             fname,  # Path/str OR UploadedFile OR file-like
             *,

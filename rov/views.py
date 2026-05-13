@@ -441,7 +441,7 @@ def rov_upload_survey_manager(request):
             buffer = io.StringIO(text)
 
             # reuse your core loader by passing buffer instead of filename
-            res = dsrdb.load_sm_file_to_db(f,update_key="unique")
+            res = dsrdb.load_sm_file_to_db(f)
             res["original_name"] = f.name
             results.append(res)
 
