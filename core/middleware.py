@@ -1,9 +1,9 @@
-from django.core.exceptions import PermissionDenied
-from django.utils.deprecation import MiddlewareMixin
-from .models import UserSettings
 from pathlib import Path
+
+
 from django.shortcuts import redirect
 from django.contrib import messages
+
 
 class ActiveProjectMiddleware:
     def __init__(self, get_response):
@@ -15,7 +15,6 @@ class ActiveProjectMiddleware:
         if not request.user.is_authenticated:
             return self.get_response(request)
 
-        # prevent redirect loop on project page itself
         allowed_names = {"projects", "login", "logout"}
         match = getattr(request, "resolver_match", None)
         current_url_name = match.url_name if match else None
@@ -45,19 +44,22 @@ class ActiveProjectMiddleware:
                 return self.get_response(request)
 
             request.active_project = project
+
             return self.get_response(request)
 
-        except Exception:
-            # fail safe
+        except Exception as e:
+            print(f"[ActiveProjectMiddleware] {e}")
+
             try:
                 from core.models import UserSettings
+
                 settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
                 settings_obj.active_project = None
                 settings_obj.save(update_fields=["active_project"])
             except Exception:
                 pass
 
-            if current_url_name not in {"projects", "login", "logout"}:
+            if current_url_name not in allowed_names:
                 messages.error(
                     request,
                     "Could not open active project. Please select a project again."

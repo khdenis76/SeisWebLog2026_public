@@ -1151,15 +1151,7 @@ class DSRMapPlots:
             is_show=False,
             save_html_path=None,
     ):
-        import numpy as np
-        import pandas as pd
-        import datashader as ds
-        import datashader.transfer_functions as tf
-        import colorcet as cc
 
-        from bokeh.embed import json_item
-        from bokeh.models import Range1d, Legend, LegendItem
-        from bokeh.plotting import figure, save, output_file
 
         if layers is None:
             layers = []
@@ -1431,6 +1423,7 @@ class DSRMapPlots:
             ]
 
             if show_sm:
+                """
                 layers.append(
                     dict(
                         df="sm",
@@ -1443,7 +1436,8 @@ class DSRMapPlots:
                         color="deepskyblue",
                     )
                 )
-
+               """
+                pass
             layers.append(
                 dict(
                     df="rec",
@@ -1547,7 +1541,7 @@ class DSRMapPlots:
         if show_sm and dsr_df is not None and len(dsr_df) > 0:
             sm_df = dsr_df.copy()
             if "Status" in sm_df.columns:
-                sm_df = sm_df[sm_df["Status"] != ""].copy()
+                sm_df = sm_df[sm_df["Status"] != None].copy()
             else:
                 sm_df = sm_df.iloc[0:0].copy()
 

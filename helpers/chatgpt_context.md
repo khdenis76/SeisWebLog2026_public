@@ -15,7 +15,7 @@ Applications:
 - rov: work with DSR, BBOX files main application for work with Node deployment/recovery 
 - source: work with Source SPS files production and non-production  and also with shot table
 Coding rules:
-- imports at top of the file. 
+- All imports at top of the file. !IMPORTANT 
 - Write detailed comments for functions 
 - from utils.decorators import log_action add to all view files at top
 - from core.models import UserSettings add to the top of view files

@@ -71,16 +71,38 @@ def rov_main_view(request):
         ),
         dict(
             name="SM (Deployment)",
-            df='sm',
-            x_col="PrimaryEasting1",
-            y_col="PrimaryNorthing1",
+            df='dsr',
+            x_col="PrimaryEasting",
+            y_col="PrimaryNorthing",
             marker="circle",
             size=6,
             alpha=0.9,
             color='lightblue',
-            # color_col="ROV",                       # categorical color mapping
-             # filter: ROV not empty
+            where=" Status == 'Deployed' ",
         ),
+        dict(
+            name="SM (Collected)",
+            df='dsr',
+            x_col="PrimaryEasting",
+            y_col="PrimaryNorthing",
+            marker="circle",
+            size=6,
+            alpha=0.9,
+            color='magenta',
+            where="Status == 'Collected'",
+        ),
+        dict(
+            name="SM (Picked Up)",
+            df='dsr',
+            x_col="PrimaryEasting",
+            y_col="PrimaryNorthing",
+            marker="circle",
+            size=6,
+            alpha=0.9,
+            color='lightgreen',
+            where="Status == 'Picked Up'",
+        ),
+
         dict(
             name="Recovered Nodes",
             df='dsr',
@@ -93,6 +115,7 @@ def rov_main_view(request):
             # color_col="ROV",                       # categorical color mapping
             where="ROV1.notna() and ROV1 != ''",  # filter: ROV not empty
         ),
+
 
         dict(
             name="Processed Nodes",

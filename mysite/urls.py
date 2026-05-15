@@ -18,6 +18,7 @@ from core.views import (
 )
 
 urlpatterns = [
+
     path('admin/', admin.site.urls),
 
     path('logout/', logout_view, name='logout'),
@@ -42,5 +43,6 @@ urlpatterns = [
     path("reports/", include("reports.urls")),
     path("svp/", include("svp.urls")),
     path('', include('core.urls')),
-    path('production-monitor/',include('production_monitor.urls'))
+    path('production-monitor/',include('production_monitor.urls')),
+
 ]

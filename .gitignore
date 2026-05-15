@@ -45,3 +45,4 @@ rov/*_test.py
 
 /install_myenv.bat
 /install_tesseract.bat
+/staticfiles/
