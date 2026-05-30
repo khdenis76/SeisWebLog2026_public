@@ -34,6 +34,10 @@ import {initEOLReport} from "./eol_report.js";
 import {initRECDBHistogramCharts} from "./initRECDBHistogram.js";
 import {initROVDepRecLoad} from "./initROVDepRecLoad.js";
 import {initDSRSpeedHeadingMap} from "./initDSRSpeedHeadingMap.js";
+import {initRecDbQcTabs} from "./initRecDbQcTabs.js";
+import {initPlotlyResize} from "./initPlotlyResize.js";
+import {initExportNodePositionReports} from "./initExportNodePositionReports.js";
+import {initPolarHistogramTabs} from "./initPolarHistogramTabs.js";
 
 
 
@@ -74,7 +78,10 @@ export function initAllJSForRovUpload() {
   initRECDBHistogramCharts();
   initROVDepRecLoad();
   initDSRSpeedHeadingMap();
-
+  initRecDbQcTabs();
+  initPlotlyResize();
+  initExportNodePositionReports();
+  initPolarHistogramTabs();
 
 
     // GNSS QC

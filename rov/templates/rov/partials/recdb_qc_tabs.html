@@ -1,0 +1,43 @@
+<ul class="nav qc-tabs gap-1 mb-2" id="recdb-qc-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+       <button class="qc-btn qc-water active"
+               id="tab-depvsrecdb"
+               data-bs-toggle="tab"
+               data-bs-target="#pane-depvsrecdb"
+               data-plot-url="{% url 'recdb_bullseye_qc_json' 'deployment' %}"
+               data-plot-target="plot-depvsrecdb"
+               type="button" role="tab">
+         <i class="fa-solid fa-water"></i><span>DSR(Dep) VS REC DB</span>
+       </button>
+    </li>
+
+    <li class="nav-item" role="presentation">
+       <button class="qc-btn qc-water"
+               id="tab-recvsrecdb"
+               data-bs-toggle="tab"
+               data-bs-target="#pane-recvsrecdb"
+               data-plot-url="{% url 'recdb_bullseye_qc_json' 'recovery' %}"
+               data-plot-target="plot-recvsrecdb"
+               type="button" role="tab">
+         <i class="fa-solid fa-water"></i><span>DSR(Rec) VS REC DB</span>
+       </button>
+    </li>
+</ul>
+
+<div class="tab-content border rounded-3 p-2" id="qcTabsContent">
+    <div class="tab-pane fade show active" id="pane-depvsrecdb" role="tabpanel">
+        <div id="plot-depvsrecdb"
+             class="qc-plot-slot w-100"
+             style="height: 78vh;">
+            Open tab to load…
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="pane-recvsrecdb" role="tabpanel">
+        <div id="plot-recvsrecdb"
+             class="qc-plot-slot w-100"
+             style="height: 78vh;">
+            Open tab to load…
+        </div>
+    </div>
+</div>

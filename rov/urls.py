@@ -43,4 +43,9 @@ urlpatterns = [
     path("api/map/dsr-rov/<str:mode>/", rov_dsr_rov_map_json, name="rov_dsr_rov_map_json"),
     path("api/dsr-speed-heading-map/",rov_dsr_speed_heading_map_json,name="rov_dsr_speed_heading_map_json",),
    path("project-template/matrix-html/",rov_project_template_matrix_html,name="rov_project_template_matrix_html",),
+   path("qc/recdb/bullseye/<str:mode>/",recdb_bullseye_qc_json,name="recdb_bullseye_qc_json",),
+    path("reports/node-position-comparison/selected/pdf/",export_selected_node_position_comparison_pdfs,name="export_selected_node_position_comparison_pdfs",),
+    path("dsr/polar-histograms/",load_dsr_polar_histograms,name="load_dsr_polar_histograms",),
+    path("recdb/polar-histograms/",load_recdb_polar_histograms,name="load_recdb_polar_histograms",),
+
 ]

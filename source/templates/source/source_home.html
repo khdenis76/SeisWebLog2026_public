@@ -5,6 +5,7 @@
    <link rel="stylesheet" href="{% static 'source/css/st_table_selected.css' %}">
    <link rel="stylesheet" href="{% static 'source/css/source_vessel_colors.css' %}">
    <link rel="stylesheet" href="{% static 'source/css/sps_table_summary.css' %}">
+   <link rel="stylesheet" href="{% static 'source/css/mfa.css' %}">
 {% endblock %}
 {% block title %}SOURCE QC — {{ project.name }}{% endblock %}
 {% block content %}
@@ -25,6 +26,12 @@
                           data-bs-target="#sourceUploadModal"
                   >
                           <i class="fas fa-folder-open"></i>
+                  </button>
+                  <button type="button"
+                          class="btn btn-sm btn-primary"
+                          data-bs-toggle="modal"
+                          data-bs-target="#mfaUploadModal">
+                      <i class="fas fa-upload me-1"></i> Upload MFA
                   </button>
          </div>
     </div>
@@ -73,6 +80,8 @@
 {% include "source/modals/shot_summary_filter_modal.html" %}
 {% include "source/modals/_shot_delete_modal.html" %}
 {% include "source/modals/_shot_recalc_modal.html" %}
+{% include "source/modals/mfa_upload_modal.html" %}
+
 
 
 

@@ -17,6 +17,8 @@ import {initShotSummaryDelete} from "./initShotSummaryDelete.js";
 import {initShotSummaryRecalc} from "./initShotSummaryRecalc.js";
 import {initShotSummaryFilters} from "./initShotSummaryFilters.js";
 import {initSourceBathyMaps} from "./initSourceBathyMaps.js";
+import {initMfaUpload} from "./initMfaUpload.js";
+
 //import {initRecalcLines} from "./initRecalcLines.js";
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -28,6 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initSourceQCMap();
     initShotSummaryRecalc();
     initShotSummaryFilters();
+
     //initRecalcLines();
     initSpsTableFilterModal({
     tbodyId: "sps-table-tbody",
@@ -40,6 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initShotTableSort();
     initDailyProductionTab();
     initSpsRowLinePlot();
+    initMfaUpload();
     //initShotSummaryBackendFilters();
     initShotSummaryDelete();
     initShotLineSort({ tbodyId: "shot-summary-tbody" }); // <-- your tbody id
@@ -51,12 +55,15 @@ document.addEventListener("DOMContentLoaded", () => {
     storageKey: "seisweblog:sps-sort",
     maxLevels: 4,
   });
-    const bathyTab = document.getElementById("source-bathy-map-tab");
-  if (bathyTab) {
-    bathyTab.addEventListener("shown.bs.tab", () => {
-      initSourceBathyMaps();
-    });
-  }
+    // Bathy / Density
+initSourceBathyMaps();
+
+const bathyTab = document.getElementById("source-bathy-map-tab");
+if (bathyTab) {
+  bathyTab.addEventListener("shown.bs.tab", () => {
+    initSourceBathyMaps();
+  });
+}
     initColumnToggles(
     "source_toggle-left-rov-btn",
     "source_left-rov-col",

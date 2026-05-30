@@ -14,7 +14,7 @@ from bokeh.embed import json_item
 from bokeh.io import show
 from bokeh.layouts import row, column, gridplot
 from bokeh.models import Span, Range1d, FactorRange, Legend, LegendItem, LinearColorMapper, BasicTicker, \
-    NumeralTickFormatter, ColorBar, Select
+    NumeralTickFormatter, ColorBar, Select, CheckboxGroup
 from bokeh.palettes import Category10, Category20, Turbo256
 
 from bokeh.plotting import figure
@@ -34,6 +34,8 @@ from bokeh.models import (
     DateRangeSlider, Slider, Button, MultiChoice
 )
 import xyzservices.providers as xyz
+from bokeh.layouts import column, row, gridplot, Spacer
+from bokeh.models import Legend, LegendItem, DataTable, TableColumn, NumberFormatter
 
 PathLike = Union[str, Path]
 
@@ -3988,16 +3990,35 @@ class DSRMapPlots:
                 annotation_lines.append(f"<b>Over baseline</b><br>{format(int(round(total_val - baseline)), ',')}")
 
             fig.update_layout(
-                title=dict(text=final_title, x=0.02, xanchor="left"),
-                margin=dict(l=10, r=10, t=45, b=55),
-                uniformtext=dict(minsize=10, mode="show"),
+                title=dict(
+                    text=final_title,
+                    x=0.02,
+                    xanchor="left"
+                ),
+
+                autosize=True,
+
+                margin=dict(
+                    l=0,
+                    r=0,
+                    t=35,
+                    b=35
+                ),
+
+                uniformtext=dict(
+                    minsize=10,
+                    mode="show"
+                ),
+
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
-                    y=-0.18,
-                    xanchor="left",
-                    x=0,
+                    y=0,
+                    xanchor="center",
+                    x=0.5,
+                    font=dict(size=11)
                 ),
+
                 annotations=[
                     dict(
                         text="<br>".join(annotation_lines),
@@ -4005,15 +4026,44 @@ class DSRMapPlots:
                         y=0.5,
                         showarrow=False,
                         align="center",
-                        font=dict(size=12, color=center_text_color),
+                        font=dict(
+                            size=12,
+                            color=center_text_color
+                        ),
                     )
                 ],
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+
+                # Hide fake scatter axes used for legends
+                xaxis=dict(
+                    showgrid=False,
+                    zeroline=False,
+                    showticklabels=False,
+                    showline=False,
+                    ticks="",
+                    fixedrange=True
+                ),
+
+                yaxis=dict(
+                    showgrid=False,
+                    zeroline=False,
+                    showticklabels=False,
+                    showline=False,
+                    ticks="",
+                    fixedrange=True
+                ),
+
+                # Let Plotly resize dynamically
+                height=None,
+                width=None,
+
                 template=template,
+
                 paper_bgcolor=paper_bgcolor,
                 plot_bgcolor=plot_bgcolor,
-                font=dict(color=text_color),
+
+                font=dict(
+                    color=text_color
+                ),
             )
 
         except Exception as e:
@@ -4035,8 +4085,13 @@ class DSRMapPlots:
             plot_html = fig.to_html(
                 full_html=False,
                 include_plotlyjs="cdn",
-                config={"responsive": True}
+                config={
+                    "responsive": True
+                },
+                default_height="100%",
+                default_width="100%"
             )
+
             return plot_html
 
     def build_offsets_histograms_by_rov(
@@ -5474,3 +5529,1045 @@ class DSRMapPlots:
             return json_item(layout)
 
         return layout
+    def make_dsr_primary_preplot_bullseye(
+            self,
+            dsr_df: Optional[pd.DataFrame] = None,
+            *,
+            lines: Optional[Iterable[int]] = None,
+            solution_fk: Optional[int] = 1,
+            title: str = "DSR Primary vs Preplot Bullseye",
+            rov_col: str = "ROV",
+            x_col: str = "PrimaryEasting",
+            y_col: str = "PrimaryNorthing",
+            pp_x_col: str = "PreplotEasting",
+            pp_y_col: str = "PreplotNorthing",
+            point_size: int = 7,
+            circle_step: float = 2.0,
+            max_radius: Optional[float] = None,
+            show_p50_p95: bool = True,
+            is_show: bool = False,
+            json_return: bool = False,
+            target_id: str = "dsr-primary-preplot-bullseye",
+    ):
+        """
+        Bullseye QC plot for DSR deployment position vs preplot.
+
+        Calculates:
+            dE = PrimaryEasting  - PreplotEasting
+            dN = PrimaryNorthing - PreplotNorthing
+            RadialOffset = sqrt(dE² + dN²)
+
+        Each point is colored by deployment ROV.
+        """
+
+        try:
+            if dsr_df is None:
+                dsr_df = self.read_dsr(
+                    lines=lines,
+                    solution_fk=solution_fk,
+                )
+
+            if dsr_df is None or dsr_df.empty:
+                return self._error_layout(
+                    title="Bullseye plot failed",
+                    message="No DSR data found.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            required_cols = [
+                x_col, y_col, pp_x_col, pp_y_col,
+                rov_col, "Line", "Station", "Node",
+            ]
+
+            missing = [c for c in required_cols if c not in dsr_df.columns]
+            if missing:
+                return self._error_layout(
+                    title="Bullseye plot failed",
+                    message="Missing required DSR columns.",
+                    details=", ".join(missing),
+                    level="error",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            df = dsr_df.copy()
+
+            for c in [x_col, y_col, pp_x_col, pp_y_col]:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+            df["dE"] = df[x_col] - df[pp_x_col]
+            df["dN"] = df[y_col] - df[pp_y_col]
+            df["RadialOffset"] = np.sqrt(df["dE"] ** 2 + df["dN"] ** 2)
+
+            df[rov_col] = df[rov_col].fillna("Unknown").astype(str).str.strip()
+            df.loc[df[rov_col] == "", rov_col] = "Unknown"
+
+            df = df.dropna(subset=["dE", "dN", "RadialOffset"])
+
+            if df.empty:
+                return self._error_layout(
+                    title="Bullseye plot failed",
+                    message="No valid Primary/Preplot coordinates after cleaning.",
+                    level="warning",
+                    is_show=is_show,
+                    json_return=json_return,
+                )
+
+            # ---------------------------------------------------------
+            # Plot limit
+            # ---------------------------------------------------------
+            auto_radius = float(np.nanmax(np.abs(df[["dE", "dN"]].to_numpy())))
+            auto_radius = max(auto_radius, float(df["RadialOffset"].max()), 1.0)
+
+            if max_radius is None:
+                max_radius = math.ceil(auto_radius * 1.15)
+
+            max_radius = float(max_radius)
+
+            # ---------------------------------------------------------
+            # Figure
+            # ---------------------------------------------------------
+            p = figure(
+                title=title,
+                sizing_mode="stretch_both",
+                height=700,
+                match_aspect=True,
+                aspect_scale=1,
+                tools="pan,wheel_zoom,box_zoom,reset,save",
+                active_scroll="wheel_zoom",
+                x_range=Range1d(-max_radius, max_radius),
+                y_range=Range1d(-max_radius, max_radius),
+            )
+
+            p.xaxis.axis_label = "dE = PrimaryEasting - PreplotEasting (m)"
+            p.yaxis.axis_label = "dN = PrimaryNorthing - PreplotNorthing (m)"
+
+            # ---------------------------------------------------------
+            # Bullseye rings
+            # ---------------------------------------------------------
+            def _circle_xy(radius, n=240):
+                ang = np.linspace(0, 2 * np.pi, n)
+                return radius * np.cos(ang), radius * np.sin(ang)
+
+            r = circle_step
+            while r <= max_radius:
+                xs, ys = _circle_xy(r)
+                p.line(
+                    xs,
+                    ys,
+                    line_color="gray",
+                    line_alpha=0.35,
+                    line_dash="dashed",
+                    line_width=1,
+                )
+
+                p.text(
+                    x=[r],
+                    y=[0],
+                    text=[f"{r:g} m"],
+                    text_font_size="8pt",
+                    text_color="gray",
+                    text_alpha=0.8,
+                )
+
+                r += circle_step
+
+            # Center cross
+            p.line([-max_radius, max_radius], [0, 0], line_color="black", line_alpha=0.5)
+            p.line([0, 0], [-max_radius, max_radius], line_color="black", line_alpha=0.5)
+
+            # ---------------------------------------------------------
+            # Optional percentile circles
+            # ---------------------------------------------------------
+            if show_p50_p95:
+                for label, radius, color in [
+                    ("P50", float(df["RadialOffset"].quantile(0.50)), "blue"),
+                    ("P95", float(df["RadialOffset"].quantile(0.95)), "red"),
+                ]:
+                    if np.isfinite(radius) and radius > 0:
+                        xs, ys = _circle_xy(radius)
+                        p.line(
+                            xs,
+                            ys,
+                            line_color=color,
+                            line_alpha=0.75,
+                            line_width=2,
+                            legend_label=f"{label}: {radius:.2f} m",
+                        )
+
+            # ---------------------------------------------------------
+            # Points by ROV
+            # ---------------------------------------------------------
+            rovs = sorted(df[rov_col].dropna().unique().tolist())
+
+            if len(rovs) <= 10:
+                palette = Category10[10]
+            else:
+                palette = Category20[20]
+
+            for i, rov in enumerate(rovs):
+                rdf = df[df[rov_col] == rov].copy()
+                src = ColumnDataSource(rdf)
+
+                renderer = p.scatter(
+                    x="dE",
+                    y="dN",
+                    source=src,
+                    size=point_size,
+                    marker="circle",
+                    fill_alpha=0.75,
+                    line_alpha=0.9,
+                    fill_color=palette[i % len(palette)],
+                    line_color=palette[i % len(palette)],
+                    legend_label=f"{rov} ({len(rdf)})",
+                )
+
+                p.add_tools(HoverTool(
+                    renderers=[renderer],
+                    tooltips=[
+                        ("ROV", f"@{rov_col}"),
+                        ("Line", "@Line"),
+                        ("Station", "@Station"),
+                        ("Node", "@Node"),
+                        ("dE", "@dE{0.000} m"),
+                        ("dN", "@dN{0.000} m"),
+                        ("Radial", "@RadialOffset{0.000} m"),
+                        ("Primary E", f"@{x_col}{{0,0.000}}"),
+                        ("Primary N", f"@{y_col}{{0,0.000}}"),
+                        ("Preplot E", f"@{pp_x_col}{{0,0.000}}"),
+                        ("Preplot N", f"@{pp_y_col}{{0,0.000}}"),
+                    ],
+                ))
+
+            p.legend.click_policy = "hide"
+            p.legend.location = "top_left"
+
+            p.grid.grid_line_alpha = 0.25
+            p.outline_line_alpha = 0.4
+
+            layout = column(p, sizing_mode="stretch_both")
+
+            if is_show:
+                show(layout)
+                return None
+
+            if json_return:
+                return json_item(layout, target=target_id)
+
+            return layout
+
+        except Exception as e:
+            return self._error_layout(
+                title="Bullseye plot failed",
+                message="Error while building DSR Primary vs Preplot bullseye plot.",
+                details=str(e),
+                level="error",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+    def bullseye_dsr_vs_recdb(
+            self,
+            lines=None,
+            solution_fk=1,
+            compare_mode="deployment",
+            color_by="ROV",
+            max_offset=50,
+            use_inline_xline=False,
+            bins=50,
+            point_size=7,
+            title=None,
+            plot_height=720,
+            hist_ratio=0.16,
+            left_hist_width=220,
+            right_panel_width=260,
+            is_show=False,
+            json_return=False,
+            save_html=None,
+    ):
+        """
+        Bullseye QC dashboard comparing DSR position to REC_DB position.
+
+        Layout:
+            - Top histogram: dX / Xline
+            - Left histogram: dY / Inline
+            - Center: large bullseye plot
+            - Right panel: ROV toggle + summary
+            - Bottom: statistics table by ROV
+        """
+
+        compare_mode = (compare_mode or "deployment").lower().strip()
+        lines_list = self._ensure_list(lines)
+
+        sql = """
+        SELECT
+            d.Line,
+            d.Station,
+            d.Node,
+            d.ROV,
+            d.ROV1,
+            d.PrimaryEasting,
+            d.PrimaryNorthing,
+            d.PrimaryElevation,
+            d.PrimaryEasting1,
+            d.PrimaryNorthing1,
+            d.PrimaryElevation1,
+            d.TimeStamp,
+            d.TimeStamp1,
+            r.REC_X,
+            r.REC_Y,
+            r.REC_Z,
+            rp.LineBearing
+        FROM DSR d
+        LEFT JOIN REC_DB r
+            ON d.Line = r.Line
+           AND d.Station = r.Point
+        LEFT JOIN RLPreplot rp
+            ON d.Line = rp.Line
+        WHERE 1=1
+        """
+
+        params = {}
+
+        if solution_fk is not None:
+            sql += " AND d.Solution_FK = :solution_fk"
+            params["solution_fk"] = int(solution_fk)
+
+        if lines_list:
+            in_clause, p = self._sql_in_clause(lines_list, "ln")
+            sql += f" AND d.Line IN {in_clause}"
+            params.update(p)
+
+        with self._connect() as conn:
+            df = pd.read_sql_query(sql, conn, params=params)
+
+        if df.empty:
+            return self._error_layout(
+                title="Bullseye failed",
+                message="No matching DSR / REC_DB rows found.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        if compare_mode == "recovery":
+            df["X1"] = pd.to_numeric(df["PrimaryEasting1"], errors="coerce")
+            df["Y1"] = pd.to_numeric(df["PrimaryNorthing1"], errors="coerce")
+            df["Z1"] = pd.to_numeric(df["PrimaryElevation1"], errors="coerce")
+            df["ROV_USED"] = df["ROV1"].fillna("Unknown").astype(str)
+        else:
+            df["X1"] = pd.to_numeric(df["PrimaryEasting"], errors="coerce")
+            df["Y1"] = pd.to_numeric(df["PrimaryNorthing"], errors="coerce")
+            df["Z1"] = pd.to_numeric(df["PrimaryElevation"], errors="coerce")
+            df["ROV_USED"] = df["ROV"].fillna("Unknown").astype(str)
+
+        df["X2"] = pd.to_numeric(df["REC_X"], errors="coerce")
+        df["Y2"] = pd.to_numeric(df["REC_Y"], errors="coerce")
+        df["Z2"] = pd.to_numeric(df["REC_Z"], errors="coerce")
+
+        df = df.dropna(subset=["X1", "Y1", "X2", "Y2"]).copy()
+
+        if df.empty:
+            return self._error_layout(
+                title="Bullseye failed",
+                message="No valid coordinate pairs found.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        df["dX"] = df["X2"] - df["X1"]
+        df["dY"] = df["Y2"] - df["Y1"]
+        df["dZ"] = df["Z2"] - df["Z1"]
+        df["Radial"] = np.sqrt(df["dX"] ** 2 + df["dY"] ** 2)
+
+        if use_inline_xline:
+            bearings = pd.to_numeric(df["LineBearing"], errors="coerce").fillna(0)
+            th = np.deg2rad(bearings)
+
+            df["Inline"] = df["dX"] * np.sin(th) + df["dY"] * np.cos(th)
+            df["Xline"] = df["dX"] * np.cos(th) + df["dY"] * (-np.sin(th))
+
+            x_field = "Xline"
+            y_field = "Inline"
+            x_label = "Xline Offset (m)"
+            y_label = "Inline Offset (m)"
+        else:
+            x_field = "dX"
+            y_field = "dY"
+            x_label = "dX / Delta Easting (m)"
+            y_label = "dY / Delta Northing (m)"
+
+        color_field = color_by if color_by in df.columns else "ROV_USED"
+        df[color_field] = df[color_field].fillna("Unknown").astype(str)
+
+        rovs = sorted(df[color_field].unique().tolist())
+        palette = Category10[10] if len(rovs) <= 10 else Category20[20]
+        color_map = {rov: palette[i % len(palette)] for i, rov in enumerate(rovs)}
+
+        hist_height = max(95, int(plot_height * hist_ratio))
+
+        # ---------------------------------------------------------
+        # Main bullseye
+        # ---------------------------------------------------------
+        p = figure(
+            title=title or f"Bullseye DSR vs REC_DB ({compare_mode})",
+            height=plot_height,
+            sizing_mode="stretch_both",
+            match_aspect=True,
+            aspect_scale=1,
+            tools="pan,wheel_zoom,box_zoom,reset,save",
+            active_scroll="wheel_zoom",
+            x_range=(-max_offset, max_offset),
+            y_range=(-max_offset, max_offset),
+        )
+
+        p.xaxis.axis_label = x_label
+        p.yaxis.axis_label = y_label
+        p.title.text_font_size = "14pt"
+        p.axis.axis_label_text_font_size = "11pt"
+
+        for radius in [1, 2, 5, 10, 20, 30, 40, 50]:
+            if radius <= max_offset:
+                p.circle(
+                    x=0,
+                    y=0,
+                    radius=radius,
+                    fill_alpha=0,
+                    line_alpha=0.25,
+                    line_dash="dashed",
+                    line_color="gray",
+                )
+                p.text(
+                    x=[1.0],
+                    y=[radius],
+                    text=[f"{radius} m"],
+                    text_font_size="8pt",
+                    text_color="#555555",
+                )
+
+        p.add_layout(Span(location=0, dimension="width", line_dash="dashed", line_color="black", line_alpha=0.65))
+        p.add_layout(Span(location=0, dimension="height", line_dash="dashed", line_color="black", line_alpha=0.65))
+
+        # ---------------------------------------------------------
+        # Histograms
+        # ---------------------------------------------------------
+        p_top = figure(
+            title=f"{x_label} Histogram",
+            height=hist_height,
+            sizing_mode="stretch_width",
+            x_range=p.x_range,
+            toolbar_location=None,
+        )
+        p_top.yaxis.axis_label = "Count"
+        p_top.xaxis.visible = False
+        p_top.title.text_font_size = "12pt"
+
+        p_left = figure(
+            title=f"{y_label} Histogram",
+            width=left_hist_width,
+            height=plot_height,
+            y_range=p.y_range,
+            toolbar_location=None,
+        )
+        p_left.xaxis.axis_label = "Count"
+        p_left.yaxis.visible = False
+        p_left.title.text_font_size = "11pt"
+
+        scatter_renderers = []
+        toggle_renderers = []
+        legend_items = []
+        checkbox_labels = []
+
+        # stacked histogram accumulators
+        x_edges = np.linspace(-max_offset, max_offset, bins + 1)
+        y_edges = np.linspace(-max_offset, max_offset, bins + 1)
+        x_stack = np.zeros(bins)
+        y_stack = np.zeros(bins)
+
+        for rov in rovs:
+            sub = df[df[color_field] == rov].copy()
+            src = ColumnDataSource(sub)
+            color = color_map[rov]
+
+            scatter_r = p.scatter(
+                x=x_field,
+                y=y_field,
+                source=src,
+                size=point_size,
+                alpha=0.85,
+                fill_color=color,
+                line_color=color,
+                legend_label=str(rov),
+            )
+
+            scatter_renderers.append(scatter_r)
+
+            # top stacked histogram
+            hx, _ = np.histogram(sub[x_field].dropna(), bins=x_edges)
+            hx_bottom = x_stack.copy()
+            hx_top = x_stack + hx
+            x_stack = hx_top.copy()
+
+            hx_src = ColumnDataSource(dict(
+                left=x_edges[:-1],
+                right=x_edges[1:],
+                bottom=hx_bottom,
+                top=hx_top,
+            ))
+
+            hx_r = p_top.quad(
+                left="left",
+                right="right",
+                bottom="bottom",
+                top="top",
+                source=hx_src,
+                fill_color=color,
+                line_color=color,
+                alpha=0.75,
+                legend_label=str(rov),
+            )
+
+            # left stacked histogram
+            hy, _ = np.histogram(sub[y_field].dropna(), bins=y_edges)
+            hy_left = y_stack.copy()
+            hy_right = y_stack + hy
+            y_stack = hy_right.copy()
+
+            hy_src = ColumnDataSource(dict(
+                left=hy_left,
+                right=hy_right,
+                bottom=y_edges[:-1],
+                top=y_edges[1:],
+            ))
+
+            hy_r = p_left.quad(
+                left="left",
+                right="right",
+                bottom="bottom",
+                top="top",
+                source=hy_src,
+                fill_color=color,
+                line_color=color,
+                alpha=0.75,
+            )
+
+            toggle_renderers.append([scatter_r, hx_r, hy_r])
+            legend_items.append(LegendItem(label=str(rov), renderers=[scatter_r, hx_r, hy_r]))
+            checkbox_labels.append(f"{rov} ({len(sub):,})")
+
+        p.add_tools(HoverTool(
+            tooltips=[
+                ("Line", "@Line"),
+                ("Station", "@Station"),
+                ("Node", "@Node"),
+                ("ROV", "@ROV_USED"),
+                ("dX", "@dX{0.00}"),
+                ("dY", "@dY{0.00}"),
+                ("dZ", "@dZ{0.00}"),
+                ("Radial", "@Radial{0.00}"),
+                ("DSR X", "@X1{0.00}"),
+                ("DSR Y", "@Y1{0.00}"),
+                ("REC X", "@X2{0.00}"),
+                ("REC Y", "@Y2{0.00}"),
+                ("REC Z", "@Z2{0.00}"),
+            ]
+        ))
+
+        p.legend.click_policy = "hide"
+        p.legend.location = "top_right"
+        p_top.legend.click_policy = "hide"
+        p_top.legend.location = "top_right"
+
+        # ---------------------------------------------------------
+        # Summary values
+        # ---------------------------------------------------------
+        total_points = int(len(df))
+        e95 = float(np.percentile(df["Radial"].dropna(), 95))
+        mean_radial = float(df["Radial"].mean())
+        max_radial = float(df["Radial"].max())
+        std_radial = float(df["Radial"].std())
+
+        # E95 ellipse/circle
+        p.circle(
+            x=0,
+            y=0,
+            radius=e95,
+            fill_alpha=0,
+            line_width=3,
+            line_color="red",
+            legend_label=f"E95 = {e95:.2f} m",
+        )
+
+        # ---------------------------------------------------------
+        # Right panel with checkbox toggle
+        # ---------------------------------------------------------
+        checkbox = CheckboxGroup(
+            labels=checkbox_labels,
+            active=list(range(len(checkbox_labels))),
+            width=right_panel_width - 25,
+        )
+
+        checkbox.js_on_change(
+            "active",
+            CustomJS(
+                args=dict(renderers=toggle_renderers),
+                code="""
+                const active = new Set(cb_obj.active);
+                for (let i = 0; i < renderers.length; i++) {
+                    const visible = active.has(i);
+                    for (const r of renderers[i]) {
+                        r.visible = visible;
+                    }
+                }
+                """
+            )
+        )
+
+        summary_div = Div(
+            width=right_panel_width,
+            text=f"""
+            <div style="
+                border:1px solid #d7e0ee;
+                border-radius:10px;
+                padding:12px;
+                font-family:system-ui,Segoe UI,Arial;
+                background:#ffffff;
+                margin-top:10px;
+            ">
+              <div style="font-size:14px; font-weight:700; margin-bottom:8px;">Summary</div>
+              <table style="width:100%; font-size:13px;">
+                <tr><td>Total Points:</td><td style="text-align:right; font-weight:700; color:#0d47a1;">{total_points:,}</td></tr>
+                <tr><td>E95 Radial:</td><td style="text-align:right; font-weight:700; color:red;">{e95:.2f} m</td></tr>
+                <tr><td>Mean Radial:</td><td style="text-align:right;">{mean_radial:.2f} m</td></tr>
+                <tr><td>Max Radial:</td><td style="text-align:right;">{max_radial:.2f} m</td></tr>
+                <tr><td>Std Radial:</td><td style="text-align:right;">{std_radial:.2f} m</td></tr>
+              </table>
+            </div>
+            """
+        )
+
+        rov_panel = Div(
+            width=right_panel_width,
+            text="""
+            <div style="
+                border:1px solid #d7e0ee;
+                border-radius:10px 10px 0 0;
+                padding:10px 12px 2px 12px;
+                font-family:system-ui,Segoe UI,Arial;
+                background:#ffffff;
+                font-size:16px;
+                font-weight:700;
+                color:#0b1f55;
+            ">
+                ROV <span style="font-size:12px; font-weight:400;">(click to toggle)</span>
+            </div>
+            """
+        )
+
+        right_panel = column(
+            rov_panel,
+            checkbox,
+            summary_div,
+            width=right_panel_width,
+            sizing_mode="fixed",
+        )
+
+        # ---------------------------------------------------------
+        # Statistics table
+        # ---------------------------------------------------------
+        stats = (
+            df.groupby(color_field)
+            .agg(
+                Count=("Radial", "count"),
+                dX_Min=("dX", "min"),
+                dX_Max=("dX", "max"),
+                dX_Avg=("dX", "mean"),
+                dX_Std=("dX", "std"),
+                dY_Min=("dY", "min"),
+                dY_Max=("dY", "max"),
+                dY_Avg=("dY", "mean"),
+                dY_Std=("dY", "std"),
+                Radial_Avg=("Radial", "mean"),
+                Radial_Max=("Radial", "max"),
+            )
+            .reset_index()
+            .rename(columns={color_field: "ROV"})
+        )
+
+        total_row = {
+            "ROV": "TOTAL",
+            "Count": int(stats["Count"].sum()),
+            "dX_Min": df["dX"].min(),
+            "dX_Max": df["dX"].max(),
+            "dX_Avg": df["dX"].mean(),
+            "dX_Std": df["dX"].std(),
+            "dY_Min": df["dY"].min(),
+            "dY_Max": df["dY"].max(),
+            "dY_Avg": df["dY"].mean(),
+            "dY_Std": df["dY"].std(),
+            "Radial_Avg": df["Radial"].mean(),
+            "Radial_Max": df["Radial"].max(),
+        }
+
+        stats = pd.concat([stats, pd.DataFrame([total_row])], ignore_index=True)
+
+        stats_src = ColumnDataSource(stats)
+        num_fmt = NumberFormatter(format="0.00")
+
+        table = DataTable(
+            source=stats_src,
+            columns=[
+                TableColumn(field="ROV", title="ROV"),
+                TableColumn(field="Count", title="Count"),
+                TableColumn(field="dX_Min", title="dX Min", formatter=num_fmt),
+                TableColumn(field="dX_Max", title="dX Max", formatter=num_fmt),
+                TableColumn(field="dX_Avg", title="dX Avg", formatter=num_fmt),
+                TableColumn(field="dX_Std", title="dX Std", formatter=num_fmt),
+                TableColumn(field="dY_Min", title="dY Min", formatter=num_fmt),
+                TableColumn(field="dY_Max", title="dY Max", formatter=num_fmt),
+                TableColumn(field="dY_Avg", title="dY Avg", formatter=num_fmt),
+                TableColumn(field="dY_Std", title="dY Std", formatter=num_fmt),
+                TableColumn(field="Radial_Avg", title="Radial Avg", formatter=num_fmt),
+                TableColumn(field="Radial_Max", title="Radial Max", formatter=num_fmt),
+            ],
+            height=190,
+            sizing_mode="stretch_width",
+            index_position=None,
+        )
+
+        # ---------------------------------------------------------
+        # Controls
+        # ---------------------------------------------------------
+        sp = Spinner(
+            title="Point Size",
+            low=1,
+            high=50,
+            step=1,
+            value=point_size,
+            width=150,
+        )
+
+        sp.js_on_change(
+            "value",
+            CustomJS(
+                args=dict(renderers=scatter_renderers),
+                code="""
+                for (const r of renderers) {
+                    r.glyph.size = cb_obj.value;
+                }
+                """
+            )
+        )
+
+        controls = column(
+            sp,
+            width=left_hist_width,
+            height=hist_height,
+            sizing_mode="fixed",
+        )
+
+        top_row = row(
+            controls,
+            p_top,
+            sizing_mode="stretch_width",
+        )
+
+        main_row = row(
+            p_left,
+            p,
+            right_panel,
+            sizing_mode="stretch_both",
+        )
+
+        table_title = Div(
+            text="""
+            <div style="
+                font-family:system-ui,Segoe UI,Arial;
+                font-size:16px;
+                font-weight:700;
+                padding:6px 4px;
+                color:#0b1f55;
+            ">
+                📊 Statistics by ROV
+            </div>
+            """,
+            sizing_mode="stretch_width",
+        )
+
+        layout = column(
+            top_row,
+            main_row,
+            table_title,
+            table,
+            sizing_mode="stretch_both",
+        )
+
+        if save_html:
+            output_file(str(save_html))
+            save(layout)
+
+        if is_show:
+            show(layout)
+            return None
+
+        if json_return:
+            return json_item(layout)
+
+        return layout
+
+    def polar_histogram_plotly(
+            self,
+            df=None,
+            *,
+            table="DSR",  # "DSR" or "REC_DB"
+            lines=None,  # None = whole DB, int = one line, list/tuple/set = many lines
+            solution_fk=1,  # used only for DSR
+            e_col=None,
+            n_col=None,
+            preplot_e_col=None,
+            preplot_n_col=None,
+            group_col=None,
+            title=None,
+            angle_bins=36,
+            max_radius=None,
+            template="plotly_dark",
+            is_show=False,
+            json_return=False,
+    ):
+        """
+        Plotly polar histogram / rose plot.
+
+        Works for:
+          - whole database: lines=None
+          - single line: lines=13801
+          - multiple lines: lines=[13801, 13873, 13945]
+
+        0° = North, 90° = East.
+        """
+
+        try:
+            table = str(table or "DSR").upper().strip()
+
+            # ---------------------------------------------------------
+            # Auto-read dataframe if df was not supplied
+            # ---------------------------------------------------------
+            if df is None:
+                if isinstance(lines, int):
+                    lines = [lines]
+                elif lines is not None:
+                    lines = list(lines)
+
+                if table == "DSR":
+                    df = self.read_dsr(
+                        lines=lines,
+                        solution_fk=solution_fk,
+                    )
+
+                    e_col = e_col or "PrimaryEasting"
+                    n_col = n_col or "PrimaryNorthing"
+                    preplot_e_col = preplot_e_col or "PreplotEasting"
+                    preplot_n_col = preplot_n_col or "PreplotNorthing"
+                    group_col = group_col or "ROV"
+                    title = title or "DSR Primary Offset Direction"
+
+                elif table in ("REC_DB", "RECDB", "REC"):
+                    df = self.read_recdb(lines=lines)
+
+                    e_col = e_col or "REC_X"
+                    n_col = n_col or "REC_Y"
+                    preplot_e_col = preplot_e_col or "RPRE_X"
+                    preplot_n_col = preplot_n_col or "RPRE_Y"
+                    group_col = group_col or None
+                    title = title or "REC_DB Offset Direction"
+
+                else:
+                    raise ValueError("table must be 'DSR' or 'REC_DB'")
+
+            title = title or "Polar Histogram"
+
+            if df is None or df.empty:
+                return self._plotly_error_html(
+                    title=title,
+                    message="No data for polar histogram.",
+                    level="warning",
+                    json_return=json_return,
+                )
+
+            # ---------------------------------------------------------
+            # Optional dataframe-level line filtering
+            # Useful when df was passed manually
+            # ---------------------------------------------------------
+            data = df.copy()
+
+            if lines is not None and "Line" in data.columns:
+                if isinstance(lines, int):
+                    lines_filter = [lines]
+                else:
+                    lines_filter = list(lines)
+
+                data["Line"] = pd.to_numeric(data["Line"], errors="coerce")
+                data = data[data["Line"].isin(lines_filter)].copy()
+
+            if data.empty:
+                return self._plotly_error_html(
+                    title=title,
+                    message="No rows found for selected line filter.",
+                    details=f"lines={lines}",
+                    level="warning",
+                    json_return=json_return,
+                )
+
+            # ---------------------------------------------------------
+            # Validate columns
+            # ---------------------------------------------------------
+            required = [e_col, n_col, preplot_e_col, preplot_n_col]
+
+            for c in required:
+                if not c or c not in data.columns:
+                    raise ValueError(f"Missing column: {c}")
+                data[c] = pd.to_numeric(data[c], errors="coerce")
+
+            data = data.dropna(subset=required)
+
+            if data.empty:
+                return self._plotly_error_html(
+                    title=title,
+                    message="No valid coordinate rows after cleaning.",
+                    level="warning",
+                    json_return=json_return,
+                )
+
+            # ---------------------------------------------------------
+            # Calculate offsets and bearing
+            # ---------------------------------------------------------
+            data["dE"] = data[e_col] - data[preplot_e_col]
+            data["dN"] = data[n_col] - data[preplot_n_col]
+            data["RadialOffset"] = np.sqrt(data["dE"] ** 2 + data["dN"] ** 2)
+
+            if max_radius is not None:
+                data = data[data["RadialOffset"] <= float(max_radius)].copy()
+
+            if data.empty:
+                return self._plotly_error_html(
+                    title=title,
+                    message="No rows left after max_radius filter.",
+                    details=f"max_radius={max_radius}",
+                    level="warning",
+                    json_return=json_return,
+                )
+
+            data["Bearing"] = (
+                                      np.degrees(np.arctan2(data["dE"], data["dN"])) + 360.0
+                              ) % 360.0
+
+            bin_width = 360.0 / int(angle_bins)
+            theta_bins = np.arange(bin_width / 2.0, 360.0, bin_width)
+
+            data["BearingBin"] = (
+                    np.floor(data["Bearing"] / bin_width) * bin_width + bin_width / 2.0
+            )
+
+            # ---------------------------------------------------------
+            # Grouping
+            # ---------------------------------------------------------
+            if group_col and group_col in data.columns:
+                data[group_col] = data[group_col].fillna("Unknown").astype(str).str.strip()
+                data.loc[data[group_col] == "", group_col] = "Unknown"
+                groups = sorted(data[group_col].unique().tolist())
+            else:
+                group_col = "__Group"
+                data[group_col] = "All"
+                groups = ["All"]
+
+            fig = go.Figure()
+
+            for group in groups:
+                gdf = data[data[group_col] == group]
+
+                hist = (
+                    gdf.groupby("BearingBin")
+                    .size()
+                    .reindex(theta_bins, fill_value=0)
+                    .reset_index(name="Count")
+                )
+
+                fig.add_trace(go.Barpolar(
+                    r=hist["Count"],
+                    theta=hist["BearingBin"],
+                    width=[bin_width] * len(hist),
+                    name=str(group),
+                    opacity=0.75,
+                    hovertemplate=(
+                        "<b>%{fullData.name}</b><br>"
+                        "Bearing: %{theta:.1f}°<br>"
+                        "Count: %{r}<extra></extra>"
+                    ),
+                ))
+
+            # ---------------------------------------------------------
+            # Better dynamic title
+            # ---------------------------------------------------------
+            if lines is None:
+                line_label = "All lines"
+            elif isinstance(lines, int):
+                line_label = f"Line {lines}"
+            else:
+                line_label = f"{len(list(lines))} lines"
+
+            fig.update_layout(
+                title=dict(
+                    text=f"{title} — {line_label}",
+                    x=0.02,
+                    xanchor="left",
+                ),
+                template=template,
+                autosize=True,
+                margin=dict(l=20, r=20, t=55, b=25),
+                polar=dict(
+                    angularaxis=dict(
+                        direction="clockwise",
+                        rotation=90,
+                        tickmode="array",
+                        tickvals=[0, 45, 90, 135, 180, 225, 270, 315],
+                        ticktext=["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+                    ),
+                    radialaxis=dict(
+                        title="Node Count",
+                        ticks="",
+                    ),
+                ),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.18,
+                    xanchor="center",
+                    x=0.5,
+                ),
+            )
+
+            if is_show:
+                fig.show()
+                return None
+
+            if json_return:
+                return fig.to_json()
+
+            return fig.to_html(
+                full_html=False,
+                include_plotlyjs="cdn",
+                config={"responsive": True},
+                default_height="100%",
+                default_width="100%",
+            )
+
+        except Exception as e:
+            return self._plotly_error_html(
+                title="Polar histogram failed",
+                message="Error while building Plotly polar histogram.",
+                details=str(e),
+                level="error",
+                json_return=json_return,
+            )

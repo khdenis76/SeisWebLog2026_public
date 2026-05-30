@@ -6457,6 +6457,169 @@ class DSRLineGraphics(object):
                 json_return=json_return,
             )
 
+    def make_dsr_deployment_recovery_vs_recdb_with_hists(
+            self,
+            lines=None,
+            solution_fk=1,
+            title="DSR Deployment / Recovery vs REC_DB",
+            max_display_mode="p95",
+            max_offset=None,
+            is_show=False,
+            json_return=False,
+            target_id="dsr_recdb_dep_rec_plot",
+    ):
+        """
+        Compare DSR deployment and recovery positions against REC_DB.
+
+        Primary series:
+            Deployment DSR.PrimaryEasting / PrimaryNorthing vs REC_DB.REC_X / REC_Y
+
+        Secondary series:
+            Recovery DSR.PrimaryEasting1 / PrimaryNorthing1 vs REC_DB.REC_X / REC_Y
+        """
+
+        lines_list = self._ensure_list(lines)
+
+        sql = """
+        SELECT
+            d.Line,
+            d.Station,
+            d.Node,
+            d.ROV,
+            d.ROV1,
+            d.TimeStamp,
+            d.TimeStamp1,
+
+            d.PrimaryEasting,
+            d.PrimaryNorthing,
+            d.PrimaryElevation,
+
+            d.PrimaryEasting1,
+            d.PrimaryNorthing1,
+            d.PrimaryElevation1,
+
+            r.REC_X,
+            r.REC_Y,
+            r.REC_Z
+
+        FROM DSR d
+        LEFT JOIN REC_DB r
+            ON d.Line = r.Line
+           AND d.Station = r.Point
+        WHERE 1=1
+        """
+
+        params = {}
+
+        if solution_fk is not None:
+            sql += " AND d.Solution_FK = :solution_fk"
+            params["solution_fk"] = int(solution_fk)
+
+        if lines_list:
+            in_clause, p = self._sql_in_clause(lines_list, "ln")
+            sql += f" AND d.Line IN {in_clause}"
+            params.update(p)
+
+        with self._connect() as conn:
+            df = pd.read_sql_query(sql, conn, params=params)
+
+        if df.empty:
+            return self._error_layout(
+                title="DSR vs REC_DB Plot Error",
+                message="No DSR / REC_DB matched rows found.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        numeric_cols = [
+            "PrimaryEasting", "PrimaryNorthing",
+            "PrimaryEasting1", "PrimaryNorthing1",
+            "REC_X", "REC_Y", "REC_Z",
+        ]
+
+        for c in numeric_cols:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        # Deployment DSR - REC_DB
+        df["dX_deployment"] = df["PrimaryEasting"] - df["REC_X"]
+        df["dY_deployment"] = df["PrimaryNorthing"] - df["REC_Y"]
+
+        # Recovery DSR - REC_DB
+        df["dX_recovery"] = df["PrimaryEasting1"] - df["REC_X"]
+        df["dY_recovery"] = df["PrimaryNorthing1"] - df["REC_Y"]
+
+        df["RangeToRECDB_Dep"] = np.sqrt(
+            df["dX_deployment"] ** 2 +
+            df["dY_deployment"] ** 2
+        )
+
+        df["RangeToRECDB_Rec"] = np.sqrt(
+            df["dX_recovery"] ** 2 +
+            df["dY_recovery"] ** 2
+        )
+
+        df["RangeToPreplot"] = df["RangeToRECDB_Dep"]
+
+        df = df.dropna(
+            subset=[
+                "dX_deployment",
+                "dY_deployment",
+                "dX_recovery",
+                "dY_recovery",
+            ],
+            how="all",
+        ).copy()
+
+        if df.empty:
+            return self._error_layout(
+                title="DSR vs REC_DB Plot Error",
+                message="No valid deployment or recovery coordinate pairs.",
+                level="warning",
+                is_show=is_show,
+                json_return=json_return,
+            )
+
+        display_radius = None
+        display_mode = max_display_mode
+
+        if max_offset is not None:
+            display_radius = float(max_offset)
+            display_mode = "fixed"
+
+        return self.make_dxdy_primary_secondary_with_hists(
+            df=df,
+
+            dx_p_col="dX_deployment",
+            dy_p_col="dY_deployment",
+            dx_s_col="dX_recovery",
+            dy_s_col="dY_recovery",
+
+            line_col="Line",
+            station_col="Station",
+            rov_col="ROV",
+            deploy_time_col="TimeStamp",
+            range_to_preplot_col="RangeToPreplot",
+
+            title=title,
+            p_name="Deployment vs REC_DB",
+            s_name="Recovery vs REC_DB",
+
+            display_radius_mode=display_mode,
+            display_radius=display_radius,
+
+            primary_color="#1f77b4",
+            secondary_color="#ff7f0e",
+
+            show_station_labels=False,
+            connect_pairs=True,
+            show_pair_heatmap=True,
+            show_controls=True,
+
+            is_show=is_show,
+            json_return=json_return,
+            target_id=target_id,
+        )
 
 
 

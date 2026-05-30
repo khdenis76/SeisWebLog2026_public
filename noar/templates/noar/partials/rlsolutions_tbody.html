@@ -46,18 +46,25 @@
   data-file-name="{{ row.FileName|default:'' }}"
   style="cursor:pointer;"
 >
+  <td class="sticky-col sticky-col-0 text-center">
+    <input
+      class="form-check-input noar-rl-row-check"
+      type="checkbox"
+      value="{{ row.ID }}"
+      data-line="{{ row.Line }}"
+      onclick="event.stopPropagation();"
+    >
+  </td>
+
   <td class="sticky-col sticky-col-1 fw-semibold">{{ row.Line|default:"" }}</td>
   <td class="sticky-col sticky-col-2">{{ row.LineName|default:"" }}</td>
   <td class="sticky-col sticky-col-3">{{ row.Seq|default:"" }}</td>
 
   <td>{{ row.Attempt|default:"" }}</td>
   <td>{{ row.Solution|default:"" }}</td>
-  <td>{{ row.Tier|default:"" }}</td>
-  <td>{{ row.TierLine|default:"" }}</td>
+
   <td>{{ row.FRP|default:"" }}</td>
   <td>{{ row.LRP|default:"" }}</td>
-  <td>{{ row.SRP|default:"" }}</td>
-  <td>{{ row.ERP|default:"" }}</td>
   <td>{{ row.Vessel|default:"" }}</td>
 
   <td>
@@ -137,7 +144,7 @@
 </tr>
 {% empty %}
 <tr>
-  <td colspan="43" class="text-center text-muted py-3">
+  <td colspan="44" class="text-center text-muted py-3">
     No RLSolutions loaded.
   </td>
 </tr>

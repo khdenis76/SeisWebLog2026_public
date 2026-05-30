@@ -1,19 +1,45 @@
+<div class="noar-rlsolutions-toolbar d-flex flex-wrap gap-2 align-items-center mb-2">
+  <button type="button" class="btn btn-sm btn-outline-secondary" id="noar-rl-select-all-btn">
+    Select all
+  </button>
+
+  <button type="button" class="btn btn-sm btn-outline-secondary" id="noar-rl-clear-selection-btn">
+    Clear
+  </button>
+
+  <div class="dropdown">
+    <button class="btn btn-sm btn-danger dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+      Delete selected
+    </button>
+
+    <ul class="dropdown-menu">
+      <li><button type="button" class="dropdown-item noar-rl-delete-option" data-delete-type="all">All</button></li>
+      <li><button type="button" class="dropdown-item noar-rl-delete-option" data-delete-type="pinger_log">Pinger Log</button></li>
+      <li><button type="button" class="dropdown-item noar-rl-delete-option" data-delete-type="nav_log">Nav Log</button></li>
+      <li><button type="button" class="dropdown-item noar-rl-delete-option" data-delete-type="sm_deployed">SM-Deployed</button></li>
+      <li><button type="button" class="dropdown-item noar-rl-delete-option" data-delete-type="sm_recovered">SM Recovered</button></li>
+      <li><button type="button" class="dropdown-item noar-rl-delete-option" data-delete-type="rec_db">REC_DB</button></li>
+    </ul>
+  </div>
+
+  <span class="small text-muted" id="noar-rl-selected-count">0 selected</span>
+</div>
+
 <div class="noar-rlsolutions-table-wrap">
   <table class="table table-sm table-hover table-striped align-middle mb-0 noar-rlsolutions-table">
     <thead>
       <tr>
+        <th class="sticky-col sticky-col-0 text-center" style="width: 42px;">
+          <input class="form-check-input" type="checkbox" id="noar-rl-check-all">
+        </th>
+
         <th class="sticky-col sticky-col-1">Line</th>
         <th class="sticky-col sticky-col-2">LineName</th>
         <th class="sticky-col sticky-col-3">Seq</th>
-
         <th>Attempt</th>
         <th>Solution</th>
-        <th>Tier</th>
-        <th>TierLine</th>
         <th>FRP</th>
         <th>LRP</th>
-        <th>SRP</th>
-        <th>ERP</th>
         <th>Vessel</th>
 
         <th>Start Date</th>

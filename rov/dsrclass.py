@@ -131,6 +131,27 @@ class DSRDB:
         jday = int(dt.timetuple().tm_yday)
         return year, month, week, day, jday
 
+    @staticmethod
+    def _coordinate_unit_factor(unit: str) -> float:
+        """
+        Convert from project base unit meters to selected export unit.
+        """
+        unit = (unit or "m").strip().lower()
+
+        factors = {
+            "m": 1.0,
+            "meter": 1.0,
+            "meters": 1.0,
+            "ft": 3.280839895,
+            "feet": 3.280839895,
+            "usft": 3937.0 / 1200.0,
+            "us_survey_ft": 3937.0 / 1200.0,
+        }
+
+        if unit not in factors:
+            raise ValueError(f"Unsupported coordinate unit: {unit}")
+
+        return factors[unit]
     # --------------------------------------------------
     # Solution FK
     # --------------------------------------------------
@@ -2780,9 +2801,6 @@ WHERE Area IS NOT NULL
 
         return df
 
-    from pathlib import Path
-    import pandas as pd
-
     def export_dsr_lines_to_sps(
             self,
             export_dir,
@@ -2799,7 +2817,23 @@ WHERE Area IS NOT NULL
             how_exp=2,
             line_code="",
             use_line_code=False,
+            xy_unit="m",
+            z_unit="m",
+            coord_unit=None,
     ):
+        """
+        Export selected DSR lines to SPS R-file.
+
+        kind:
+            0 = deployment coordinates from DSR PrimaryEasting/PrimaryNorthing/PrimaryElevation
+            1 = recovery coordinates from DSR PrimaryEasting1/PrimaryNorthing1/PrimaryElevation1
+            2 = REC_DB / First Break coordinates from REC_X/REC_Y/REC_Z
+
+        If kind=2 and REC_DB row is missing, the point is exported as KL using deployment coordinates.
+
+        Unit conversion is applied only during export.
+        Database values remain unchanged.
+        """
         if not selected_lines:
             return {"ok": False, "message": "No lines selected.", "files": [], "errors": {}}
 
@@ -2808,64 +2842,61 @@ WHERE Area IS NOT NULL
 
         pcode = (pcode or "R1").strip()[:4]
         seq = (seq or "").strip()
+
         if use_seq and not seq:
             seq = "01"
+
+        if coord_unit:
+            xy_unit = coord_unit
+            z_unit = coord_unit
+
+        xy_factor = self._coordinate_unit_factor(xy_unit)
+        z_factor = self._coordinate_unit_factor(z_unit)
 
         header_lines = None
         if export_header:
             header_lines = self._read_header_lines(header_file_path)
 
-        # ----------------------------
-        # 1) Fetch DSR
-        # ----------------------------
         df = self._fetch_dsr_for_lines(selected_lines)
+
         if df.empty:
             return {"ok": False, "message": "No DSR data found.", "files": [], "errors": {}}
 
-        # Robust timestamp parsing
         df["TS"] = pd.to_datetime(df["TimeStamp"], errors="coerce")
         df = df.dropna(subset=["TS"])
+
         if df.empty:
             return {"ok": False, "message": "No valid timestamps.", "files": [], "errors": {}}
 
-        # Normalize join keys in DSR (Line + LinePoint)
         df["Line"] = pd.to_numeric(df["Line"], errors="coerce")
         df["LinePoint"] = pd.to_numeric(df["LinePoint"], errors="coerce")
         df = df.dropna(subset=["Line", "LinePoint"])
+
         df["Line"] = df["Line"].astype("int64")
         df["LinePoint"] = df["LinePoint"].astype("int64")
 
-        # Station is used in SPS output; keep numeric if present
         if "Station" in df.columns:
             df["Station"] = pd.to_numeric(df["Station"], errors="coerce")
             df = df.dropna(subset=["Station"])
             df["Station"] = df["Station"].astype("int64")
         else:
-            # If Station isn't present, use LinePoint as Station
             df["Station"] = df["LinePoint"].astype("int64")
 
-        # Sort base DSR
         df = df.sort_values(["Line", "Station", "TS"])
 
-        # ----------------------------
-        # 2) Load REC_DB and merge
-        #    - Keep ALL REC_DB rows (even duplicates per Line+LinePoint)
-        #    - Append DSR rows missing in REC_DB as KL
-        #    - Also load Point from REC_DB
-        # ----------------------------
-        rec = self._fetch_rec_db_for_lines(selected_lines)  # must include Line, LinePoint, Point, REC_*, DEPLOY, RPI
+        rec = self._fetch_rec_db_for_lines(selected_lines)
+
         if rec is None:
             rec = pd.DataFrame()
 
         if not rec.empty:
-            # Normalize join keys in REC_DB
             rec["Line"] = pd.to_numeric(rec["Line"], errors="coerce")
             rec["LinePoint"] = pd.to_numeric(rec["LinePoint"], errors="coerce")
             rec = rec.dropna(subset=["Line", "LinePoint"])
+
             rec["Line"] = rec["Line"].astype("int64")
             rec["LinePoint"] = rec["LinePoint"].astype("int64")
 
-            # Keep needed columns (DO NOT drop duplicates!)
             keep_cols = [
                 c for c in [
                     "Line",
@@ -2878,11 +2909,12 @@ WHERE Area IS NOT NULL
                     "DEPLOY",
                     "RPI",
                     "PointIdx",
-                ] if c in rec.columns
+                ]
+                if c in rec.columns
             ]
+
             rec = rec[keep_cols].copy()
 
-            # 2.1) All REC_DB rows (many-to-one) enriched with DSR columns
             merged = rec.merge(
                 df,
                 how="left",
@@ -2890,7 +2922,6 @@ WHERE Area IS NOT NULL
                 suffixes=("", "_DSR"),
             )
 
-            # 2.2) DSR rows with NO REC_DB match on (Line, LinePoint) -> append as KL
             rec_keys = rec[["Line", "LinePoint"]].drop_duplicates()
 
             dsr_only = df.merge(
@@ -2899,101 +2930,169 @@ WHERE Area IS NOT NULL
                 on=["Line", "LinePoint"],
                 indicator=True,
             )
+
             dsr_only = dsr_only[dsr_only["_merge"] == "left_only"].drop(columns=["_merge"]).copy()
 
-            # Fill missing REC_DB fields on dsr_only
             dsr_only["Point"] = pd.NA
             dsr_only["REC_ID"] = pd.NA
             dsr_only["REC_X"] = pd.NA
             dsr_only["REC_Y"] = pd.NA
             dsr_only["REC_Z"] = pd.NA
             dsr_only["RPI"] = 0
+            dsr_only["DEPLOY"] = pd.NA
+            dsr_only["PointIdx"] = pd.NA
 
-            # DEPLOY fallback for dsr_only (same logic as before)
-            dsr_only["DEPLOY"] = 0
-
-            # Combine: all REC_DB-based rows + DSR-only rows
             df = pd.concat([merged, dsr_only], ignore_index=True)
 
         else:
-            # No REC_DB at all -> export everything as KL
             df["Point"] = pd.NA
             df["REC_ID"] = pd.NA
             df["REC_X"] = pd.NA
             df["REC_Y"] = pd.NA
             df["REC_Z"] = pd.NA
             df["RPI"] = 0
-            df["DEPLOY"] = df.groupby(["Line", "Station"]).cumcount() + 1
+            df["DEPLOY"] = pd.NA
+            df["PointIdx"] = pd.NA
 
-        # If any rows came only from REC_DB with no DSR match, TS can be NaT -> drop (cannot build time fields)
         df["TS"] = pd.to_datetime(df.get("TS"), errors="coerce")
         df = df.dropna(subset=["TS"])
+
         if df.empty:
-            return {"ok": False, "message": "After merge, no rows have valid timestamps (DSR match missing).",
-                    "files": [], "errors": {}}
+            return {
+                "ok": False,
+                "message": "After merge, no rows have valid timestamps.",
+                "files": [],
+                "errors": {},
+            }
 
-        # ----------------------------
-        # 3) Build SPS fields
-        # ----------------------------
         df["PointCode"] = pcode
-        df[["Static", "Datum", "Elevation", "Uphole"]] = 0
+        df["Static"] = 0
+        df["Datum"] = 0
+        df["Elevation"] = 0
+        df["Uphole"] = 0
 
-        # DEPLOY: prefer REC_DB if present, fallback to cumcount
-        df["DEPLOY"] = pd.to_numeric(df.get("DEPLOY"), errors="coerce")
-        miss_dep = df["DEPLOY"].isna()
-        if miss_dep.any():
-            df.loc[miss_dep, "DEPLOY"] = df[miss_dep].groupby(["Line", "Station"]).cumcount() + 1
-        df["DEPLOY"] = df["DEPLOY"].astype("int64")
-
-        # RPI: prefer REC_DB, fallback 0
         df["RPI"] = pd.to_numeric(df.get("RPI"), errors="coerce").fillna(0).astype("int64")
 
-        # Time fields
         df["JDay"] = df["TS"].dt.strftime("%j").astype(int)
         df["Hour"] = df["TS"].dt.hour.astype(int)
         df["Minute"] = df["TS"].dt.minute.astype(int)
         df["Second"] = df["TS"].dt.second.astype(int)
 
-        # ----------------------------
-        # 4) Choose coordinates (X,Y,Z)
-        # ----------------------------
         if int(kind) == 0:
-            df[["X", "Y", "Z"]] = df[["PrimaryEasting", "PrimaryNorthing", "PrimaryElevation"]]
+            df["X"] = pd.to_numeric(df["PrimaryEasting"], errors="coerce")
+            df["Y"] = pd.to_numeric(df["PrimaryNorthing"], errors="coerce")
+            df["Z"] = pd.to_numeric(df["PrimaryElevation"], errors="coerce")
             sub = "dep"
 
+            df["DEPLOY"] = pd.to_numeric(df.get("DEPLOY"), errors="coerce")
+            miss_dep = df["DEPLOY"].isna()
+
+            if miss_dep.any():
+                df.loc[miss_dep, "DEPLOY"] = (
+                    df[miss_dep]
+                    .groupby(["Line", "Station"])
+                    .cumcount()
+                    .add(1)
+                )
+
+            df["DEPLOY"] = df["DEPLOY"].fillna(1).astype("int64")
+
         elif int(kind) == 1:
-            df[["X", "Y", "Z"]] = df[["PrimaryEasting1", "PrimaryNorthing1", "PrimaryElevation1"]]
+            df["X"] = pd.to_numeric(df["PrimaryEasting1"], errors="coerce")
+            df["Y"] = pd.to_numeric(df["PrimaryNorthing1"], errors="coerce")
+            df["Z"] = pd.to_numeric(df["PrimaryElevation1"], errors="coerce")
             sub = "rec"
+
             if "ROV1" in df.columns:
-                mask = df["ROV1"].isna()
+                mask = df["ROV1"].isna() | (df["ROV1"].astype(str).str.strip() == "")
                 df.loc[mask, "PointCode"] = "KL"
-                df.loc[mask, ["X", "Y", "Z"]] = df.loc[
-                    mask, ["PrimaryEasting", "PrimaryNorthing", "PrimaryElevation"]
-                ].values
+                df.loc[mask, "X"] = pd.to_numeric(df.loc[mask, "PrimaryEasting"], errors="coerce")
+                df.loc[mask, "Y"] = pd.to_numeric(df.loc[mask, "PrimaryNorthing"], errors="coerce")
+                df.loc[mask, "Z"] = pd.to_numeric(df.loc[mask, "PrimaryElevation"], errors="coerce")
+
+            df["DEPLOY"] = pd.to_numeric(df.get("DEPLOY"), errors="coerce")
+            miss_dep = df["DEPLOY"].isna()
+
+            if miss_dep.any():
+                df.loc[miss_dep, "DEPLOY"] = (
+                    df[miss_dep]
+                    .groupby(["Line", "Station"])
+                    .cumcount()
+                    .add(1)
+                )
+
+            df["DEPLOY"] = df["DEPLOY"].fillna(1).astype("int64")
 
         else:
-            # FB: use REC_DB coords where available; fallback to primary coords
+            # REC_DB / First Break export.
+            # Main coordinates MUST come from REC_DB: REC_X, REC_Y, REC_Z.
+            # Only missing REC_DB rows fall back to deployment coordinates and become KL.
             df["X"] = pd.to_numeric(df.get("REC_X"), errors="coerce")
             df["Y"] = pd.to_numeric(df.get("REC_Y"), errors="coerce")
             df["Z"] = pd.to_numeric(df.get("REC_Z"), errors="coerce")
-            df["DEPLOY"] = pd.to_numeric(df.get("PointIdx"), errors="coerce")
             sub = "fb"
 
-            # Force KL when REC_ID missing OR coords missing; fallback to DSR primary coords
-            no_rec = df.get("REC_ID").isna() if "REC_ID" in df.columns else df["X"].isna()
+            has_rec = (
+                df["REC_ID"].notna()
+                if "REC_ID" in df.columns
+                else df["X"].notna() & df["Y"].notna()
+            )
+
+            no_rec = ~has_rec
             df.loc[no_rec, "PointCode"] = "KL"
 
             fallback = df["X"].isna() | df["Y"].isna() | df["Z"].isna()
-            df.loc[fallback, ["X", "Y", "Z"]] = df.loc[
-                fallback, ["PrimaryEasting", "PrimaryNorthing", "PrimaryElevation"]
-            ].values
 
-        # Z formatting (same as your logic)
+            df.loc[fallback, "X"] = pd.to_numeric(
+                df.loc[fallback, "PrimaryEasting"],
+                errors="coerce",
+            )
+            df.loc[fallback, "Y"] = pd.to_numeric(
+                df.loc[fallback, "PrimaryNorthing"],
+                errors="coerce",
+            )
+            df.loc[fallback, "Z"] = pd.to_numeric(
+                df.loc[fallback, "PrimaryElevation"],
+                errors="coerce",
+            )
+
+            if "PointIdx" in df.columns:
+                point_idx = pd.to_numeric(df["PointIdx"], errors="coerce")
+            else:
+                point_idx = pd.Series(pd.NA, index=df.index)
+
+            fallback_deploy = (
+                df.groupby(["Line", "Station"])
+                .cumcount()
+                .add(1)
+                .astype("int64")
+            )
+
+            df["DEPLOY"] = point_idx.fillna(fallback_deploy)
+            df["DEPLOY"] = pd.to_numeric(df["DEPLOY"], errors="coerce").fillna(1).astype("int64")
+
+        df["X"] = pd.to_numeric(df["X"], errors="coerce") * xy_factor
+        df["Y"] = pd.to_numeric(df["Y"], errors="coerce") * xy_factor
+        df["Z"] = pd.to_numeric(df["Z"], errors="coerce") * z_factor
+
+        df = df.dropna(subset=["X", "Y"])
+
+        if df.empty:
+            return {
+                "ok": False,
+                "message": "No rows have valid X/Y coordinates after fallback and unit conversion.",
+                "files": [],
+                "errors": {},
+            }
+
         df["Z"] = pd.to_numeric(df["Z"], errors="coerce").fillna(0).abs().round(1)
 
         def format_z(val):
+            if pd.isna(val):
+                val = 0
+            val = float(val)
             if val > 100:
-                return str(int(val)).rjust(4)
+                return str(int(round(val))).rjust(4)
             return f"{val:4.1f}"
 
         df["Zfmt"] = df["Z"].apply(format_z)
@@ -3006,6 +3105,7 @@ WHERE Area IS NOT NULL
 
         def build_lines_v1(part, line_name_for_record):
             buf = []
+
             for r in part.sort_values(["Station", "DEPLOY"]).itertuples():
                 buf.append(
                     "R{:<16}{:>8d}{:d}{:<1}{:>4d}{:>4}{:>4d}{:>2d}{:>4}{:>9.1f}{:>10.1f}{:>6.1f}{:03d}{:02d}{:02d}{:02d}\n".format(
@@ -3027,56 +3127,61 @@ WHERE Area IS NOT NULL
                         int(r.Second),
                     )
                 )
+
             return buf
 
         def write_file(path, blocks):
             with open(path, "w", encoding="utf-8") as out:
                 if header_lines and export_header:
                     out.writelines(header_lines)
+
                 for block in blocks:
                     out.writelines(block)
-
-        out_dir = export_dir
-        out_dir.mkdir(parents=True, exist_ok=True)
 
         created_files = []
 
         try:
+            selected_lines_int = [int(x) for x in selected_lines]
+
             if int(how_exp) == 1:
-                for line in selected_lines:
-                    line_i = int(line)
-                    part = df[df["Line"] == line_i].copy()
+                for line in selected_lines_int:
+                    part = df[df["Line"] == line].copy()
+
                     if part.empty:
                         continue
 
-                    rec_name = record_line_name(line_i)
-                    fname_line = file_line_name(line_i)
+                    rec_name = record_line_name(line)
+                    fname_line = file_line_name(line)
                     fname = f"{line_code}{fname_line}.R01" if use_line_code else f"{fname_line}.R01"
-                    fpath = out_dir / fname
+                    fpath = export_dir / fname
 
-                    lines_block = build_lines_v1(part, rec_name)
-                    write_file(fpath, [lines_block])
+                    write_file(fpath, [build_lines_v1(part, rec_name)])
                     created_files.append(str(fpath))
+
             else:
-                base = (
-                    f"{selected_lines[0]}-{selected_lines[-1]}"if len(selected_lines) > 1 else f"{selected_lines[0]}"
-                )
+                if len(selected_lines_int) > 1:
+                    base = f"{selected_lines_int[0]}-{selected_lines_int[-1]}"
+                else:
+                    base = f"{selected_lines_int[0]}"
+
                 if use_seq and seq:
-                    base = (
-                        f"{selected_lines[0]}{seq}-{selected_lines[-1]}{seq}" if len(selected_lines) > 1 else f"{selected_lines[0]}{seq}")
-
-
+                    if len(selected_lines_int) > 1:
+                        base = f"{selected_lines_int[0]}{seq}-{selected_lines_int[-1]}{seq}"
+                    else:
+                        base = f"{selected_lines_int[0]}{seq}"
 
                 fname = f"{line_code}{base}.R01" if use_line_code else f"{base}.R01"
-                fpath = out_dir / fname
+                fpath = export_dir / fname
 
                 blocks = []
-                for line in selected_lines:
-                    line_i = int(line)
-                    part = df[df["Line"] == line_i].copy()
+
+                for line in selected_lines_int:
+                    part = df[df["Line"] == line].copy()
+
                     if part.empty:
                         continue
-                    rec_name = record_line_name(line_i)
+
+                    rec_name = record_line_name(line)
                     blocks.append(build_lines_v1(part, rec_name))
 
                 write_file(fpath, blocks)
@@ -3090,6 +3195,12 @@ WHERE Area IS NOT NULL
             "message": f"Exported {len(created_files)} file(s).",
             "files": created_files,
             "errors": {},
+            "kind": kind,
+            "sub": sub,
+            "xy_unit": xy_unit,
+            "z_unit": z_unit,
+            "xy_factor": xy_factor,
+            "z_factor": z_factor,
         }
 
     def _fetch_rec_db_for_lines(self, selected_lines):

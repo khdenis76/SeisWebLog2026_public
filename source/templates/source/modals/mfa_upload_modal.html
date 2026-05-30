@@ -1,0 +1,60 @@
+<div class="modal fade" id="mfaUploadModal" tabindex="-1" aria-labelledby="mfaUploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+
+            <div class="modal-header py-2">
+                <h5 class="modal-title" id="mfaUploadModalLabel">
+                    <i class="fas fa-table me-2"></i> Upload MFA Files
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <form id="mfa-upload-form"
+                  data-upload-url="{% url 'source_mfa_upload' %}"
+                  enctype="multipart/form-data">
+
+                {% csrf_token %}
+
+                <div class="modal-body">
+
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">MFA files</label>
+                        <input type="file"
+                               id="mfa-files-input"
+                               name="mfa_files"
+                               class="form-control form-control-sm"
+                               accept=".mfa"
+                               multiple>
+                        <div class="form-text">
+                            Select one MFA file or multiple MFA files.
+                        </div>
+                    </div>
+
+                    <div id="mfa-upload-status" class="small text-muted mt-2"></div>
+
+                    <div id="mfa-upload-progress-wrap" class="progress mt-2 d-none" style="height: 18px;">
+                        <div id="mfa-upload-progress"
+                             class="progress-bar progress-bar-striped progress-bar-animated"
+                             role="progressbar"
+                             style="width: 0%;">
+                            0%
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">
+                        Close
+                    </button>
+
+                    <button type="submit" id="mfa-upload-submit" class="btn btn-sm btn-primary">
+                        <i class="fas fa-upload me-1"></i> Upload
+                    </button>
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+</div>

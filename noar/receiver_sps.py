@@ -1,3 +1,4 @@
+import math
 import os
 import sqlite3
 from datetime import datetime, timedelta
@@ -31,7 +32,6 @@ class ReceiverSPS:
     ) -> dict:
 
         revision = SPSRevision.objects.get(id=sps_revision_id)
-
         conn = self._connect()
 
         try:
@@ -42,8 +42,6 @@ class ReceiverSPS:
 
             if node_vessel_fk and not vessel_name:
                 vessel_name = self._get_vessel_name(conn, node_vessel_fk)
-
-
 
             pp_lines = self._load_rlpreplot_lookup(conn)
             pp_points = self._load_rppreplot_lookup(conn)
@@ -76,6 +74,7 @@ class ReceiverSPS:
                             solution_fk=solution_fk,
                             file_id=file_id,
                             vessel_name=vessel_name,
+                            node_vessel_fk=node_vessel_fk,
                             line_mask=line_mask,
                         )
 
@@ -100,9 +99,26 @@ class ReceiverSPS:
                             parsed["PP_Point_FK"] = pp_point["ID"]
                             parsed["PP_X"] = pp_point["X"]
                             parsed["PP_Y"] = pp_point["Y"]
-                            parsed["dX"] = pp_point["X"] - parsed["Easting"]
-                            parsed["dY"] = pp_point["Y"] - parsed["Northing"]
+
+                            dx = float(parsed["Easting"] or 0) - float(pp_point["X"] or 0)
+                            dy = float(parsed["Northing"] or 0) - float(pp_point["Y"] or 0)
+
+                            parsed["dX"] = dx
+                            parsed["dY"] = dy
+                            parsed["RadialOffset"] = math.hypot(dx, dy)
+
+                            bearing = float(
+                                pp_line.get("LineBearing")
+                                or pp_line.get("CalcLineBearing")
+                                or 0
+                            )
+                            theta = math.radians(bearing)
+
+                            parsed["ILOffset"] = dx * math.sin(theta) + dy * math.cos(theta)
+                            parsed["XLOffset"] = dx * math.cos(theta) - dy * math.sin(theta)
+
                             parsed["isPreplotCompared"] = 1
+                            parsed["isCompared"] = 1
 
                         self._update_line_stat(
                             line_stats=line_stats,
@@ -142,137 +158,40 @@ class ReceiverSPS:
             conn.close()
 
     def ensure_tables(self, conn):
+        """
+        Safe table initialization.
+
+        Does not drop tables on every load.
+        Creates tables only if missing.
+        """
         self.ensure_sps_files_table(conn)
-
         self.ensure_rlsolution_table(conn)
-        self.recreate_rpsolution_table(conn)
-
+        self.ensure_rpsolution_table(conn)
         self.ensure_indexes(conn)
 
-    def ensure_rlsolution_table(self, conn):
-        """
-        Recreate RLSolution only when table is missing or schema is old.
-
-        Required changes:
-        - remove LineSolution dependency
-        - use Solution_FK as FK to Solutions.ID
-        - add is_recovered
-        - add is_processed
-        - add Min/Avg/Max QC fields
-        """
-
-        required_columns = {
-            "ID",
-            "PPLine_FK",
-            "File_FK",
-            "LineName",
-            "Line",
-            "Seq",
-            "Attempt",
-            "Tier",
-            "TierLine",
-            "FRP",
-            "LRP",
-            "StartX",
-            "StartY",
-            "EndX",
-            "EndY",
-            "SRP",
-            "ERP",
-            "Vessel",
-
-            "StartYear",
-            "StartMonth",
-            "StartJDay",
-            "StartDay",
-            "StartHour",
-            "StartMinute",
-            "StartSecond",
-            "StartMSecond",
-
-            "EndYear",
-            "EndMonth",
-            "EndJDay",
-            "EndDay",
-            "EndHour",
-            "EndMinute",
-            "EndSecond",
-            "EndMSecond",
-
-            "Solution_FK",
-
-            "PercentOfLineDone",
-            "SeqProdCount",
-            "PercentOFSeqDone",
-            "Count_All",
-
-            "is_clicked",
-            "is_recovered",
-            "is_processed",
-            "is_fbloaded",
-
-            "FileName_FK",
-
-            "MinRadialOffset",
-            "AvgRadialOffset",
-            "MaxRadialOffset",
-
-            "MinILOffset",
-            "AvgILOffset",
-            "MaxILOffset",
-
-            "MinXLOffset",
-            "AvgXLOffset",
-            "MaxXLOffset",
-
-            "MindX",
-            "AvgdX",
-            "MaxdX",
-
-            "MindY",
-            "AvgdY",
-            "MaxdY",
-
-            "MinWaterDepth",
-            "AvgWaterDepth",
-            "MaxWaterDepth",
-
-            "MinElevation",
-            "AvgElevation",
-            "MaxElevation",
-        }
-
+    def _table_exists(self, conn, table_name: str) -> bool:
         row = conn.execute("""
             SELECT name
             FROM sqlite_master
             WHERE type = 'table'
-              AND name = 'RLSolution'
-        """).fetchone()
+              AND name = ?
+        """, (table_name,)).fetchone()
 
-        recreate = False
+        return row is not None
 
-        if not row:
-            recreate = True
-        else:
-            existing_columns = {
-                r["name"]
-                for r in conn.execute("PRAGMA table_info(RLSolution)").fetchall()
-            }
+    def ensure_rlsolution_table(self, conn):
+        """
+        Current RLSolution schema.
 
-            missing = required_columns - existing_columns
+        Changes:
+        - SRP removed
+        - ERP removed
+        - PP_Count added from RLPreplot.Points
+        - Vessel_FK added from project_fleet.id
+        """
 
-            # Old table has LineSolution. New table should not depend on it.
-            has_old_linesolution = "LineSolution" in existing_columns
-
-            if missing or has_old_linesolution:
-                recreate = True
-
-        if recreate:
-            self.recreate_rlsolution_table(conn)
-
-    def recreate_rlsolution_table(self, conn):
-
-        conn.execute("DROP TABLE IF EXISTS RLSolution")
+        if self._table_exists(conn, "RLSolution"):
+            return
 
         conn.execute("""
             CREATE TABLE RLSolution (
@@ -280,6 +199,7 @@ class ReceiverSPS:
 
                 PPLine_FK INTEGER,
                 File_FK INTEGER,
+                FileName_FK INTEGER,
 
                 LineName TEXT,
                 Line INTEGER,
@@ -293,16 +213,15 @@ class ReceiverSPS:
                 FRP INTEGER,
                 LRP INTEGER,
 
+                PP_Count INTEGER DEFAULT 0,
+
                 StartX REAL DEFAULT 0,
                 StartY REAL DEFAULT 0,
-
                 EndX REAL DEFAULT 0,
                 EndY REAL DEFAULT 0,
 
-                SRP INTEGER,
-                ERP INTEGER,
-
                 Vessel TEXT,
+                Vessel_FK INTEGER,
 
                 StartYear INTEGER,
                 StartMonth INTEGER,
@@ -334,8 +253,6 @@ class ReceiverSPS:
                 is_recovered INTEGER DEFAULT 0,
                 is_processed INTEGER DEFAULT 0,
                 is_fbloaded INTEGER DEFAULT 0,
-
-                FileName_FK INTEGER,
 
                 MinRadialOffset REAL DEFAULT 0,
                 AvgRadialOffset REAL DEFAULT 0,
@@ -381,13 +298,24 @@ class ReceiverSPS:
                     REFERENCES SPS_Files(ID)
                     ON DELETE CASCADE,
 
+                FOREIGN KEY (Vessel_FK)
+                    REFERENCES project_fleet(id)
+                    ON DELETE SET NULL,
+
                 UNIQUE(Line, Solution_FK)
             )
         """)
 
-    def recreate_rpsolution_table(self, conn):
+    def ensure_rpsolution_table(self, conn):
+        """
+        Current RPSolution schema.
 
-        conn.execute("DROP TABLE IF EXISTS RPSolution")
+        Does not drop existing table.
+        Adds Vessel_FK and stores calculated IL / XL offsets.
+        """
+
+        if self._table_exists(conn, "RPSolution"):
+            return
 
         conn.execute("""
             CREATE TABLE RPSolution (
@@ -449,6 +377,7 @@ class ReceiverSPS:
                 YearDay TEXT,
 
                 Vessel TEXT,
+                Vessel_FK INTEGER,
 
                 RadialOffset REAL DEFAULT 0,
                 ILOffset REAL DEFAULT 0,
@@ -519,7 +448,6 @@ class ReceiverSPS:
                 Spare3 INTEGER DEFAULT 0,
 
                 UNIQUE(LinePointIdxSol),
-                UNIQUE(ID, LinePointIdxSol),
 
                 FOREIGN KEY (LineName_FK)
                     REFERENCES RLSolution(ID)
@@ -539,9 +467,14 @@ class ReceiverSPS:
 
                 FOREIGN KEY (File_FK)
                     REFERENCES SPS_Files(ID)
-                    ON DELETE CASCADE
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY (Vessel_FK)
+                    REFERENCES project_fleet(id)
+                    ON DELETE SET NULL
             )
         """)
+
     def ensure_sps_files_table(self, conn):
         conn.execute("""
             CREATE TABLE IF NOT EXISTS SPS_Files (
@@ -554,30 +487,43 @@ class ReceiverSPS:
         """)
 
     def ensure_indexes(self, conn):
-        conn.execute("""
+        indexes = [
+            """
             CREATE INDEX IF NOT EXISTS idx_sps_files_filename
             ON SPS_Files(FileName)
-        """)
-
-        conn.execute("""
+            """,
+            """
             CREATE INDEX IF NOT EXISTS idx_rlsolution_line_solution
             ON RLSolution(Line, Solution_FK)
-        """)
-
-        conn.execute("""
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_rlsolution_vessel_fk
+            ON RLSolution(Vessel_FK)
+            """,
+            """
             CREATE INDEX IF NOT EXISTS idx_rpsolution_line_solution
             ON RPSolution(Line, Solution_FK)
-        """)
-
-        conn.execute("""
+            """,
+            """
             CREATE INDEX IF NOT EXISTS idx_rpsolution_line_point
             ON RPSolution(Line, Point)
-        """)
-
-        conn.execute("""
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_rpsolution_linename_fk
+            ON RPSolution(LineName_FK)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_rpsolution_vessel_fk
+            ON RPSolution(Vessel_FK)
+            """,
+            """
             CREATE INDEX IF NOT EXISTS idx_rppreplot_line_point
             ON RPPreplot(Line_Fk, Point)
-        """)
+            """,
+        ]
+
+        for sql in indexes:
+            conn.execute(sql)
 
     def _parse_record(
         self,
@@ -589,6 +535,7 @@ class ReceiverSPS:
         solution_fk: int,
         file_id: int,
         vessel_name: str,
+        node_vessel_fk: int | None,
         line_mask: str | None,
     ) -> dict | None:
 
@@ -701,6 +648,7 @@ class ReceiverSPS:
             "YearDay": f"{year}{jday:03d}",
 
             "Vessel": vessel_name,
+            "Vessel_FK": node_vessel_fk,
 
             "RadialOffset": 0,
             "ILOffset": 0,
@@ -760,37 +708,15 @@ class ReceiverSPS:
         }
 
     def _build_receiver_keys(
-            self,
-            *,
-            line: int,
-            point: int,
-            point_idx: int,
-            tier: int,
-            solution_fk: int,
-            line_mask: str,
+        self,
+        *,
+        line: int,
+        point: int,
+        point_idx: int,
+        tier: int,
+        solution_fk: int,
+        line_mask: str,
     ):
-        """
-        Build unique receiver keys based on rl_mask.
-
-        Example:
-            rl_mask = AAAAALLLLPPPPEE
-
-        L-count = 4
-        P-count = 4
-
-        LinePoint:
-            line * 10^P_count + point
-
-        TierLinePoint:
-            tier * 10^(L_count + P_count) + LinePoint
-
-        LinePointIdx:
-            LinePoint * 10^PointIdx_digits + PointIdx
-
-        LinePointIdxSol:
-            LinePointIdx * 10^Solution_digits + Solution_FK
-        """
-
         if not line_mask:
             raise ValueError("Receiver line mask is required.")
 
@@ -803,7 +729,6 @@ class ReceiverSPS:
         point_scalar = 10 ** point_digits
         tier_scalar = 10 ** (line_digits + point_digits)
 
-        # Usually PointIdx is one digit, but make it safe
         point_idx_digits = max(1, len(str(abs(int(point_idx or 0)))))
         point_idx_scalar = 10 ** point_idx_digits
 
@@ -818,23 +743,6 @@ class ReceiverSPS:
         return line_point, tier_line_point, line_point_idx, line_point_idx_sol
 
     def _parse_line_name(self, line_name: str, line_mask: str | None):
-        """
-        Receiver mask example:
-            AAAAALLLLPPPPEE
-
-        A = prefix
-        L = line number
-        P = point number
-        E = suffix
-
-        For receiver SPS:
-            L -> Line
-            Seq -> 1
-            Attempt -> ""
-
-        Point is still taken from SPSRevision point_start/point_end.
-        """
-
         if not line_mask:
             return 0, 1, ""
 
@@ -894,6 +802,7 @@ class ReceiverSPS:
             "Date",
             "YearDay",
             "Vessel",
+            "Vessel_FK",
             "RadialOffset",
             "ILOffset",
             "XLOffset",
@@ -960,77 +869,87 @@ class ReceiverSPS:
             for row in rows
         ]
 
-        try:
-            conn.executemany(sql, values)
-
-        except Exception as exc:
-            print("\n[ReceiverSPS] ERROR in _flush_rpsolution")
-            print(f"[ReceiverSPS] Error type: {type(exc).__name__}")
-            print(f"[ReceiverSPS] Error: {exc}")
-            print(f"[ReceiverSPS] Rows count: {len(rows)}")
-            print(f"[ReceiverSPS] Columns count: {len(columns)}")
-            print(f"[ReceiverSPS] SQL columns: {columns}")
-
-            # Check current RPSolution schema
-            try:
-                table_info = conn.execute("PRAGMA table_info(RPSolution)").fetchall()
-                db_columns = [row["name"] for row in table_info]
-                print(f"[ReceiverSPS] DB columns count: {len(db_columns)}")
-                print(f"[ReceiverSPS] DB columns: {db_columns}")
-
-                missing_in_db = [c for c in columns if c not in db_columns]
-                extra_in_db = [c for c in db_columns if c not in columns and c != "ID"]
-
-                print(f"[ReceiverSPS] Missing in DB: {missing_in_db}")
-                print(f"[ReceiverSPS] Extra in DB: {extra_in_db}")
-
-            except Exception as schema_exc:
-                print(f"[ReceiverSPS] Could not inspect RPSolution schema: {schema_exc}")
-
-            # Try row-by-row to find exact bad row
-            for idx, row in enumerate(rows):
-                one_value = tuple(row.get(col) for col in columns)
-
-                try:
-                    conn.execute(sql, one_value)
-
-                except Exception as row_exc:
-                    print("\n[ReceiverSPS] BAD ROW FOUND")
-                    print(f"[ReceiverSPS] Row index in chunk: {idx}")
-                    print(f"[ReceiverSPS] Row error type: {type(row_exc).__name__}")
-                    print(f"[ReceiverSPS] Row error: {row_exc}")
-
-                    print("[ReceiverSPS] Important keys:")
-                    for key in [
-                        "Line",
-                        "Point",
-                        "PointIdx",
-                        "LinePoint",
-                        "LinePointIdx",
-                        "LinePointIdxSol",
-                        "PP_Point_FK",
-                        "PP_Line_FK",
-                        "File_FK",
-                        "Solution_FK",
-                    ]:
-                        print(f"    {key}: {row.get(key)}")
-
-                    print("[ReceiverSPS] Full row values:")
-                    for col, val in zip(columns, one_value):
-                        print(f"    {col}: {repr(val)}")
-
-                    try:
-                        fk_check = conn.execute("PRAGMA foreign_key_check").fetchall()
-                        print(f"[ReceiverSPS] FK check: {[dict(x) for x in fk_check]}")
-                    except Exception as fk_exc:
-                        print(f"[ReceiverSPS] Could not run foreign_key_check: {fk_exc}")
-
-                    raise row_exc
-
-            raise exc
+        conn.executemany(sql, values)
 
     def _flush_rlsolution(self, conn, line_stats):
+        columns = [
+            "PPLine_FK",
+            "File_FK",
+            "FileName_FK",
+            "LineName",
+            "Line",
+            "Seq",
+            "Attempt",
+            "Tier",
+            "TierLine",
+            "FRP",
+            "LRP",
+            "PP_Count",
+            "StartX",
+            "StartY",
+            "EndX",
+            "EndY",
+            "Vessel",
+            "Vessel_FK",
+            "StartYear",
+            "StartMonth",
+            "StartJDay",
+            "StartDay",
+            "StartHour",
+            "StartMinute",
+            "StartSecond",
+            "StartMSecond",
+            "EndYear",
+            "EndMonth",
+            "EndJDay",
+            "EndDay",
+            "EndHour",
+            "EndMinute",
+            "EndSecond",
+            "EndMSecond",
+            "Solution_FK",
+            "PercentOfLineDone",
+            "SeqProdCount",
+            "PercentOFSeqDone",
+            "Count_All",
+            "is_recovered",
+            "is_processed",
+            "MinRadialOffset",
+            "AvgRadialOffset",
+            "MaxRadialOffset",
+            "MinILOffset",
+            "AvgILOffset",
+            "MaxILOffset",
+            "MinXLOffset",
+            "AvgXLOffset",
+            "MaxXLOffset",
+            "MindX",
+            "AvgdX",
+            "MaxdX",
+            "MindY",
+            "AvgdY",
+            "MaxdY",
+            "MinWaterDepth",
+            "AvgWaterDepth",
+            "MaxWaterDepth",
+            "MinElevation",
+            "AvgElevation",
+            "MaxElevation",
+        ]
+
+        update_columns = [
+            col
+            for col in columns
+            if col not in ("Line", "Solution_FK")
+        ]
+
+        update_set = ",\n".join([f"{col} = ?" for col in update_columns])
+        insert_cols = ", ".join(columns)
+        insert_marks = ", ".join(["?"] * len(columns))
+
         for stat in line_stats.values():
+            stat["FileName_FK"] = stat["File_FK"]
+            stat["LineName"] = str(stat["Line"])
 
             existing = conn.execute("""
                 SELECT ID
@@ -1041,216 +960,26 @@ class ReceiverSPS:
                 stat["Solution_FK"],
             )).fetchone()
 
-            values = (
-                stat["PPLine_FK"],
-                stat["File_FK"],
-                str(stat["Line"]),
-                stat["Line"],
-                stat["Seq"],
-                stat["Attempt"],
-                stat["Tier"],
-                stat.get("TierLine"),
-                stat["FRP"],
-                stat["LRP"],
-                stat["StartX"],
-                stat["StartY"],
-                stat["EndX"],
-                stat["EndY"],
-                stat["SRP"],
-                stat["ERP"],
-                stat["Vessel"],
-                stat["StartYear"],
-                stat["StartMonth"],
-                stat["StartJDay"],
-                stat["StartDay"],
-                stat["StartHour"],
-                stat["StartMinute"],
-                stat["StartSecond"],
-                stat["StartMSecond"],
-                stat["EndYear"],
-                stat["EndMonth"],
-                stat["EndJDay"],
-                stat["EndDay"],
-                stat["EndHour"],
-                stat["EndMinute"],
-                stat["EndSecond"],
-                stat["EndMSecond"],
-                stat["Solution_FK"],
-                stat["PercentOfLineDone"],
-                stat.get("SeqProdCount", 0),
-                stat.get("PercentOFSeqDone", 0),
-                stat["Count_All"],
-                stat.get("is_recovered", 0),
-                stat.get("is_processed", 0),
-                stat["File_FK"],
-                stat.get("MinRadialOffset", 0),
-                stat.get("AvgRadialOffset", 0),
-                stat.get("MaxRadialOffset", 0),
-                stat.get("MinILOffset", 0),
-                stat.get("AvgILOffset", 0),
-                stat.get("MaxILOffset", 0),
-                stat.get("MinXLOffset", 0),
-                stat.get("AvgXLOffset", 0),
-                stat.get("MaxXLOffset", 0),
-                stat.get("MindX", 0),
-                stat.get("AvgdX", 0),
-                stat.get("MaxdX", 0),
-                stat.get("MindY", 0),
-                stat.get("AvgdY", 0),
-                stat.get("MaxdY", 0),
-                stat.get("MinWaterDepth", 0),
-                stat.get("AvgWaterDepth", 0),
-                stat.get("MaxWaterDepth", 0),
-                stat.get("MinElevation", 0),
-                stat.get("AvgElevation", 0),
-                stat.get("MaxElevation", 0),
-            )
-
             if existing:
                 rl_id = existing["ID"]
 
-                conn.execute("""
+                update_values = tuple(stat.get(col) for col in update_columns)
+
+                conn.execute(f"""
                     UPDATE RLSolution
-                    SET
-                        PPLine_FK = ?,
-                        File_FK = ?,
-                        LineName = ?,
-                        Line = ?,
-                        Seq = ?,
-                        Attempt = ?,
-                        Tier = ?,
-                        TierLine = ?,
-                        FRP = ?,
-                        LRP = ?,
-                        StartX = ?,
-                        StartY = ?,
-                        EndX = ?,
-                        EndY = ?,
-                        SRP = ?,
-                        ERP = ?,
-                        Vessel = ?,
-                        StartYear = ?,
-                        StartMonth = ?,
-                        StartJDay = ?,
-                        StartDay = ?,
-                        StartHour = ?,
-                        StartMinute = ?,
-                        StartSecond = ?,
-                        StartMSecond = ?,
-                        EndYear = ?,
-                        EndMonth = ?,
-                        EndJDay = ?,
-                        EndDay = ?,
-                        EndHour = ?,
-                        EndMinute = ?,
-                        EndSecond = ?,
-                        EndMSecond = ?,
-                        Solution_FK = ?,
-                        PercentOfLineDone = ?,
-                        SeqProdCount = ?,
-                        PercentOFSeqDone = ?,
-                        Count_All = ?,
-                        is_recovered = ?,
-                        is_processed = ?,
-                        FileName_FK = ?,
-                        MinRadialOffset = ?,
-                        AvgRadialOffset = ?,
-                        MaxRadialOffset = ?,
-                        MinILOffset = ?,
-                        AvgILOffset = ?,
-                        MaxILOffset = ?,
-                        MinXLOffset = ?,
-                        AvgXLOffset = ?,
-                        MaxXLOffset = ?,
-                        MindX = ?,
-                        AvgdX = ?,
-                        MaxdX = ?,
-                        MindY = ?,
-                        AvgdY = ?,
-                        MaxdY = ?,
-                        MinWaterDepth = ?,
-                        AvgWaterDepth = ?,
-                        MaxWaterDepth = ?,
-                        MinElevation = ?,
-                        AvgElevation = ?,
-                        MaxElevation = ?
+                    SET {update_set}
                     WHERE ID = ?
-                """, values + (rl_id,))
+                """, update_values + (rl_id,))
 
             else:
-                cur = conn.execute("""
+                values = tuple(stat.get(col) for col in columns)
+
+                cur = conn.execute(f"""
                     INSERT INTO RLSolution (
-                        PPLine_FK,
-                        File_FK,
-                        LineName,
-                        Line,
-                        Seq,
-                        Attempt,
-                        Tier,
-                        TierLine,
-                        FRP,
-                        LRP,
-                        StartX,
-                        StartY,
-                        EndX,
-                        EndY,
-                        SRP,
-                        ERP,
-                        Vessel,
-                        StartYear,
-                        StartMonth,
-                        StartJDay,
-                        StartDay,
-                        StartHour,
-                        StartMinute,
-                        StartSecond,
-                        StartMSecond,
-                        EndYear,
-                        EndMonth,
-                        EndJDay,
-                        EndDay,
-                        EndHour,
-                        EndMinute,
-                        EndSecond,
-                        EndMSecond,
-                        Solution_FK,
-                        PercentOfLineDone,
-                        SeqProdCount,
-                        PercentOFSeqDone,
-                        Count_All,
-                        is_recovered,
-                        is_processed,
-                        FileName_FK,
-                        MinRadialOffset,
-                        AvgRadialOffset,
-                        MaxRadialOffset,
-                        MinILOffset,
-                        AvgILOffset,
-                        MaxILOffset,
-                        MinXLOffset,
-                        AvgXLOffset,
-                        MaxXLOffset,
-                        MindX,
-                        AvgdX,
-                        MaxdX,
-                        MindY,
-                        AvgdY,
-                        MaxdY,
-                        MinWaterDepth,
-                        AvgWaterDepth,
-                        MaxWaterDepth,
-                        MinElevation,
-                        AvgElevation,
-                        MaxElevation
+                        {insert_cols}
                     )
                     VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?
+                        {insert_marks}
                     )
                 """, values)
 
@@ -1267,19 +996,6 @@ class ReceiverSPS:
             ))
 
     def _update_line_stat(self, line_stats, row, pp_line, solution_fk):
-        """
-        Update one RLSolution summary row while loading RPSolution rows.
-
-        This builds line-level statistics for:
-        - first / last receiver point
-        - start / end time
-        - total loaded points
-        - percent of line completed
-        - min / avg / max Radial, Inline, Crossline offsets
-        - min / avg / max dX / dY to preplot
-        - min / avg / max WaterDepth and Elevation
-        """
-
         def _safe_float(value):
             try:
                 if value is None or value == "":
@@ -1307,6 +1023,7 @@ class ReceiverSPS:
                 "Line": line,
                 "PPLine_FK": pp_line["ID"],
                 "File_FK": row["File_FK"],
+                "FileName_FK": row["File_FK"],
                 "Solution_FK": int(solution_fk),
 
                 "Seq": row["Seq"],
@@ -1316,8 +1033,8 @@ class ReceiverSPS:
 
                 "FRP": row["Point"],
                 "LRP": row["Point"],
-                "SRP": row["Point"],
-                "ERP": row["Point"],
+
+                "PP_Count": pp_line.get("Points", 0) or 0,
 
                 "StartX": row["Easting"],
                 "StartY": row["Northing"],
@@ -1325,6 +1042,7 @@ class ReceiverSPS:
                 "EndY": row["Northing"],
 
                 "Vessel": row["Vessel"],
+                "Vessel_FK": row.get("Vessel_FK"),
 
                 "StartYear": row["Year"],
                 "StartMonth": row["Month"],
@@ -1345,7 +1063,6 @@ class ReceiverSPS:
                 "EndMSecond": row["Msecond"],
 
                 "Count_All": 0,
-                "PlannedPoints": pp_line.get("Points", 0) or 0,
 
                 "PercentOfLineDone": 0,
                 "SeqProdCount": 0,
@@ -1400,12 +1117,6 @@ class ReceiverSPS:
 
         if point < stat["FRP"]:
             stat["FRP"] = point
-
-        if point > stat["LRP"]:
-            stat["LRP"] = point
-
-        if point < stat["SRP"]:
-            stat["SRP"] = point
             stat["StartX"] = row["Easting"]
             stat["StartY"] = row["Northing"]
 
@@ -1418,8 +1129,8 @@ class ReceiverSPS:
             stat["StartSecond"] = row["Second"]
             stat["StartMSecond"] = row["Msecond"]
 
-        if point > stat["ERP"]:
-            stat["ERP"] = point
+        if point > stat["LRP"]:
+            stat["LRP"] = point
             stat["EndX"] = row["Easting"]
             stat["EndY"] = row["Northing"]
 
@@ -1488,7 +1199,7 @@ class ReceiverSPS:
             stat["MaxElevation"],
         ) = _min_avg_max(stat["_elevation_values"])
 
-        planned = stat["PlannedPoints"]
+        planned = stat["PP_Count"]
 
         if planned:
             stat["PercentOfLineDone"] = round(
@@ -1500,7 +1211,13 @@ class ReceiverSPS:
 
     def _load_rlpreplot_lookup(self, conn):
         rows = conn.execute("""
-            SELECT ID, Line, Points
+            SELECT
+                ID,
+                Line,
+                Points,
+                TierLine,
+                LineBearing,
+                CalcLineBearing
             FROM RLPreplot
         """).fetchall()
 
@@ -1598,16 +1315,16 @@ class ReceiverSPS:
         return "latin1"
 
     def list_rlsolutions(
-            self,
-            *,
-            search: str = "",
-            line_from: int | None = None,
-            line_to: int | None = None,
-            seq_from: int | None = None,
-            seq_to: int | None = None,
-            solution_fk: int | None = None,
-            sort_by: str = "Line",
-            sort_dir: str = "asc",
+        self,
+        *,
+        search: str = "",
+        line_from: int | None = None,
+        line_to: int | None = None,
+        seq_from: int | None = None,
+        seq_to: int | None = None,
+        solution_fk: int | None = None,
+        sort_by: str = "Line",
+        sort_dir: str = "asc",
     ) -> list[dict]:
 
         conn = self._connect()
@@ -1624,9 +1341,8 @@ class ReceiverSPS:
                 "TierLine": "rl.TierLine",
                 "FRP": "rl.FRP",
                 "LRP": "rl.LRP",
-                "SRP": "rl.SRP",
-                "ERP": "rl.ERP",
                 "Vessel": "rl.Vessel",
+                "PP_Count": "rl.PP_Count",
                 "Count_All": "rl.Count_All",
                 "PercentOfLineDone": "rl.PercentOfLineDone",
                 "PercentOFSeqDone": "rl.PercentOFSeqDone",
@@ -1697,10 +1413,11 @@ class ReceiverSPS:
 
                     rl.FRP,
                     rl.LRP,
-                    rl.SRP,
-                    rl.ERP,
+                    rl.PP_Count,
 
                     rl.Vessel,
+                    rl.Vessel_FK,
+                    pf.vessel_name AS VesselName,
 
                     rl.StartYear,
                     rl.StartMonth,
@@ -1775,6 +1492,9 @@ class ReceiverSPS:
                 LEFT JOIN SPS_Files f
                     ON f.ID = rl.FileName_FK
 
+                LEFT JOIN project_fleet pf
+                    ON pf.id = rl.Vessel_FK
+
                 {where_sql}
 
                 ORDER BY
@@ -1786,6 +1506,117 @@ class ReceiverSPS:
 
             cur.execute(sql, params)
             return [dict(row) for row in cur.fetchall()]
+
+        finally:
+            conn.close()
+
+    def delete_selected_rlsolutions(self, *, ids, delete_type: str) -> dict:
+        ids = [int(x) for x in ids if str(x).isdigit()]
+
+        if not ids:
+            return {"rows": 0}
+
+        placeholders = ",".join("?" for _ in ids)
+
+        conn = self._connect()
+
+        try:
+            cur = conn.cursor()
+
+            cur.execute(
+                f"SELECT DISTINCT Line FROM RLSolution WHERE ID IN ({placeholders})",
+                ids,
+            )
+
+            lines = [
+                row["Line"]
+                for row in cur.fetchall()
+                if row["Line"] is not None
+            ]
+
+            line_placeholders = ",".join("?" for _ in lines) if lines else ""
+
+            deleted = {}
+
+            if delete_type == "all":
+                cur.execute(
+                    f"DELETE FROM RPSolution WHERE LineName_FK IN ({placeholders})",
+                    ids,
+                )
+                deleted["RPSolution"] = cur.rowcount
+
+                if lines:
+                    cur.execute(
+                        f"DELETE FROM REC_DB WHERE Line IN ({line_placeholders})",
+                        lines,
+                    )
+                    deleted["REC_DB"] = cur.rowcount
+
+                cur.execute(
+                    f"DELETE FROM RLSolution WHERE ID IN ({placeholders})",
+                    ids,
+                )
+                deleted["RLSolution"] = cur.rowcount
+
+            elif delete_type == "nav_log":
+                cur.execute(
+                    f"DELETE FROM RPSolution WHERE LineName_FK IN ({placeholders})",
+                    ids,
+                )
+                deleted["RPSolution"] = cur.rowcount
+
+            elif delete_type == "rec_db":
+                if lines:
+                    cur.execute(
+                        f"DELETE FROM REC_DB WHERE Line IN ({line_placeholders})",
+                        lines,
+                    )
+                    deleted["REC_DB"] = cur.rowcount
+                else:
+                    deleted["REC_DB"] = 0
+
+            elif delete_type == "pinger_log":
+                cur.execute(
+                    f"""
+                    UPDATE RLSolution
+                    SET is_fbloaded = 0
+                    WHERE ID IN ({placeholders})
+                    """,
+                    ids,
+                )
+                deleted["RLSolution_updated"] = cur.rowcount
+
+            elif delete_type == "sm_deployed":
+                cur.execute(
+                    f"""
+                    UPDATE RLSolution
+                    SET is_clicked = 0
+                    WHERE ID IN ({placeholders})
+                    """,
+                    ids,
+                )
+                deleted["RLSolution_updated"] = cur.rowcount
+
+            elif delete_type == "sm_recovered":
+                cur.execute(
+                    f"""
+                    UPDATE RLSolution
+                    SET is_recovered = 0
+                    WHERE ID IN ({placeholders})
+                    """,
+                    ids,
+                )
+                deleted["RLSolution_updated"] = cur.rowcount
+
+            else:
+                raise ValueError(f"Unknown delete_type: {delete_type}")
+
+            conn.commit()
+            return deleted
+
+        except Exception:
+            conn.rollback()
+            raise
 
         finally:
             conn.close()

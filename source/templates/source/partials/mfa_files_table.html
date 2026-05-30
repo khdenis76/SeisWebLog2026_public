@@ -1,0 +1,53 @@
+<div class="card border-0 shadow-sm mt-2">
+
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <div>
+            <div class="fw-semibold">
+                <i class="fas fa-table me-1"></i> MFA Files
+            </div>
+            <div class="small text-muted">
+                Gator MFA files sorted by Line / Seq / Attempt
+            </div>
+        </div>
+
+        <button type="button"
+                class="btn btn-sm btn-primary"
+                data-bs-toggle="modal"
+                data-bs-target="#mfaUploadModal">
+            <i class="fas fa-upload me-1"></i> Upload MFA
+        </button>
+    </div>
+
+    <div class="card-body p-2">
+
+        <div class="mfa-table-wrap">
+            <table class="table table-sm table-hover align-middle mb-0 mfa-files-table">
+
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Line</th>
+                        <th>Seq</th>
+                        <th>Attempt</th>
+                        <th>Sail Line</th>
+                        <th>Vessel</th>
+                        <th>Line Name</th>
+                        <th>File Name</th>
+                        <th class="text-end">Pages</th>
+                        <th class="text-end">Rows</th>
+                        <th class="text-end">Total Shots</th>
+                        <th class="text-end">First Shot</th>
+                        <th class="text-end">Last Shot</th>
+                        <th>Imported</th>
+                    </tr>
+                </thead>
+
+                <tbody id="mfa-files-tbody">
+                {{ mfa_files_table_body|safe }}
+                </tbody>
+
+            </table>
+        </div>
+
+    </div>
+</div>

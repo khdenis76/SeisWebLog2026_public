@@ -22,6 +22,10 @@ import rasterio.mask
 import plotly.graph_objects as go
 import plotly.io as pio
 import plotly.io as pio
+from pathlib import Path
+
+import numpy as np
+from osgeo import gdal, osr
 
 
 class SPSBathymetryGDALGraphics:
@@ -751,9 +755,54 @@ class SPSBathymetryGDALGraphics:
             shape_path: str | None = None,
             epsg: int | None = None,
             nodata: float = 0.0,
+            density_type: str = "count",
+            search_radius: float | None = None,
+            cells_per_radius: int = 1,
+            area_units: str = "cell",
     ) -> dict:
+        """
+        Create SP density raster from SPSolution.
+
+        density_type:
+            count    = raw point count per raster cell
+            gaussian = OpenCV Gaussian-smoothed density grid
+
+        search_radius:
+            Radius in map units/meters. If supplied, cell_size becomes:
+            search_radius / cells_per_radius.
+
+        area_units:
+            cell  = SP count per cell
+            sq_km = SP count per square kilometer
+            sq_m  = SP count per square meter
+        """
         output_path = Path(output_tif)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        density_type = (density_type or "count").lower().strip()
+        area_units = (area_units or "cell").lower().strip()
+
+        if density_type not in {"count", "gaussian"}:
+            raise ValueError("density_type must be 'count' or 'gaussian'.")
+
+        if area_units not in {"cell", "sq_km", "sq_m"}:
+            raise ValueError("area_units must be 'cell', 'sq_km', or 'sq_m'.")
+
+        cells_per_radius = int(cells_per_radius or 1)
+        if cells_per_radius < 1:
+            cells_per_radius = 1
+
+        if search_radius is not None:
+            search_radius = float(search_radius)
+            if search_radius <= 0:
+                search_radius = None
+
+        if search_radius:
+            cell_size = float(search_radius) / float(cells_per_radius)
+
+        cell_size = float(cell_size)
+        if cell_size <= 0:
+            raise ValueError("cell_size must be greater than zero.")
 
         if epsg is None and (shape_filename or shape_path):
             epsg = self.get_epsg_from_shape(
@@ -816,8 +865,43 @@ class SPSBathymetryGDALGraphics:
                 iy = int(row["iy"])
 
                 if 0 <= ix < width and 0 <= iy < height:
-                    # raster row 0 is top, so flip y
                     density[height - 1 - iy, ix] = float(row["n"])
+
+        raw_max_density = float(np.nanmax(density)) if density.size else 0.0
+
+        sigma_cells = 0.0
+        kernel_size = 0
+
+        if density_type == "gaussian":
+            import cv2
+
+            if search_radius:
+                sigma_cells = max(0.1, float(search_radius) / float(cell_size))
+            else:
+                sigma_cells = max(0.1, float(cells_per_radius))
+
+            kernel_size = int(max(3, round(sigma_cells * 6.0)))
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+
+            density = cv2.GaussianBlur(
+                density,
+                ksize=(kernel_size, kernel_size),
+                sigmaX=sigma_cells,
+                sigmaY=sigma_cells,
+                borderType=cv2.BORDER_CONSTANT,
+            ).astype(np.float32)
+
+        cell_area_m2 = cell_size * cell_size
+
+        if area_units == "sq_km":
+            density = density * (1_000_000.0 / cell_area_m2)
+            density_units = "SP count / km²"
+        elif area_units == "sq_m":
+            density = density / cell_area_m2
+            density_units = "SP count / m²"
+        else:
+            density_units = "SP count / cell"
 
         driver = gdal.GetDriverByName("GTiff")
         ds = driver.Create(
@@ -852,7 +936,12 @@ class SPSBathymetryGDALGraphics:
         band = ds.GetRasterBand(1)
         band.SetNoDataValue(nodata)
         band.WriteArray(density)
-        band.SetDescription(f"SP density FireCode={fire_code}")
+        band.SetDescription(
+            f"SP density FireCode={fire_code}; "
+            f"type={density_type}; "
+            f"units={density_units}; "
+            f"cell_size={cell_size:g}"
+        )
         band.FlushCache()
 
         ds.FlushCache()
@@ -877,11 +966,19 @@ class SPSBathymetryGDALGraphics:
             "clipped_density_tif": clipped_path,
             "fire_code": fire_code,
             "cell_size": cell_size,
+            "search_radius": search_radius,
+            "cells_per_radius": cells_per_radius,
+            "density_type": density_type,
+            "area_units": area_units,
+            "density_units": density_units,
             "epsg": epsg,
             "width": width,
             "height": height,
             "total_points": int(bounds["total_points"]),
-            "max_density": float(np.nanmax(density)),
+            "raw_max_density": raw_max_density,
+            "max_density": float(np.nanmax(density)) if density.size else 0.0,
+            "sigma_cells": sigma_cells,
+            "kernel_size": kernel_size,
         }
 
     def make_3d_density_surface_from_raster(
@@ -892,6 +989,7 @@ class SPSBathymetryGDALGraphics:
             colorscale: str = "Turbo",
             vertical_exaggeration: float = 1.0,
             max_grid_size: int = 500,
+            density_units: str = "SP count / cell",
             is_show: bool = False,
     ):
         grid_x, grid_y, density = self.read_dem_for_plotly(
@@ -900,7 +998,6 @@ class SPSBathymetryGDALGraphics:
             nodata=0.0,
         )
 
-        # 3D height = density count
         z_surface = density * vertical_exaggeration
 
         fig = go.Figure()
@@ -912,18 +1009,18 @@ class SPSBathymetryGDALGraphics:
                 z=z_surface,
                 surfacecolor=density,
                 colorscale=colorscale,
-                colorbar=dict(title="SP count / cell"),
+                colorbar=dict(title=density_units),
                 connectgaps=False,
                 opacity=0.96,
             )
         )
 
         fig.update_layout(
-            title=f"SP Density 3D Surface | VE x{vertical_exaggeration:g}",
+            title=f"SP Density 3D Surface | {density_units} | VE x{vertical_exaggeration:g}",
             scene=dict(
                 xaxis_title="Easting",
                 yaxis_title="Northing",
-                zaxis_title="SP Count",
+                zaxis_title=density_units,
                 aspectmode="data",
             ),
             margin=dict(l=0, r=0, t=45, b=0),

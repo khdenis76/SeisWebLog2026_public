@@ -7,4 +7,6 @@ urlpatterns = [
     path("", views.noar_home, name="noar_home"),
     path("api/dashboard/", views.noar_dashboard_api, name="noar_dashboard_api"),
     path("load-sps/", views.noar_load_sps, name="noar_load_sps"),
+    path("delete-selected/",views.delete_selected_rlsolutions,name="delete_selected_rlsolutions",
+),
 ]

@@ -1,0 +1,72 @@
+{% for f in mfa_files %}
+    <tr
+        data-mfa-file-id="{{ f.ID }}"
+        data-line="{{ f.Line|default:'' }}"
+        data-seq="{{ f.Seq|default:'' }}"
+        data-attempt="{{ f.Attempt|default:'' }}"
+        data-sailline-fk="{{ f.SailLine_FK|default:'' }}"
+        data-vessel-fk="{{ f.Vessel_FK|default:'' }}"
+        data-first-shot="{{ f.FirstOnlineShot|default:'' }}"
+        data-last-shot="{{ f.LastOnlineShot|default:'' }}">
+
+        <td>{{ f.ID }}</td>
+
+        <td class="fw-semibold">
+            {{ f.Line|default:"-" }}
+        </td>
+
+        <td>
+            {{ f.Seq|default:"-" }}
+        </td>
+
+        <td>
+            {{ f.Attempt|default:"-" }}
+        </td>
+
+        <td>
+            {{ f.SailLine|default:"-" }}
+        </td>
+
+        <td>
+            {{ f.vessel_name|default:"-" }}
+        </td>
+
+        <td>
+            {{ f.LineName|default:"-" }}
+        </td>
+
+        <td>
+            {{ f.FileName }}
+        </td>
+
+        <td class="text-end">
+            {{ f.Pages|default:0 }}
+        </td>
+
+        <td class="text-end">
+            {{ f.Rows|default:0 }}
+        </td>
+
+        <td class="text-end">
+            {{ f.TotalShots|default:0 }}
+        </td>
+
+        <td class="text-end">
+            {{ f.FirstOnlineShot|default:"-" }}
+        </td>
+
+        <td class="text-end">
+            {{ f.LastOnlineShot|default:"-" }}
+        </td>
+
+        <td>
+            {{ f.ImportedAt|default:"-" }}
+        </td>
+    </tr>
+{% empty %}
+    <tr>
+        <td colspan="14" class="text-center text-muted py-4">
+            No MFA files imported yet.
+        </td>
+    </tr>
+{% endfor %}

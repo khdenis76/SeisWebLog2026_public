@@ -124,6 +124,31 @@
               REC_DB vs DSR Primary
           </button>
       </li>
+      <li class="nav-item" role="presentation">
+           <button class="nav-link pill-hist lazy-plotly-polar-tab"
+                   id="dsr-polar-tab"
+                   data-bs-toggle="tab"
+                   data-bs-target="#dsr-polar-pane"
+                   data-url="{% url 'load_dsr_polar_histograms' %}"
+                   data-target="dsr-polar-container"
+                   type="button"
+                   role="tab">
+               DSR Polar Histogram
+           </button>
+       </li>
+
+       <li class="nav-item" role="presentation">
+           <button class="nav-link pill-hist lazy-plotly-polar-tab"
+                   id="recdb-polar-tab"
+                   data-bs-toggle="tab"
+                   data-bs-target="#recdb-polar-pane"
+                   data-url="{% url 'load_recdb_polar_histograms' %}"
+                   data-target="recdb-polar-container"
+                   type="button"
+                   role="tab">
+               REC_DB Polar Histogram
+           </button>
+       </li>
 </ul>
 
 <div class="tab-content mt-3">
@@ -140,19 +165,19 @@
             </div>
        </div>
        <div class="tab-pane fade" id="batterylife-map-tab" role="tabpanel">
-      <div class="row">
-          <button type="button"
-                  id="bl-load-button"
-                  class="btn btn-warning btn-sm"
-                  data-url="{% url 'load_battery_life_map' %}">
-              <i class="fas fa-image me-2"></i>
-              Load map
-          </button>
-      </div>
-      <div class="w-100 bokeh-light-scope" style="height: 80vh" id="bl-map-container">
+            <div class="row">
+                <button type="button"
+                        id="bl-load-button"
+                        class="btn btn-warning btn-sm"
+                        data-url="{% url 'load_battery_life_map' %}">
+                    <i class="fas fa-image me-2"></i>
+                    Load map
+                </button>
+            </div>
+            <div class="w-100 bokeh-light-scope" style="height: 80vh" id="bl-map-container">
 
       </div>
-  </div>
+       </div>
        <div class="tab-pane fade" id="batteryliferest-map-tab" role="tabpanel">
              <div class="row align-items-center g-2">
 
@@ -216,13 +241,18 @@
            </div>
 
        </div>
-        <div class="tab-pane fade" id="prod-pie-tab" role="tabpanel">
-            <div class="row">
-                <div class="col-6 m-0 p-0" id="dep-pie-container">
-                    {{ deployment_pie |safe }}
+        <div class="tab-pane fade h-100" id="prod-pie-tab" role="tabpanel">
+            <div class="row g-0" style="height:70vh">
+                <div class="col-6 h-100">
+                    <div id="dep-pie-container" class="h-100">
+                        {{ deployment_pie|safe }}
+                    </div>
                 </div>
-                <div class="col-6 m-0 p-0" id="rec-pie-container">
-                    {{ recovery_pie |safe }}
+
+                <div class="col-6 h-100">
+                    <div id="rec-pie-container" class="h-100">
+                        {{ recovery_pie|safe }}
+                    </div>
                 </div>
             </div>
         </div>
@@ -328,4 +358,16 @@
           </div>
 
       </div>
+      <div class="tab-pane fade" id="dsr-polar-pane"role="tabpanel">
+         <div id="dsr-polar-container" class="w-100" style="min-height: 900px;">
+                 <div class="text-muted small">Click DSR Polar Histogram to load plots.</div>
+         </div>
+      </div>
+      <div class="tab-pane fade"
+         id="recdb-polar-pane"
+         role="tabpanel">
+        <div id="recdb-polar-container" class="w-100" style="min-height: 650px;">
+            <div class="text-muted small">Click REC_DB Polar Histogram to load plots.</div>
+        </div>
+    </div>
 </div>

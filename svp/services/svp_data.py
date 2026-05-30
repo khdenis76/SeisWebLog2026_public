@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -131,6 +132,21 @@ class SVPData:
                 continue
         return s
 
+
+    @staticmethod
+    def _is_blank(value: Any) -> bool:
+        return value is None or str(value).strip() == ""
+
+    @staticmethod
+    def _read_uploaded_text(file_obj) -> str:
+        raw = file_obj.read()
+        return raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw)
+
+    def _ensure_column(self, conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
+        cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
+        if column_name not in cols:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+
     # ------------------------------------------------------------------
     # Schema
     # ------------------------------------------------------------------
@@ -164,6 +180,11 @@ class SVPData:
                     source_file_name TEXT,
                     source_file_path TEXT,
                     raw_header TEXT,
+                    source_000_file TEXT,
+                    source_svp_file TEXT,
+                    source_000_raw_header TEXT,
+                    source_svp_raw_header TEXT,
+                    import_mode TEXT,
                     notes TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -241,6 +262,13 @@ class SVPData:
                 ON svp_profiles (timestamp)
                 """
             )
+
+
+            self._ensure_column(conn, "svp_profiles", "source_000_file", "TEXT")
+            self._ensure_column(conn, "svp_profiles", "source_svp_file", "TEXT")
+            self._ensure_column(conn, "svp_profiles", "source_000_raw_header", "TEXT")
+            self._ensure_column(conn, "svp_profiles", "source_svp_raw_header", "TEXT")
+            self._ensure_column(conn, "svp_profiles", "import_mode", "TEXT")
 
     # ------------------------------------------------------------------
     # Read
@@ -358,11 +386,16 @@ class SVPData:
                     source_file_name,
                     source_file_path,
                     raw_header,
+                    source_000_file,
+                    source_svp_file,
+                    source_000_raw_header,
+                    source_svp_raw_header,
+                    import_mode,
                     notes,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self._clean_text(profile.get("name")),
@@ -389,6 +422,11 @@ class SVPData:
                     self._clean_text(profile.get("source_file_name")),
                     self._clean_text(profile.get("source_file_path")),
                     profile.get("raw_header"),
+                    self._clean_text(profile.get("source_000_file")),
+                    self._clean_text(profile.get("source_svp_file")),
+                    profile.get("source_000_raw_header"),
+                    profile.get("source_svp_raw_header"),
+                    self._clean_text(profile.get("import_mode")),
                     self._clean_text(profile.get("notes")),
                     now,
                     now,
@@ -436,6 +474,11 @@ class SVPData:
                     source_file_name = ?,
                     source_file_path = ?,
                     raw_header = ?,
+                    source_000_file = ?,
+                    source_svp_file = ?,
+                    source_000_raw_header = ?,
+                    source_svp_raw_header = ?,
+                    import_mode = ?,
                     notes = ?,
                     updated_at = ?
                 WHERE id = ?
@@ -465,6 +508,11 @@ class SVPData:
                     self._clean_text(profile.get("source_file_name")),
                     self._clean_text(profile.get("source_file_path")),
                     profile.get("raw_header"),
+                    self._clean_text(profile.get("source_000_file")),
+                    self._clean_text(profile.get("source_svp_file")),
+                    profile.get("source_000_raw_header"),
+                    profile.get("source_svp_raw_header"),
+                    self._clean_text(profile.get("import_mode")),
                     self._clean_text(profile.get("notes")),
                     now,
                     svp_id,
@@ -543,6 +591,347 @@ class SVPData:
     # ------------------------------------------------------------------
     # Import helpers
     # ------------------------------------------------------------------
+
+    def _parse_text_with_saved_config(self, text: str, *, config_id: int, detected_name: str) -> dict[str, Any]:
+        cfg = self.get_format_config(int(config_id))
+        if not cfg:
+            raise ValueError(f"Config id={config_id} not found.")
+
+        from .svp_format_setup import SVPFormatSetup
+        from .svp_parser import SVPParser
+
+        setup = SVPFormatSetup(
+            format_name=cfg.get("name") or cfg.get("config_name") or "saved_config",
+            file_ext=cfg.get("file_ext"),
+            delimiter=cfg.get("delimiter"),
+            header_line_count=cfg.get("header_line_count"),
+            data_header_line_index=cfg.get("data_header_line_index"),
+            data_start_line_index=cfg.get("data_start_line_index"),
+            meta_coordinates_key=cfg.get("meta_coordinates_key"),
+            meta_lat_key=cfg.get("meta_lat_key"),
+            meta_lon_key=cfg.get("meta_lon_key"),
+            meta_rov_key=cfg.get("meta_rov_key"),
+            meta_timestamp_key=cfg.get("meta_timestamp_key"),
+            meta_name_key=cfg.get("meta_name_key"),
+            meta_location_key=cfg.get("meta_location_key"),
+            meta_serial_key=cfg.get("meta_serial_key"),
+            meta_make_key=cfg.get("meta_make_key"),
+            meta_model_key=cfg.get("meta_model_key"),
+            col_timestamp=cfg.get("col_timestamp"),
+            col_depth=cfg.get("col_depth"),
+            col_velocity=cfg.get("col_velocity"),
+            col_temperature=cfg.get("col_temperature"),
+            col_salinity=cfg.get("col_salinity"),
+            col_density=cfg.get("col_density"),
+            sort_by_depth=bool(cfg.get("sort_by_depth")),
+            clamp_negative_depth_to_zero=bool(cfg.get("clamp_negative_depth_to_zero")),
+            pressure_is_depth=bool(cfg.get("pressure_is_depth")),
+        )
+
+        return SVPParser.parse(text, setup)
+
+
+    def import_uploaded_profile(
+        self,
+        file_000_obj,
+        file_svp_obj=None,
+        *,
+        name: str | None = None,
+        notes: str | None = None,
+        rov: str | None = None,
+        coord_e=None,
+        coord_n=None,
+        instrument_model: str | None = None,
+        config_id: int | None = None,
+    ) -> int:
+        """
+        Import one SVP profile where .000 is the main measured profile.
+
+        .svp file is optional and is used only for:
+          - ROV
+          - Easting / Northing
+          - Instrument model
+
+        Manual modal values are fallback when .svp is missing/incomplete,
+        and they override .svp when entered.
+        """
+        if not file_000_obj:
+            raise ValueError("Missing .000 file.")
+
+        name_000 = getattr(file_000_obj, "name", "profile.000")
+        text_000 = self._read_uploaded_text(file_000_obj)
+
+        # Parse .000 with selected saved config when provided.
+        # This keeps your existing configurable parser workflow for .000 files.
+        if config_id:
+            parsed_000 = self._parse_text_with_saved_config(
+                text_000,
+                config_id=int(config_id),
+                detected_name=name_000,
+            )
+        else:
+            parsed_000 = self.parse_000_text(text_000)
+
+        profile_000 = parsed_000.get("profile") or {}
+        points = parsed_000.get("points") or []
+
+        if not points:
+            raise ValueError("No SVP profile points found in .000 file.")
+
+        merged = profile_000.copy()
+        profile_svp: dict[str, Any] = {}
+        source_svp_file = None
+        source_svp_raw_header = None
+
+        if file_svp_obj:
+            source_svp_file = getattr(file_svp_obj, "name", "profile.svp")
+            text_svp = self._read_uploaded_text(file_svp_obj)
+            parsed_svp = self.parse_svp_text(text_svp)
+            profile_svp = parsed_svp.get("profile") or {}
+            source_svp_raw_header = profile_svp.get("raw_header")
+
+            # Important: from .svp take only requested metadata.
+            for key in ["rov", "coord_e", "coord_n", "instrument_model"]:
+                if not self._is_blank(profile_svp.get(key)):
+                    merged[key] = profile_svp.get(key)
+
+        # Manual values from modal override .svp values when entered.
+        if not self._is_blank(rov):
+            merged["rov"] = str(rov).strip()
+
+        if not self._is_blank(coord_e):
+            merged["coord_e"] = self._to_float(coord_e)
+
+        if not self._is_blank(coord_n):
+            merged["coord_n"] = self._to_float(coord_n)
+
+        if not self._is_blank(instrument_model):
+            merged["instrument_model"] = str(instrument_model).strip()
+
+        merged["file_type"] = "000+svp" if file_svp_obj else "000"
+        merged["import_mode"] = "merged_pair" if file_svp_obj else "manual_metadata"
+        merged["source_file_name"] = f"{name_000} + {source_svp_file}" if source_svp_file else name_000
+        merged["source_000_file"] = name_000
+        merged["source_svp_file"] = source_svp_file
+        merged["source_000_raw_header"] = profile_000.get("raw_header")
+        merged["source_svp_raw_header"] = source_svp_raw_header
+        merged["raw_header"] = (
+            "===== .000 HEADER =====\n"
+            f"{profile_000.get('raw_header') or ''}\n\n"
+            "===== .svp HEADER =====\n"
+            f"{source_svp_raw_header or ''}"
+        )
+
+        # Default profile name must be the .000 file name.
+        # The user can override it with the optional Name field in the modal.
+        if name:
+            merged["name"] = name
+        else:
+            merged["name"] = str(name_000).rsplit(".", 1)[0]
+
+        if notes:
+            merged["notes"] = notes
+
+        missing = []
+        if self._is_blank(merged.get("rov")):
+            missing.append("ROV")
+        if self._is_blank(merged.get("coord_e")):
+            missing.append("Easting")
+        if self._is_blank(merged.get("coord_n")):
+            missing.append("Northing")
+        if self._is_blank(merged.get("instrument_model")):
+            missing.append("Instrument Model")
+
+        if missing:
+            raise ValueError(
+                "Missing metadata: "
+                + ", ".join(missing)
+                + ". Upload .svp file or enter these values manually."
+            )
+
+        return self.create_profile(profile=merged, points=points)
+
+
+
+    def import_uploaded_batch(
+        self,
+        files,
+        *,
+        name: str | None = None,
+        notes: str | None = None,
+        rov: str | None = None,
+        coord_e=None,
+        coord_n=None,
+        instrument_model: str | None = None,
+        config_id: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Import many SVP locations in one upload.
+
+        The user selects many .000 and .svp files together.
+        Every .000 file becomes one SVP profile.
+        A matching .svp file is optional and is used only for:
+          - ROV
+          - Easting / Northing
+          - Instrument model
+
+        Matching order:
+          1. exact stem match
+          2. timestamp / serial token match
+          3. best common token score
+
+        Manual modal values are used as fallback and override .svp values.
+        """
+        upload_files = list(files or [])
+        if not upload_files:
+            raise ValueError("No SVP files selected.")
+
+        files_000 = []
+        files_svp = []
+        unsupported = []
+
+        for f in upload_files:
+            fname = getattr(f, "name", "") or ""
+            ext = Path(fname).suffix.lower()
+            if ext == ".000":
+                files_000.append(f)
+            elif ext == ".svp":
+                files_svp.append(f)
+            else:
+                unsupported.append(fname)
+
+        if unsupported:
+            raise ValueError("Unsupported file type(s): " + ", ".join(unsupported))
+
+        if not files_000:
+            raise ValueError("No .000 files selected. At least one .000 file is required.")
+
+        svp_by_stem = {
+            Path(getattr(f, "name", "")).stem.lower(): f
+            for f in files_svp
+        }
+        unused_svp = set(id(f) for f in files_svp)
+
+        imported = []
+        failed = []
+        missing_svp = []
+
+        single_profile_name = name if len(files_000) == 1 else None
+
+        for file_000 in files_000:
+            file_name_000 = getattr(file_000, "name", "profile.000")
+            matched_svp = self._match_svp_for_000(file_000, files_svp, svp_by_stem, unused_svp)
+
+            try:
+                profile_id = self.import_uploaded_profile(
+                    file_000_obj=file_000,
+                    file_svp_obj=matched_svp,
+                    name=single_profile_name,
+                    notes=notes,
+                    rov=rov,
+                    coord_e=coord_e,
+                    coord_n=coord_n,
+                    instrument_model=instrument_model,
+                    config_id=config_id,
+                )
+
+                imported.append({
+                    "profile_id": profile_id,
+                    "file_000": file_name_000,
+                    "file_svp": getattr(matched_svp, "name", None) if matched_svp else None,
+                })
+
+                if matched_svp:
+                    unused_svp.discard(id(matched_svp))
+                else:
+                    missing_svp.append(file_name_000)
+
+            except Exception as exc:
+                failed.append({
+                    "file_000": file_name_000,
+                    "file_svp": getattr(matched_svp, "name", None) if matched_svp else None,
+                    "error": str(exc),
+                })
+
+        unmatched_svp = [
+            getattr(f, "name", "profile.svp")
+            for f in files_svp
+            if id(f) in unused_svp
+        ]
+
+        return {
+            "success": not failed,
+            "imported_count": len(imported),
+            "failed_count": len(failed),
+            "missing_svp_count": len(missing_svp),
+            "unmatched_svp_count": len(unmatched_svp),
+            "imported": imported,
+            "failed": failed,
+            "missing_svp": missing_svp,
+            "unmatched_svp": unmatched_svp,
+        }
+
+    def _match_svp_for_000(self, file_000, files_svp, svp_by_stem: dict[str, Any], unused_svp: set[int]):
+        name_000 = getattr(file_000, "name", "") or ""
+        stem_000 = Path(name_000).stem.lower()
+
+        exact = svp_by_stem.get(stem_000)
+        if exact and id(exact) in unused_svp:
+            return exact
+
+        key_000 = self._svp_match_key(name_000)
+        best = None
+        best_score = 0
+
+        for svp_file in files_svp:
+            if id(svp_file) not in unused_svp:
+                continue
+
+            name_svp = getattr(svp_file, "name", "") or ""
+            key_svp = self._svp_match_key(name_svp)
+
+            score = 0
+            if key_000.get("timestamp") and key_000.get("timestamp") == key_svp.get("timestamp"):
+                score += 50
+            if key_000.get("serial") and key_000.get("serial") == key_svp.get("serial"):
+                score += 40
+
+            common_tokens = key_000.get("tokens", set()) & key_svp.get("tokens", set())
+            score += len(common_tokens)
+
+            if score > best_score:
+                best_score = score
+                best = svp_file
+
+        # Keep this conservative so unrelated .svp files are not paired by accident.
+        return best if best_score >= 10 else None
+
+    def _svp_match_key(self, filename: str) -> dict[str, Any]:
+        stem = Path(filename or "").stem.lower()
+        tokens = set(t for t in re.split(r"[^a-z0-9]+", stem) if t)
+
+        timestamp = None
+        serial = None
+
+        # Example: TGS_313311_SVP_SVX2_202602010429_54446.000
+        m = re.search(r"(20\d{10,12})", stem)
+        if m:
+            timestamp = m.group(1)
+
+        numeric_tokens = re.findall(r"\d+", stem)
+        if numeric_tokens:
+            # Use the last 4-8 digit token as likely instrument/cast serial.
+            candidates = [t for t in numeric_tokens if 4 <= len(t) <= 8]
+            if candidates:
+                serial = candidates[-1]
+
+        return {
+            "stem": stem,
+            "tokens": tokens,
+            "timestamp": timestamp,
+            "serial": serial,
+        }
+
     def import_file(
         self,
         file_path: str | Path,

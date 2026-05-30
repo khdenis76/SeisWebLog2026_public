@@ -20,6 +20,8 @@ urlpatterns = [
     path("source/shot-summary/filter/",views.source_shot_line_summary_tbody,name="source_shot_line_summary_tbody",),
     path("api/bathy-map-options/", views.source_bathy_map_options, name="source_bathy_map_options"),
     path("api/generate-bathy-map/", views.source_generate_bathy_map, name="source_generate_bathy_map"),
+    path("mfa/upload/",views.mfa_upload,name="source_mfa_upload",),
+    path("bathymetry/sp-density/generate/",views.source_generate_sp_density_grid,name="source_generate_sp_density_grid",),
 
 
 ]

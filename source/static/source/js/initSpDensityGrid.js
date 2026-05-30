@@ -40,17 +40,7 @@ function updateDensityControls() {
 
 async function loadSourceBathyOptions(pane) {
   const res = await fetch(pane.dataset.optionsUrl);
-  const rawText = await res.text();
-
-let data;
-try {
-  data = JSON.parse(rawText);
-} catch (err) {
-  console.error("Server returned non-JSON response:", rawText);
-  throw new Error(
-    "Server returned HTML instead of JSON. Check Django terminal traceback."
-  );
-}
+  const data = await res.json();
 
   if (!data.ok) {
     throw new Error(data.error || "Could not load map options.");

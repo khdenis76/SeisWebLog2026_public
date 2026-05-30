@@ -1,4 +1,5 @@
 import json
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from django.views.decorators.http import require_POST
 import re
 import plotly.io as pio
 from utils.decorators import log_action
+from .mfa.mfa_db import MFADB
 from .source_data import SourceData   # adjust path
 from .source_map_graph import SourceMapGraphics
 from source.sps_bathymetry_gdal_graphics import SPSBathymetryGDALGraphics
@@ -94,45 +96,78 @@ def _generate_source_bathymetry_map(
         },
     }
 def _generate_source_density_map(
-    *,
-    g,
-    output_dir: Path,
-    fire_code: str,
-    cell_size: float,
-    shape_filename: str | None,
-    colorscale: str,
-    vertical_exaggeration: float,
-    export_tif: bool,
-    export_html: bool,
-) -> dict:
-    density_tif = output_dir / f"sps_density_{fire_code}_{cell_size:g}m.tif"
-    density_html = output_dir / f"sps_density_{fire_code}_{cell_size:g}m_3d.html"
+        *,
+        g,
+        output_dir,
+        fire_code,
+        search_radius=1127.0,
+        cells_per_radius=1,
+        density_type="gaussian",
+        area_units="sq_km",
+        shape_filename=None,
+        colorscale="Turbo",
+        vertical_exaggeration=3.0,
+        export_tif=True,
+        export_html=True,
+):
+    import plotly.io as pio
+
+    search_radius = float(search_radius or 1127.0)
+    cells_per_radius = int(cells_per_radius or 1)
+
+    if cells_per_radius < 1:
+        cells_per_radius = 1
+
+    density_cell_size = search_radius / cells_per_radius
+
+    safe_fire_code = str(fire_code).replace("/", "_").replace("\\", "_")
+    safe_density_type = str(density_type).replace("/", "_").replace("\\", "_")
+    safe_area_units = str(area_units).replace("/", "_").replace("\\", "_")
+
+    file_prefix = (
+        f"sps_density_{safe_fire_code}_"
+        f"{safe_density_type}_"
+        f"{safe_area_units}_"
+        f"r{int(search_radius)}_"
+        f"cpr{int(cells_per_radius)}"
+    )
+
+    tif_path = output_dir / f"{file_prefix}.tif"
+    html_path = output_dir / f"{file_prefix}_3d.html"
 
     stats = g.make_sp_density_grid(
-        output_tif=str(density_tif),
+        output_tif=str(tif_path),
         fire_code=fire_code,
-        cell_size=cell_size,
+        cell_size=density_cell_size,
+        search_radius=search_radius,
+        cells_per_radius=cells_per_radius,
+        density_type=density_type,
+        area_units=area_units,
         shape_filename=shape_filename,
     )
 
-    final_tif = stats["clipped_density_tif"] or stats["density_tif"]
-
-    html_path = str(density_html) if export_html else None
+    raster_for_plot = stats.get("clipped_density_tif") or stats["density_tif"]
 
     fig = g.make_3d_density_surface_from_raster(
-        density_tif=final_tif,
-        save_html=html_path,
+        density_tif=raster_for_plot,
+        save_html=str(html_path) if export_html else None,
         colorscale=colorscale,
         vertical_exaggeration=vertical_exaggeration,
-        max_grid_size=500,
+        density_units=stats.get("density_units", "SP count / cell"),
         is_show=False,
     )
 
     return {
-        "map_title": "SP Density 3D Surface",
+        "map_title": (
+            f"SP Density 3D Surface | "
+            f"{stats.get('density_units', 'SP count / cell')} | "
+            f"{density_type} | "
+            f"R={search_radius:g}m | "
+            f"CPR={cells_per_radius}"
+        ),
         "plotly_json": pio.to_json(fig),
-        "html_path": html_path,
-        "tif_path": final_tif if export_tif else None,
+        "tif_path": str(tif_path) if export_tif else None,
+        "html_path": str(html_path) if export_html else None,
         "png_path": None,
         "stats": stats,
     }
@@ -150,6 +185,11 @@ def source_home(request):
     pdb = ProjectDB(project.db_path)
     sd = SourceData(project.db_path)
     schema_result = sd.ensure_source_runtime_schema()
+    mdb = MFADB(project.db_path)
+    # ensure MFA schema exists
+    mdb.ensure_tables()
+    # render MFA files table
+    mfa_files_table_body = mdb.render_mfa_files_table_body("source/partials/mfa_files_table_body.html",request)
     print(schema_result)
     #sd.ensure_stfiles_schema()
     #sd.ensure_shot_table_schema()
@@ -220,6 +260,7 @@ def source_home(request):
             "shot_filter_options": shot_filter_options,
             "shot_line_summary_count": shot_line_summary_count,
             "st_file_name": st_file_name,
+            "mfa_files_table_body":mfa_files_table_body,
         },
     )
 @login_required
@@ -1017,7 +1058,98 @@ def source_bathy_map_options(request):
             for row in fire_codes
         ],
     })
+@login_required
+@require_POST
+@log_action("generate source SP density grid", object_type="SOURCE")
+def source_generate_sp_density_grid(request):
+    """
+    Generate SP density GeoTIFF and Plotly 3D HTML from SPSolution.
 
+    Supports:
+    - raw count density
+    - Gaussian smoothed density
+    - search radius / cells per radius
+    - area units conversion
+    - optional clipping by project shape
+    """
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project selected."}, status=400)
+
+    if not project.can_view(request.user):
+        return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
+
+    try:
+        fire_code = request.POST.get("fire_code", "A").strip() or "A"
+        density_type = request.POST.get("density_type", "count").strip() or "count"
+        area_units = request.POST.get("area_units", "cell").strip() or "cell"
+
+        search_radius = request.POST.get("search_radius", "").strip()
+        search_radius = float(search_radius) if search_radius else None
+
+        cells_per_radius = int(request.POST.get("cells_per_radius", 1) or 1)
+
+        vertical_exaggeration = float(request.POST.get("vertical_exaggeration", 1.0) or 1.0)
+        max_grid_size = int(request.POST.get("max_grid_size", 500) or 500)
+
+        shape_filename = request.POST.get("shape_filename", "").strip() or None
+
+        pdb = ProjectDB(project.db_path)
+        main = pdb.get_main() or {}
+
+        epsg = main.get("epsg")
+        try:
+            epsg = int(epsg) if epsg else None
+        except Exception:
+            epsg = None
+
+        reports_dir = Path(getattr(project, "reports_dir", None) or Path(project.db_path).parent / "reports")
+        output_dir = reports_dir / "source" / "sp_density"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_type = density_type.replace(" ", "_")
+        safe_units = area_units.replace(" ", "_")
+
+        density_tif = output_dir / f"sp_density_{fire_code}_{safe_type}_{safe_units}.tif"
+        density_html = output_dir / f"sp_density_{fire_code}_{safe_type}_{safe_units}_3d.html"
+
+        graph = SPSBathymetryGDALGraphics(project.db_path)
+
+        stats = graph.make_sp_density_grid(
+            output_tif=str(density_tif),
+            fire_code=fire_code,
+            search_radius=search_radius,
+            cells_per_radius=cells_per_radius,
+            density_type=density_type,
+            area_units=area_units,
+            shape_filename=shape_filename,
+            epsg=epsg,
+        )
+
+        raster_for_3d = stats.get("clipped_density_tif") or stats["density_tif"]
+
+        graph.make_3d_density_surface_from_raster(
+            density_tif=raster_for_3d,
+            save_html=str(density_html),
+            vertical_exaggeration=vertical_exaggeration,
+            max_grid_size=max_grid_size,
+            density_units=stats.get("density_units", "SP count / cell"),
+            is_show=False,
+        )
+
+        stats["html"] = str(density_html)
+        stats["html_url"] = f"/media/source/sp_density/{density_html.name}"
+
+        return JsonResponse({
+            "ok": True,
+            "stats": stats,
+            "html_url": stats["html_url"],
+        })
+
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
 @login_required
 @log_action("generate bathy/density map", object_type="SOU")
@@ -1034,19 +1166,35 @@ def source_generate_bathy_map(request):
     if not project.can_view(request.user):
         raise PermissionDenied("You are not a member of this project.")
 
-    data = json.loads(request.body.decode("utf-8"))
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload."}, status=400)
 
     map_type = data.get("map_type", "bathymetry_3d")
     fire_code = data.get("fire_code", "A")
     shape_filename = data.get("shape_filename") or None
-    cell_size = float(data.get("cell_size", 100))
+
+    cell_size = float(data.get("cell_size", 100) or 100)
     algorithm = data.get("algorithm", "average")
     colorscale = data.get("colorscale", "Earth")
-    vertical_exaggeration = float(data.get("vertical_exaggeration", 3))
+    vertical_exaggeration = float(data.get("vertical_exaggeration", 3) or 3)
 
     export_tif = bool(data.get("export_tif", True))
     export_html = bool(data.get("export_html", True))
     export_png = bool(data.get("export_png", False))
+
+    # Density-specific options from JS panel
+    search_radius = float(data.get("search_radius", 1127) or 1127)
+    cells_per_radius = int(data.get("cells_per_radius", 1) or 1)
+    density_type = data.get("density_type", "gaussian") or "gaussian"
+    area_units = data.get("area_units", "sq_km") or "sq_km"
+
+    if cells_per_radius < 1:
+        cells_per_radius = 1
+
+    if search_radius <= 0:
+        search_radius = 1127.0
 
     output_dir = Path(project.reports_dir) / "source_maps"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1068,6 +1216,7 @@ def source_generate_bathy_map(request):
             export_html=export_html,
             export_png=export_png,
         )
+
         return JsonResponse({"ok": True, **result})
 
     if map_type == "sp_density_3d":
@@ -1075,14 +1224,19 @@ def source_generate_bathy_map(request):
             g=g,
             output_dir=output_dir,
             fire_code=fire_code,
-            cell_size=cell_size,
+            search_radius=search_radius,
+            cells_per_radius=cells_per_radius,
+            density_type=density_type,
+            area_units=area_units,
             shape_filename=shape_filename,
             colorscale=colorscale,
             vertical_exaggeration=vertical_exaggeration,
             export_tif=export_tif,
             export_html=export_html,
         )
+
         return JsonResponse({"ok": True, **result})
+
     if map_type == "gun_depth_3d":
         result = _generate_source_bathymetry_map(
             g=g,
@@ -1100,9 +1254,66 @@ def source_generate_bathy_map(request):
             map_title="Gun Depth 3D Surface",
             file_prefix="sps_gun_depth",
         )
+
         return JsonResponse({"ok": True, **result})
 
     return JsonResponse(
         {"ok": False, "error": f"Unknown map type: {map_type}"},
         status=400,
     )
+@login_required
+@require_POST
+@log_action("upload MFA files", object_type="SOU_MFA")
+def mfa_upload(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project or not project.can_edit(request.user):
+        return JsonResponse({"ok": False, "error": "No active project or permission denied."}, status=403)
+
+    uploads = request.FILES.getlist("mfa_files")
+
+    if not uploads:
+        return JsonResponse({"ok": False, "error": "No MFA files selected."}, status=400)
+
+    db = MFADB(project.db_path)
+
+    imported = []
+    failed = []
+
+    for upload in uploads:
+        suffix = Path(upload.name).suffix or ".mfa"
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            for chunk in upload.chunks():
+                tmp.write(chunk)
+            tmp_path = Path(tmp.name)
+
+        try:
+            file_id = db.import_file(
+                tmp_path,
+                replace_existing=True,
+                original_file_name=upload.name,
+            )
+
+            imported.append({
+                "file_id": file_id,
+                "file_name": upload.name,
+            })
+
+        except Exception as exc:
+            failed.append({
+                "file_name": upload.name,
+                "error": str(exc),
+            })
+
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    return JsonResponse({
+        "ok": len(failed) == 0,
+        "imported": imported,
+        "failed": failed,
+        "imported_count": len(imported),
+        "failed_count": len(failed),
+    })

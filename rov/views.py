@@ -14,7 +14,7 @@ from bokeh.layouts import column, gridplot
 from bokeh.palettes import Turbo256
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse, Http404
 from django.shortcuts import render, redirect
 from django.template.loader import render_to_string
 from django.views.decorators.csrf import csrf_protect
@@ -29,6 +29,7 @@ from rov.bbox_graphics import BlackBoxGraphics
 from django.core.cache import cache
 from utils.decorators import log_action
 from baseproject.utils.project_template_db import ProjectTemplateDB
+from rov.reports.node_position_comparison import NodePositionComparisonReport
 from utils.audit import audit_event
 # Create your views here.
 @login_required
@@ -1360,14 +1361,16 @@ def select_prod_day(request):
     })
 @require_POST
 @login_required
-def export_dsr_to_sps (request):
+def export_dsr_to_sps(request):
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
     project = user_settings.active_project
 
     if not project:
         return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
     dsrdb = DSRDB(project.db_path)
     pdb = ProjectDB(project.db_path)
+
     try:
         selected_lines = json.loads(request.POST.get("selected_lines", "[]"))
 
@@ -1378,24 +1381,31 @@ def export_dsr_to_sps (request):
         use_seq = request.POST.get("use_seq") in ("1", "true", "on")
         use_line_seq = request.POST.get("use_line_seq") in ("1", "true", "on")
         use_line_fn = request.POST.get("use_line_fn") in ("1", "true", "on")
+
         seq = (request.POST.get("seq") or "01").strip()
         pcode = (request.POST.get("pcode") or "R1").strip()
-        rov_export = request.POST.get("rov_export")  # "0" / "1" / "2"
-        sps_ver = request.POST.get("sps_ver")  # "1" / "2"
-        how_exp = request.POST.get("how_exp")  # "1" / "2"
+        rov_export = request.POST.get("rov_export") or "0"
+        sps_ver = request.POST.get("sps_ver") or "1"
+        how_exp = request.POST.get("how_exp") or "2"
+        xy_unit = (request.POST.get("xy_unit") or "m").strip().lower()
+        z_unit = (request.POST.get("z_unit") or "m").strip().lower()
 
-        # TODO: run your export logic here (write files on disk / DB record / etc.)
         export_dir = project.export_sps1 if sps_ver == "1" else project.export_sps21
-        header_file_path = f"{project.hdr_dir}/header1.txt" if sps_ver == "1" else f"{project.hdr_dir}/header2.txt"
+        header_file_path = (
+            f"{project.hdr_dir}/header1.txt"
+            if sps_ver == "1"
+            else f"{project.hdr_dir}/header2.txt"
+        )
+
         if rov_export == "0":
-           export_dir =f"{export_dir}/dep/"
-        if rov_export == "1":
+            export_dir = f"{export_dir}/dep/"
+        elif rov_export == "1":
             export_dir = f"{export_dir}/rec/"
-        if rov_export == "2":
+        elif rov_export == "2":
             export_dir = f"{export_dir}/fb/"
 
-        dsrdb.export_dsr_lines_to_sps(
-            export_dir = export_dir,
+        result = dsrdb.export_dsr_lines_to_sps(
+            export_dir=export_dir,
             selected_lines=selected_lines,
             header_file_path=header_file_path,
             export_header=export_header,
@@ -1408,14 +1418,17 @@ def export_dsr_to_sps (request):
             how_exp=how_exp,
             line_code=pdb.get_main().line_code,
             use_line_code=use_line_fn,
+            xy_unit=xy_unit,
+            z_unit=z_unit,
         )
-        # Example output:
-        created_files = [f"SPS_{line}_{seq}.txt" for line in selected_lines]
+
+        if not result.get("ok"):
+            return JsonResponse(result, status=400)
 
         return JsonResponse({
             "ok": True,
-            "message": f"Exported {len(selected_lines)} line(s) to SPS.",
-            "files": created_files,
+            "message": result.get("message", "SPS export completed."),
+            "files": result.get("files", []),
             "meta": {
                 "export_header": export_header,
                 "use_seq": use_seq,
@@ -1425,7 +1438,10 @@ def export_dsr_to_sps (request):
                 "rov_export": rov_export,
                 "sps_ver": sps_ver,
                 "how_exp": how_exp,
-            }
+                "xy_unit":xy_unit,
+                "z_unit":z_unit,
+                "unit_factor": result.get("unit_factor"),
+            },
         })
 
     except Exception as e:
@@ -1969,7 +1985,31 @@ def dsr_line_qc_plot_item(request):
                 "plot_key": plot_key,
                 "item": json_item(layout)
             })
+        elif plot_key in {"recdbvsdep", "recdbvsrec"}:
+            mg = DSRMapPlots(
+                db_path=project.db_path,
+                default_epsg=32615,
+            )
 
+            mode = "deployment" if plot_key == "recdbvsdep" else "recovery"
+
+            layout = mg.bullseye_dsr_vs_recdb(
+                lines=[int(line)],
+                compare_mode=mode,
+                color_by="ROV" if mode == "deployment" else "ROV1",
+                max_offset=25,
+                bins=50,
+                point_size=7,
+                plot_height=620,
+                json_return=False,
+                is_show=False,
+            )
+
+            return JsonResponse({
+                "ok": True,
+                "plot_key": plot_key,
+                "item": json_item(layout),
+            })
 
         return JsonResponse({"ok": False, "error": f"Unknown plot_key: {plot_key}"}, status=400)
 
@@ -2359,3 +2399,278 @@ def rov_project_template_matrix_html(request):
             "ok": False,
             "error": str(exc),
         }, status=500)
+@login_required
+@log_action("load REC_DB bullseye QC plot", object_type="REC_DB")
+def recdb_bullseye_qc_json(request, mode="deployment"):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    mode = (mode or "deployment").lower().strip()
+
+    if mode not in ("deployment", "recovery"):
+        return JsonResponse({"ok": False, "error": "Invalid mode."}, status=400)
+
+    plots = DSRMapPlots(
+        db_path=project.db_path,
+        default_epsg=32615,
+    )
+
+    item = plots.bullseye_dsr_vs_recdb(
+        compare_mode=mode,
+        color_by="ROV",
+        max_offset=float(request.GET.get("max_offset", 20)),
+        bins=int(request.GET.get("bins", 100)),
+        point_size=int(request.GET.get("point_size", 7)),
+        plot_height=int(request.GET.get("plot_height", 620)),
+        json_return=True,
+    )
+
+    return JsonResponse({"ok": True, "plot": item})
+
+@login_required
+@log_action("export selected node position comparison reports", object_type="ROV")
+def export_selected_node_position_comparison_pdfs(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project selected."}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST request required."}, status=405)
+
+    lines = request.POST.getlist("lines[]") or request.POST.getlist("lines")
+
+    cleaned_lines = []
+    for line in lines:
+        try:
+            cleaned_lines.append(int(line))
+        except (TypeError, ValueError):
+            continue
+
+    cleaned_lines = sorted(set(cleaned_lines))
+
+    if not cleaned_lines:
+        return JsonResponse({"ok": False, "error": "No lines selected."}, status=400)
+
+    output_dir = project.export_dir / "node_position_comparison"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    report = NodePositionComparisonReport(project.db_path)
+
+    exported = []
+    failed = []
+
+    for line in cleaned_lines:
+        try:
+            pdf_path = report.generate_pdf(line=line, output_dir=output_dir)
+            exported.append({
+                "line": line,
+                "file": pdf_path.name,
+                "path": str(pdf_path),
+            })
+        except Exception as exc:
+            failed.append({
+                "line": line,
+                "error": str(exc),
+            })
+
+    return JsonResponse({
+        "ok": True,
+        "export_dir": str(output_dir),
+        "exported_count": len(exported),
+        "failed_count": len(failed),
+        "exported": exported,
+        "failed": failed,
+    })
+@require_GET
+@login_required
+@log_action("load_dsr_polar_histograms", object_type="DSR")
+def load_dsr_polar_histograms(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    try:
+
+        angle_bins = int(request.GET.get("angle_bins", 36))
+
+        max_radius = request.GET.get("max_radius", "")
+        max_radius = float(max_radius) if max_radius not in ("", None, "none") else None
+
+        pdb = ProjectDB(project.db_path)
+        template = "plotly_dark" if pdb.get_main().color_scheme == "dark" else "plotly_white"
+
+        plots = DSRMapPlots(
+            project.db_path,
+            default_epsg=pdb.get_main().epsg,
+            use_tiles=True,
+        )
+
+        dsr_df = plots.read_dsr()
+
+        plot_specs = [
+            {
+                "title": "DSR Primary Deployment vs Preplot",
+                "e_col": "PrimaryEasting",
+                "n_col": "PrimaryNorthing",
+                "group_col": "ROV",
+            },
+            {
+                "title": "DSR Secondary Deployment vs Preplot",
+                "e_col": "SecondaryEasting",
+                "n_col": "SecondaryNorthing",
+                "group_col": "ROV",
+            },
+            {
+                "title": "DSR Primary Recovery vs Preplot",
+                "e_col": "PrimaryEasting1",
+                "n_col": "PrimaryNorthing1",
+                "group_col": "ROV1",
+            },
+            {
+                "title": "DSR Secondary Recovery vs Preplot",
+                "e_col": "SecondaryEasting1",
+                "n_col": "SecondaryNorthing1",
+                "group_col": "ROV1",
+            },
+        ]
+
+        html_parts = []
+
+        for spec in plot_specs:
+            html_parts.append(
+                f"""
+                <div class="col-12 col-xl-6 mb-2">
+                    <div class="card h-100">
+                        <div class="card-body p-1" style="height: 430px;">
+                            {plots.polar_histogram_plotly(
+                                df=dsr_df,
+                                e_col=spec["e_col"],
+                                n_col=spec["n_col"],
+                                preplot_e_col="PreplotEasting",
+                                preplot_n_col="PreplotNorthing",
+                                group_col=spec["group_col"],
+                                title=spec["title"],
+                                angle_bins=angle_bins,
+                                max_radius=max_radius,
+                                template=template,
+                                is_show=False,
+                                json_return=False,
+                            )}
+                        </div>
+                    </div>
+                </div>
+                """
+            )
+
+        html = f"""
+        <div class="row g-2">
+            {''.join(html_parts)}
+        </div>
+        """
+
+        return JsonResponse({"ok": True, "html": html})
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+@require_GET
+@login_required
+@log_action("load_recdb_polar_histograms", object_type="REC_DB")
+def load_recdb_polar_histograms(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    try:
+        line = request.GET.get("line")
+        lines = [int(line)] if line and str(line).isdigit() else None
+
+        angle_bins = int(request.GET.get("angle_bins", 36))
+
+        max_radius = request.GET.get("max_radius", "")
+        max_radius = float(max_radius) if max_radius not in ("", None, "none") else None
+
+        pdb = ProjectDB(project.db_path)
+        template = "plotly_dark" if pdb.get_main().color_scheme == "dark" else "plotly_white"
+
+        plots = DSRMapPlots(
+            project.db_path,
+            default_epsg=pdb.get_main().epsg,
+            use_tiles=True,
+        )
+
+        rec_df = plots.read_recdb(lines=lines)
+
+        rec_vs_rpre = plots.polar_histogram_plotly(
+            df=rec_df,
+            e_col="REC_X",
+            n_col="REC_Y",
+            preplot_e_col="RPRE_X",
+            preplot_n_col="RPRE_Y",
+            group_col=None,
+            title="REC_DB REC_X / REC_Y vs RPRE_X / RPRE_Y",
+            angle_bins=angle_bins,
+            max_radius=max_radius,
+            template=template,
+            is_show=False,
+            json_return=False,
+        )
+
+        rec_vs_rfield = plots.polar_histogram_plotly(
+            df=rec_df,
+            e_col="REC_X",
+            n_col="REC_Y",
+            preplot_e_col="RFIELD_X",
+            preplot_n_col="RFIELD_Y",
+            group_col=None,
+            title="REC_DB REC_X / REC_Y vs RFIELD_X / RFIELD_Y",
+            angle_bins=angle_bins,
+            max_radius=max_radius,
+            template=template,
+            is_show=False,
+            json_return=False,
+        )
+
+        html = f"""
+        <div class="row g-2">
+            <div class="col-12 col-xl-6 mb-2">
+                <div class="card h-100">
+                    <div class="card-body p-1" style="height: 520px;">
+                        {rec_vs_rpre}
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6 mb-2">
+                <div class="card h-100">
+                    <div class="card-body p-1" style="height: 520px;">
+                        {rec_vs_rfield}
+                    </div>
+                </div>
+            </div>
+        </div>
+        """
+
+        return JsonResponse({"ok": True, "html": html})
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)

@@ -37,106 +37,81 @@
 
     <table class="visual-offset-table">
 
-      <!-- ================================================= -->
-      <!-- HEADER -->
-      <!-- ================================================= -->
-
       <thead>
 
-        <!-- ============================================= -->
         <!-- Vessel row -->
-        <!-- ============================================= -->
-
         <tr>
-
-          <th class="vo-sticky-col vo-corner">
-            RLine
-          </th>
-
-          <th class="vo-sticky-col-2 vo-corner-2">
-            Vessel
-          </th>
+          <th class="vo-sticky-col vo-corner">RLine</th>
+          <th class="vo-sticky-col-2 vo-corner-2">Vessel</th>
 
           {% for h in sl_headers %}
             <th class="vo-head-vessel {{ h.vessel_class }} {% if h.is_group_start %} vo-group-start {% endif %}">
-                {{ h.vessel }}
+              {{ h.vessel }}
             </th>
           {% endfor %}
-
         </tr>
 
-        <!-- ============================================= -->
         <!-- Sequence row -->
-        <!-- ============================================= -->
-
         <tr>
-
-          <th class="vo-sticky-col vo-corner">
-            Seq
-          </th>
-
-          <th class="vo-sticky-col-2 vo-corner-2">
-            Production
-          </th>
+          <th class="vo-sticky-col vo-corner">Seq</th>
+          <th class="vo-sticky-col-2 vo-corner-2">Production</th>
 
           {% for h in sl_headers %}
             <th class="vo-head-seq
                        {% if h.is_group_start %} vo-group-start {% endif %}"
                 title="SL {{ h.line }} | Production Seq: {{ h.seq|default:'-' }}">
-
               {{ h.seq|default:"" }}
-
             </th>
           {% endfor %}
-
         </tr>
 
-        <!-- ============================================= -->
         <!-- Source line row -->
-        <!-- ============================================= -->
-
         <tr>
-
-          <th class="vo-sticky-col vo-corner">
-            RLine
-          </th>
-
-          <th class="vo-sticky-col-2 vo-corner-2">
-            Vessel
-          </th>
+          <th class="vo-sticky-col vo-corner">RLine</th>
+          <th class="vo-sticky-col-2 vo-corner-2">Vessel</th>
 
           {% for h in sl_headers %}
             <th class="vo-head-sl
-                       {% if h.source_completed %}
-                         vo-sl-completed
-                       {% elif h.all_receivers_deployed %}
-                         vo-sl-all-deployed
+                       {% if h.prod_pp_length > 0 %}
+                         {% if h.source_completed %}
+                           vo-sl-completed
+                         {% elif h.all_receivers_deployed %}
+                           vo-sl-all-deployed
+                         {% endif %}
                        {% endif %}
                        {% if h.is_group_start %}
                          vo-group-start
                        {% endif %}"
-
                 title="
 SL {{ h.line }}
 Vessel: {{ h.vessel|default:'-' }}
 Seq: {{ h.seq|default:'-' }}
+Production Length: {{ h.prod_line_length|floatformat:1 }} / {{ h.prod_pp_length|floatformat:1 }} m
+Production %: {{ h.prod_len_pct|floatformat:1 }}%
 Required RLines: {{ h.required_rline_count }}
 Deployed RLines: {{ h.deployed_rline_count }}
 Group: {{ h.group_no }}
 ">
 
-              {{ h.line }}
+              <div class="fw-semibold">
+                {{ h.line }}
+              </div>
+
+              <div class="small text-info">
+                {{ h.prod_line_length|floatformat:0 }}
+                /
+                {{ h.prod_pp_length|floatformat:0 }} m
+              </div>
+
+              <div class="small text-warning">
+                {{ h.prod_len_pct|floatformat:1 }}%
+              </div>
 
             </th>
           {% endfor %}
-
         </tr>
 
       </thead>
-
-      <!-- ================================================= -->
-      <!-- BODY -->
-      <!-- ================================================= -->
 
       <tbody>
 
@@ -144,14 +119,7 @@ Group: {{ h.group_no }}
 
           <tr>
 
-            <!-- ========================================= -->
-            <!-- Receiver line -->
-            <!-- ========================================= -->
-
-            <th class="vo-sticky-col
-                       vo-rline
-                       {{ r.rline_status_class }}"
-
+            <th class="vo-sticky-col vo-rline {{ r.rline_status_class }}"
                 title="
 RLine {{ r.rline }}
 Deployed: {{ r.deployed_pct }}%
@@ -162,31 +130,26 @@ Planned: {{ r.planned_count }}
 Completed: {{ r.completed_count }}
 Tier: {{ r.tier }}
 ">
+              <div class="fw-bold">
+        {{ r.rline }}
+    </div>
 
-              {{ r.rline }}
-
+    <div class="text-white fw-semibold">
+        {{ r.planned_points }}
+        |
+        {{ r.deployed_count }}
+        |
+        {{ r.retrieved_count|floatformat:0 }}
+    </div>
             </th>
 
-            <!-- ========================================= -->
-            <!-- Vessel -->
-            <!-- ========================================= -->
-
-            <th class="vo-sticky-col-2
-                       vo-rline-vessel
-                       {{ r.vessel_class }}"
-
+            <th class="vo-sticky-col-2 vo-rline-vessel {{ r.vessel_class }}"
                 title="
 RLine {{ r.rline }}
 Vessel: {{ r.vessel|default:'-' }}
 ">
-
               {{ r.vessel|default:"-" }}
-
             </th>
-
-            <!-- ========================================= -->
-            <!-- Cells -->
-            <!-- ========================================= -->
 
             {% for c in r.cells %}
 
@@ -198,15 +161,12 @@ Vessel: {{ r.vessel|default:'-' }}
                            {% else %}
                              vo-active
                            {% endif %}"
-
                     title="
 RLine {{ r.rline }}
 SL {{ c.sl }}
 Range {{ r.first_sl }} → {{ r.last_sl }}
 ">
-
                   ---
-
                 </td>
 
               {% else %}
@@ -222,13 +182,9 @@ Range {{ r.first_sl }} → {{ r.last_sl }}
         {% empty %}
 
           <tr>
-            <td colspan="999"
-                class="vo-empty-message">
-
+            <td colspan="999" class="vo-empty-message">
               <i class="fas fa-exclamation-triangle me-2"></i>
-
               No project template data found
-
             </td>
           </tr>
 

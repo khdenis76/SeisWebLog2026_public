@@ -139,8 +139,16 @@ Production Monitor view added.
 In SM export added option to export only prime deployment cooordinates and filter by line,point
 ### Fixed
 Export deployment coordinates fixed 
- 
 ### Changed  
+## [2026.1.02.08] - 2026-05-30
+### Added
+Export Final comparison to PDF added 
+Export SPS files in feet or meters added
+Add 4 new plots two polar and two bull eye 
+add more qc plots for rec_db 
+### Fixed
+Export FB to SPS fixed  
+### Changed
 
   
 

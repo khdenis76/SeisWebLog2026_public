@@ -127,6 +127,19 @@
                                     <i class="fas fa-arrow-down-up-across-line me-2"></i>LINE:
                                 </button>
                            </li>
+                           <li class="nav-item" role="presentation">
+                                <button class="nav-link"
+                                        id="pills-recdb-tab"
+                                        data-bs-toggle="pill"
+                                        data-bs-target="#pills-recdb"
+                                        type="button"
+                                        role="tab"
+                                        aria-controls="pills-recdb"
+                                        aria-selected="true">
+                                    <i class="fas fa-diagram-project me-2"></i>REC DB
+                                </button>
+                           </li>
+
                     </ul>
                 </div>
                 <div class="flex-grow-1 text-end">
@@ -144,6 +157,10 @@
                   <div class="tab-pane fade" id="pills-bbox" role="tabpanel" aria-labelledby="pills-bbox-tab">
                       {% include "rov/partials/bbox_file_selected_plots.html" %}
                   </div>
+                  <div class="tab-pane fade" id="pills-recdb" role="tabpanel" aria-labelledby="pills-recdb-tab">
+                       {% include "rov/partials/recdb_qc_tabs.html" %}
+                  </div>
+
                   <div class="tab-pane fade" id="pills-line" role="tabpanel" aria-labelledby="pills-line-tab">
                       <div id="dsr-qc-root"
                             data-plot-item-url="{% url 'dsr_line_qc_plot_item' %}">

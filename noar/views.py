@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -8,6 +9,7 @@ from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from datetime import datetime
 
+from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
 from core.models import UserSettings, SPSRevision
@@ -40,13 +42,9 @@ def noar_home(request):
 
     receiver_sps = ReceiverSPS(project.db_path)
 
-    # Make sure tables exist before listing.
-    # Important: ensure_tables() currently recreates RPSolution,
-    # so use only ensure_rlsolution_table() here.
     with receiver_sps._connect() as conn:
-        receiver_sps.ensure_sps_files_table(conn)
-        receiver_sps.ensure_rlsolution_table(conn)
-        receiver_sps.ensure_indexes(conn)
+        receiver_sps.ensure_tables(conn)
+        conn.commit()
 
     rlsolutions = receiver_sps.list_rlsolutions(
         sort_by="Line",
@@ -218,3 +216,35 @@ def noar_load_sps(request):
         "solution_fk": solution_fk,
         "results": results,
     }, status=200 if ok else 400)
+@login_required
+@require_POST
+@log_action("delete selected NOAR lines", object_type="NOAR")
+def delete_selected_rlsolutions(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project or not project.can_edit(request.user):
+        raise PermissionDenied("No active project or permission denied.")
+
+    payload = json.loads(request.body.decode("utf-8") or "{}")
+    ids = payload.get("ids") or []
+    delete_type = payload.get("delete_type", "")
+
+    if not ids:
+        return JsonResponse({"ok": False, "error": "No selected lines."}, status=400)
+
+    db = ReceiverSPS(project.db_path)
+    result = db.delete_selected_rlsolutions(ids=ids, delete_type=delete_type)
+
+    rlsolutions = db.list_rlsolutions()
+    tbody_html = render_to_string(
+        "noar/partials/rlsolutions_tbody.html",
+        {"rlsolutions": rlsolutions},
+        request=request,
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "deleted": result,
+        "tbody_html": tbody_html,
+    })

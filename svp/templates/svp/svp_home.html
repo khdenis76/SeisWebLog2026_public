@@ -17,9 +17,9 @@
 
       <div class="d-flex flex-wrap align-items-center gap-2">
         <button class="btn btn-outline-info btn-sm" id="btnSetupSVPConfig" type="button">
-             <i class="fa-solid fa-sliders me-1"></i> Setup Config
+          <i class="fa-solid fa-sliders me-1"></i> Setup Config
         </button>
-        <button class="btn btn-primary btn-sm" id="btnLoadSVP">
+        <button class="btn btn-primary btn-sm" id="btnLoadSVP" type="button">
           <i class="fa-solid fa-upload me-1"></i> Load SVP
         </button>
 
@@ -43,24 +43,35 @@
   <div class="svp-split-wrap" id="svpSplitWrap">
     <div class="svp-panel svp-panel-left" id="svpLeftPanel">
       <div class="card h-100 shadow-sm border-0">
-        <div class="card-header d-flex align-items-center justify-content-between">
-          <span>SVP Profiles</span>
-          <span class="badge text-bg-secondary" id="svpProfileCount">0</span>
+        <div class="card-header d-flex align-items-center justify-content-between gap-2">
+          <div class="d-flex align-items-center gap-2">
+            <span>SVP Profiles</span>
+            <span class="badge text-bg-secondary" id="svpProfileCount">0</span>
+          </div>
+
+          <button class="btn btn-outline-danger btn-sm" id="btnDeleteSelectedSVP" type="button" disabled>
+            <i class="fa-solid fa-trash-can me-1"></i> Delete
+          </button>
         </div>
+
         <div class="card-body p-0">
           <div class="table-responsive svp-table-wrap">
             <table class="table table-hover table-sm align-middle mb-0" id="svpTable">
               <thead class="table-light">
                 <tr>
+                  <th class="text-center svp-check-col">
+                    <input class="form-check-input" type="checkbox" id="svpSelectAll" title="Select all SVP profiles">
+                  </th>
                   <th>Name</th>
-                  <th>Date</th>
-                  <th>Source</th>
+                  <th>Start Date/Time</th>
+                  <th>ROV</th>
+                  <th>Source File</th>
                   <th class="text-end">Points</th>
                 </tr>
               </thead>
               <tbody id="svpTableBody">
                 <tr>
-                  <td colspan="4" class="text-center text-muted py-4">No profiles loaded</td>
+                  <td colspan="6" class="text-center text-muted py-4">No profiles loaded</td>
                 </tr>
               </tbody>
             </table>
@@ -77,14 +88,19 @@
           <span>Profile Details</span>
           <span class="text-muted small" id="svpSelectedLabel">Nothing selected</span>
         </div>
-        <div class="card-body">
+        <div class="card-body svp-detail-scroll">
           <div id="svpDetailsBox" class="mb-3">
             <div class="text-muted">Select an SVP profile from the left table.</div>
           </div>
 
-          <div class="border rounded-3 p-3 bg-body-tertiary" style="min-height: 260px;">
-            <div class="fw-semibold mb-2">Plot area</div>
-            <div class="text-muted small">SVP graph placeholder. Later we will load a real plot here.</div>
+          <div class="border rounded-3 bg-body-tertiary svp-plot-card">
+            <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom">
+              <div class="fw-semibold">Profile Plot</div>
+              <div class="text-muted small">Sound velocity + salinity</div>
+            </div>
+            <div id="svpPlotBox" class="svp-plot-box">
+              <div class="text-muted small p-3">Click an SVP row to load the profile plot.</div>
+            </div>
           </div>
         </div>
       </div>

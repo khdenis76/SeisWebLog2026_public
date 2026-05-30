@@ -1,0 +1,20 @@
+.mfa-table-wrap {
+        max-height: 70vh;
+        overflow: auto;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.5rem;
+    }
+
+    .mfa-files-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: var(--bs-light);
+        white-space: nowrap;
+    }
+
+    .mfa-files-table td,
+    .mfa-files-table th {
+        white-space: nowrap;
+        font-size: 0.82rem;
+    }

@@ -30,9 +30,17 @@
                 <i class="fas fa-gun me-2"></i> SHOT TABLE
             </button>
         </li>
-
-
-
+        <li class="nav-item" role="presentation">
+            <button class="nav-link"
+                    id="mfa-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#mfa-pane"
+                    type="button"
+                    role="tab">
+                <i class="fas fa-table me-1"></i>
+                <i class="fas fa-gun me-2"></i> MFA
+            </button>
+        </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link"
                     id="stats-tab"
@@ -159,6 +167,10 @@
                     </div>
                 </div>
             </div>
+        </div>
+        <!-- MFA TAB -->
+        <div class="tab-pane fade" id="mfa-pane" role="tabpanel">
+             {% include "source/partials/mfa_files_table.html" %}
         </div>
 
     </div>

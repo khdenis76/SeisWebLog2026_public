@@ -815,16 +815,10 @@ class ProjectTemplateDB:
         """
         Build matrix data for Template Matrix / Production Status.
 
-        Receiver line colors:
-            white  = preplot / not deployed
-            yellow = fully deployed
-            green  = all source lines completed, ready for recovery
-            blue   = partially retrieved
-            orange = fully recovered
-
-        Matrix cells:
-            orange = planned source cell
-            green  = source line exists in SLSolution
+        Important:
+        - Source Line header is calculated ONLY from production seqs.
+        - If one Source Line has multiple production seqs, LineLength and PP_Length are summed.
+        - Header color is applied only when Source Line has production PP_Length.
         """
 
         self.ensure_schema()
@@ -965,6 +959,14 @@ class ProjectTemplateDB:
 
                 return output
 
+            def to_float(value):
+                try:
+                    if value in (None, ""):
+                        return 0.0
+                    return float(value)
+                except (TypeError, ValueError):
+                    return 0.0
+
             template_rows = [
                 dict(row)
                 for row in cur.execute("""
@@ -983,18 +985,6 @@ class ProjectTemplateDB:
                 """).fetchall()
             ]
 
-            completed_sl_lines = {
-                int(row["Line"])
-                for row in cur.execute("""
-                    SELECT DISTINCT Line
-                    FROM SLSolution
-                    WHERE Line IS NOT NULL
-                """).fetchall()
-            }
-
-            sl_vessel_map = {}
-            sl_seq_values = {}
-
             prod_rules = [
                 dict(row)
                 for row in cur.execute("""
@@ -1008,37 +998,77 @@ class ProjectTemplateDB:
                 """).fetchall()
             ]
 
+            sl_source_rows_by_line = {}
+
             for row in cur.execute("""
                 SELECT
                     s.Line,
                     s.Seq,
                     s.Vessel_FK,
+                    s.LineLength,
+                    s.PP_Length,
+                    s.purpose_id,
                     f.vessel_name AS VesselName
                 FROM SLSolution s
                 LEFT JOIN project_fleet f
                     ON f.ID = s.Vessel_FK
                 WHERE s.Line IS NOT NULL
             """).fetchall():
+                row = dict(row)
                 line = int(row["Line"])
+                sl_source_rows_by_line.setdefault(line, []).append(row)
 
-                if line not in sl_vessel_map:
-                    sl_vessel_map[line] = row["VesselName"] or ""
+            def is_production_sl_row(row):
+                """
+                A Source seq is production when:
+                1. SLSolution.purpose_id = 1, OR
+                2. Seq belongs to an active production assignment for the same vessel.
+                """
 
-                seq = row["Seq"]
-                vessel_fk = row["Vessel_FK"]
+                purpose_id = int(row.get("purpose_id") or 0)
+
+                if purpose_id == 1:
+                    return True
+
+                seq = row.get("Seq")
+                vessel_fk = row.get("Vessel_FK")
 
                 if seq is None or vessel_fk is None:
-                    continue
+                    return False
 
                 seq = int(seq)
+                vessel_fk = int(vessel_fk)
 
                 for rule in prod_rules:
                     if (
-                            int(rule["vessel_id"]) == int(vessel_fk)
+                            int(rule["vessel_id"]) == vessel_fk
                             and int(rule["seq_first"]) <= seq <= int(rule["seq_last"])
                     ):
-                        sl_seq_values.setdefault(line, set()).add(seq)
-                        break
+                        return True
+
+                return False
+
+            completed_sl_lines = set()
+            sl_vessel_map = {}
+            sl_seq_values = {}
+
+            for line, rows in sl_source_rows_by_line.items():
+                prod_rows = [
+                    r for r in rows
+                    if is_production_sl_row(r)
+                ]
+
+                if prod_rows:
+                    completed_sl_lines.add(line)
+
+                for r in rows:
+                    if line not in sl_vessel_map:
+                        sl_vessel_map[line] = r.get("VesselName") or ""
+
+                for r in prod_rows:
+                    seq = r.get("Seq")
+                    if seq is not None:
+                        sl_seq_values.setdefault(line, set()).add(int(seq))
 
             sl_seq_map = {
                 line: ",".join(str(s) for s in sorted(seq_set))
@@ -1051,8 +1081,11 @@ class ProjectTemplateDB:
             for row in cur.execute("""
                 SELECT
                     Line,
+                    COALESCE(PlannedPoints, 0) AS PlannedPoints,
                     COALESCE(DeployedPct, 0) AS DeployedPct,
                     COALESCE(RetrievedPct, 0) AS RetrievedPct,
+                    COALESCE(DeployedCount, 0) AS DeployedCount,
+                    COALESCE(RetrievedCount, 0) AS RetrievedCount,
                     Vessel_name
                 FROM DSR_LineSummary
                 WHERE Line IS NOT NULL
@@ -1060,13 +1093,17 @@ class ProjectTemplateDB:
                 line = int(row["Line"])
                 deployed_pct = float(row["DeployedPct"] or 0)
                 retrieved_pct = float(row["RetrievedPct"] or 0)
-
+                planned_points = int(row["PlannedPoints"] or 0)
+                deployed_count = int(row["DeployedCount"] or 0)
                 rline_status[line] = {
                     "deployed_pct": deployed_pct,
                     "retrieved_pct": retrieved_pct,
                     "is_deployed": deployed_pct >= 100,
                     "is_recovered": retrieved_pct >= 100,
                     "is_partial_retrieved": retrieved_pct > 0 and retrieved_pct < 100,
+                    "planned_points": planned_points,
+                    "deployed_count": deployed_count,
+                    "retrieved_count": int(row["RetrievedCount"] or 0),
                 }
 
                 rline_vessel_map[line] = row["Vessel_name"] or ""
@@ -1151,7 +1188,10 @@ class ProjectTemplateDB:
                     "rline_partial_retrieved": rline_partial_retrieved,
                     "rline_status_class": rline_status_class,
                     "deployed_pct": status.get("deployed_pct", 0),
+                    "deployed_count": status.get("deployed_count", 0),
                     "retrieved_pct": status.get("retrieved_pct", 0),
+                    "retrieved_count": int(status.get("retrieved_count", 0)),
+                    "planned_points": int(status.get("planned_points", 0)),
                     "cells": cells,
                 })
 
@@ -1171,7 +1211,47 @@ class ProjectTemplateDB:
                         and len(required_rlines) == len(deployed_required_rlines)
                 )
 
-                source_completed = sl in completed_sl_lines
+                sl_source_rows = sl_source_rows_by_line.get(sl, [])
+
+                # ---------------------------------------------------------
+                # IMPORTANT:
+                # Get ALL production seqs for this Source Line.
+                # Example: "1892,1893" becomes {1892, 1893}.
+                # Then sum LineLength and PP_Length for BOTH rows.
+                # ---------------------------------------------------------
+                production_seq_set = {
+                    int(x)
+                    for x in str(sl_seq_map.get(sl, "")).split(",")
+                    if str(x).strip().isdigit()
+                }
+
+                sl_prod_rows = [
+                    r for r in sl_source_rows
+                    if int(r.get("Seq") or 0) in production_seq_set
+                ]
+
+                prod_line_length = sum(
+                    to_float(r.get("LineLength"))
+                    for r in sl_prod_rows
+                )
+
+                # PP_Length is the planned preplot length for the Source Line.
+                # It must be counted ONCE per Line, not once per Seq.
+                prod_pp_length = 0.0
+
+                for r in sl_prod_rows:
+                    prod_pp_length = to_float(r.get("PP_Length"))
+                    if prod_pp_length > 0:
+                        break
+
+                prod_len_pct = 0.0
+                if prod_pp_length > 0:
+                    prod_len_pct = (prod_line_length / prod_pp_length) * 100.0
+
+                source_completed = (
+                        sl in completed_sl_lines
+                        and prod_pp_length > 0
+                )
 
                 current_group_no = None
                 for g in groups:
@@ -1184,6 +1264,7 @@ class ProjectTemplateDB:
                         and current_group_no != prev_group_no
                 )
                 prev_group_no = current_group_no
+
                 vessel_name = sl_vessel_map.get(sl, "")
 
                 vessel_class = (
@@ -1199,10 +1280,20 @@ class ProjectTemplateDB:
                     "vessel": vessel_name,
                     "vessel_class": vessel_class,
                     "seq": sl_seq_map.get(sl, ""),
+
+                    "prod_line_length": round(prod_line_length, 1),
+                    "prod_pp_length": round(prod_pp_length, 1),
+                    "prod_len_pct": round(prod_len_pct, 1),
+
                     "required_rline_count": len(required_rlines),
                     "deployed_rline_count": len(deployed_required_rlines),
-                    "all_receivers_deployed": all_receivers_deployed,
+
+                    "all_receivers_deployed": (
+                            all_receivers_deployed
+                            and prod_pp_length > 0
+                    ),
                     "source_completed": source_completed,
+
                     "group_no": current_group_no,
                     "is_group_start": is_group_start,
                 })
