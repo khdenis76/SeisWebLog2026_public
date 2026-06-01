@@ -16,6 +16,10 @@ db.sqlite3
 # Archives
 *.zip
 *.7z
+install_myenv.bat
+install_myenv_updated.bat
+install_myenv_with_GDAL.bat
+
 
 # Virtualenv
 myenv/

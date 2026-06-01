@@ -382,6 +382,7 @@ def project_settings_view(request):
     node_qc = pdb.get_node_qc()
     gun_qc = pdb.get_gun_qc()
     folders_qc=pdb.get_folders()
+    can_edit = project.can_edit(request.user)
     return render(
         request,
         "projects/settings.html",  # ВАЖНО: templates/projects/settings.html
@@ -391,7 +392,8 @@ def project_settings_view(request):
             "geom": geom,
             "node_qc": node_qc,
             "gun_qc": gun_qc,
-            "folders":folders_qc
+            "folders":folders_qc,
+            "can_edit":can_edit,
         },
     )
 

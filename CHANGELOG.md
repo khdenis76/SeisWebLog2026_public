@@ -149,6 +149,13 @@ add more qc plots for rec_db
 ### Fixed
 Export FB to SPS fixed  
 ### Changed
+## [2026.1.02.09] - 2026-06-01
+### Added
+### Fixed
+Fixed install librayries.
+Fixed project settings save. 
+### Changed
+
 
   
 
