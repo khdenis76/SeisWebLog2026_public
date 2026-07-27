@@ -158,6 +158,7 @@ def rov_main_view(request):
     dsr_statistics_table =dsrdb.get_dsr_html_stat()
     bbox_vessel_options = dsrdb.get_bbox_vessel_options()
     bbox_file_tbody = dsrdb.get_bbox_file_table()
+    dsr_lines =dsrdb.get_rlsolution_lines()
     return render(request,
                   "rov/rovpage.html",
                   {"project": project,
@@ -177,6 +178,7 @@ def rov_main_view(request):
                    "deployment_pie":deployment_pie,
                    "recovery_pie":recovery_pie,
                    "bbox_vessel_options": bbox_vessel_options,
+                   "rl_lines":dsr_lines
                    })
 @require_GET
 @login_required
@@ -1437,6 +1439,77 @@ def select_sm_day(request):
                 "ok": False,
                 "error": str(ex),
             },
+            status=500,
+        )
+
+@require_POST
+@login_required
+def select_sm_line(request):
+    user_settings, _ = UserSettings.objects.get_or_create(
+        user=request.user
+    )
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse(
+            {"ok": False, "error": "No active project"},
+            status=400,
+        )
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        line = str(payload.get("line") or "").strip()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse(
+            {"ok": False, "error": "Invalid JSON"},
+            status=400,
+        )
+
+    if not line:
+        return JsonResponse(
+            {"ok": False, "error": "Missing line"},
+            status=400,
+        )
+
+    try:
+        dsrdb = DSRDB(project.db_path)
+
+        # The same line query is used for both tabs.
+        # No Day or Day1 filter is applied.
+        rows = dsrdb.get_sm_comparison_by_line(line=line)
+
+        deployment_html = render_to_string(
+            "rov/partials/sm_daily_table.html",
+            {
+                "sm_rows": rows,
+                "mode": "Deployment",
+                "selected_line": line,
+            },
+            request=request,
+        )
+
+        recovery_html = render_to_string(
+            "rov/partials/sm_daily_table.html",
+            {
+                "sm_rows": rows,
+                "mode": "Recovery",
+                "selected_line": line,
+            },
+            request=request,
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "deployment_html": deployment_html,
+            "recovery_html": recovery_html,
+            "deployment_count": len(rows),
+            "recovery_count": len(rows),
+            "selected_line": line,
+        })
+
+    except Exception as exc:
+        return JsonResponse(
+            {"ok": False, "error": str(exc)},
             status=500,
         )
 @require_POST

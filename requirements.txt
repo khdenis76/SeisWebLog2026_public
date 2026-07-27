@@ -24,3 +24,4 @@ BeautifulSoup4>=4.14.3
 openpyxl>=3.1.5
 rasterio >=1.4.4
 scipy >=1.17.1
+pyshp >=3.1.6
