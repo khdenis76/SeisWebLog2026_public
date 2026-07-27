@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pyqtgraph as pg
-from PySide6 import QtCore, QtWidgets
-
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from .models import BlackBoxData, BlackBoxFileInfo
+from .qc_widgets import (
+    ElapsedAxis,
+    PLOT_BG,
+    PlainNumberAxis,
+    finite_qc,
+    make_swatch_item,
+    robust_y_range,
+    stable_color,
+    style_plot,
+)
 
 
 class BlackBoxWindow(QtWidgets.QMainWindow):
-    """Detachable BlackBox QC workbench with linked PyQtGraph plots."""
+    """Detachable BlackBox QC workbench with compact controls and readable plots."""
 
     file_requested = QtCore.Signal(int)
     add_track_requested = QtCore.Signal(object, str)
@@ -20,77 +31,121 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("BlackBox QC — DataViewer 2.0")
-        self.resize(1350, 820)
+        self.setWindowTitle("BlackBox QC — DataViewer 2.2")
+        self.resize(1500, 900)
         self._data: BlackBoxData | None = None
         self._files: list[BlackBoxFileInfo] = []
+        self._channel_styles: dict[str, dict[str, Any]] = {}
+        self._plot_widgets: list[pg.PlotWidget] = []
+        self._redraw_timer = QtCore.QTimer(self)
+        self._redraw_timer.setSingleShot(True)
+        self._redraw_timer.setInterval(70)
+        self._redraw_timer.timeout.connect(self._redraw_now)
         self._build_ui()
 
     def _build_ui(self) -> None:
         central = QtWidgets.QWidget()
         outer = QtWidgets.QVBoxLayout(central)
-        outer.setContentsMargins(5, 5, 5, 5)
+        outer.setContentsMargins(6, 6, 6, 6)
+        outer.setSpacing(6)
 
-        controls = QtWidgets.QHBoxLayout()
-        controls.addWidget(QtWidgets.QLabel("BlackBox file:"))
+        top = QtWidgets.QFrame()
+        top.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        top_layout = QtWidgets.QGridLayout(top)
+        top_layout.setContentsMargins(8, 6, 8, 6)
+
         self.file_combo = QtWidgets.QComboBox()
-        self.file_combo.setMinimumWidth(420)
+        self.file_combo.setMinimumWidth(500)
         self.file_combo.currentIndexChanged.connect(self._file_changed)
-        controls.addWidget(self.file_combo, 1)
-
-        self.reload_button = QtWidgets.QPushButton("Reload list")
+        self.reload_button = QtWidgets.QPushButton("Reload")
         self.reload_button.clicked.connect(self.reload_files_requested)
-        controls.addWidget(self.reload_button)
-
         self.track_source = QtWidgets.QComboBox()
         self.track_source.setMinimumWidth(130)
-        controls.addWidget(QtWidgets.QLabel("Coordinate pair:"))
-        controls.addWidget(self.track_source)
-
-        self.add_track_button = QtWidgets.QPushButton("Add selected pair")
+        self.add_track_button = QtWidgets.QPushButton("Add pair")
         self.add_track_button.clicked.connect(self._add_track)
-        controls.addWidget(self.add_track_button)
-
         self.add_all_tracks_button = QtWidgets.QPushButton("Add all pairs")
         self.add_all_tracks_button.clicked.connect(self._add_all_tracks)
-        controls.addWidget(self.add_all_tracks_button)
-
-        self.add_all_files_button = QtWidgets.QPushButton("Add all files + pairs")
+        self.add_all_files_button = QtWidgets.QPushButton("Add all files")
         self.add_all_files_button.clicked.connect(self._add_all_files)
-        controls.addWidget(self.add_all_files_button)
-
         self.zoom_button = QtWidgets.QPushButton("Zoom tracks")
         self.zoom_button.clicked.connect(self.zoom_track_requested)
-        controls.addWidget(self.zoom_button)
-        outer.addLayout(controls)
+
+        self.layout_combo = QtWidgets.QComboBox()
+        self.layout_combo.addItems(["Stacked", "Overlay"])
+        self.layout_combo.currentIndexChanged.connect(lambda *_: self._redraw())
+        self.max_plots = QtWidgets.QSpinBox()
+        self.max_plots.setRange(1, 20)
+        self.max_plots.setValue(8)
+        self.max_plots.setToolTip("Maximum stacked charts displayed at one time")
+        self.max_plots.valueChanged.connect(lambda *_: self._redraw())
+
+        top_layout.addWidget(QtWidgets.QLabel("BlackBox file"), 0, 0)
+        top_layout.addWidget(self.file_combo, 0, 1, 1, 5)
+        top_layout.addWidget(self.reload_button, 0, 6)
+        top_layout.addWidget(QtWidgets.QLabel("Coordinate pair"), 1, 0)
+        top_layout.addWidget(self.track_source, 1, 1)
+        top_layout.addWidget(self.add_track_button, 1, 2)
+        top_layout.addWidget(self.add_all_tracks_button, 1, 3)
+        top_layout.addWidget(self.add_all_files_button, 1, 4)
+        top_layout.addWidget(self.zoom_button, 1, 5)
+        top_layout.addWidget(QtWidgets.QLabel("Charts"), 1, 6)
+        top_layout.addWidget(self.layout_combo, 1, 7)
+        top_layout.addWidget(QtWidgets.QLabel("Max"), 1, 8)
+        top_layout.addWidget(self.max_plots, 1, 9)
+        outer.addWidget(top)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        outer.addWidget(splitter, 1)
+
+        left = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        self.channel_filter = QtWidgets.QLineEdit()
+        self.channel_filter.setPlaceholderText("Filter channels…")
+        self.channel_filter.textChanged.connect(self._filter_channels)
+        left_layout.addWidget(self.channel_filter)
+
+        preset_row = QtWidgets.QHBoxLayout()
+        for text, callback in (
+            ("GNSS", lambda: self._select_preset(("hdop", "pdop", "vdop", "nos", "diffage", "fixquality"))),
+            ("Motion", lambda: self._select_preset(("sog", "speed", "hdg", "heading", "cog", "pitch", "roll", "heave"))),
+            ("Depth", lambda: self._select_preset(("depth", "altitude", "elevation"))),
+            ("Clear", lambda: self._set_all(False)),
+        ):
+            button = QtWidgets.QPushButton(text)
+            button.clicked.connect(callback)
+            preset_row.addWidget(button)
+        left_layout.addLayout(preset_row)
+
         self.channel_tree = QtWidgets.QTreeWidget()
-        self.channel_tree.setHeaderLabels(["Channel", "Display"])
-        self.channel_tree.setMinimumWidth(230)
+        self.channel_tree.setHeaderLabels(["Channel", "Color", "Width"])
+        self.channel_tree.setColumnWidth(0, 210)
+        self.channel_tree.setColumnWidth(1, 48)
+        self.channel_tree.setColumnWidth(2, 45)
         self.channel_tree.itemChanged.connect(self._channel_changed)
-        splitter.addWidget(self.channel_tree)
+        self.channel_tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.channel_tree.customContextMenuRequested.connect(self._show_channel_context_menu)
+        left_layout.addWidget(self.channel_tree, 1)
+        self.selection_label = QtWidgets.QLabel("0 selected")
+        left_layout.addWidget(self.selection_label)
+        splitter.addWidget(left)
 
         self.plot_scroll = QtWidgets.QScrollArea()
         self.plot_scroll.setWidgetResizable(True)
         self.plot_container = QtWidgets.QWidget()
         self.plot_layout = QtWidgets.QVBoxLayout(self.plot_container)
         self.plot_layout.setContentsMargins(0, 0, 0, 0)
-        self.plot_layout.setSpacing(4)
+        self.plot_layout.setSpacing(6)
         self.plot_scroll.setWidget(self.plot_container)
         splitter.addWidget(self.plot_scroll)
-
-        self._plot_widgets: list[pg.PlotWidget] = []
-        self._redraw_timer = QtCore.QTimer(self)
-        self._redraw_timer.setSingleShot(True)
-        self._redraw_timer.setInterval(40)
-        self._redraw_timer.timeout.connect(self._redraw_now)
-        splitter.setStretchFactor(1, 1)
-        outer.addWidget(splitter, 1)
+        splitter.setSizes([330, 1170])
 
         self.status = QtWidgets.QLabel("Select a BlackBox file.")
         outer.addWidget(self.status)
         self.setCentralWidget(central)
+
+    def _style(self, name: str) -> dict[str, Any]:
+        return self._channel_styles.setdefault(name, {"color": stable_color(name), "width": 1.6})
 
     def set_files(self, files: list[BlackBoxFileInfo]) -> None:
         self._files = list(files)
@@ -100,13 +155,13 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
         for info in files:
             self.file_combo.addItem(info.label, info.file_id)
         if previous is not None:
-            idx = self.file_combo.findData(previous)
-            if idx >= 0:
-                self.file_combo.setCurrentIndex(idx)
+            index = self.file_combo.findData(previous)
+            if index >= 0:
+                self.file_combo.setCurrentIndex(index)
         del blocker
-        if self.file_combo.count() and self.file_combo.currentIndex() < 0:
-            self.file_combo.setCurrentIndex(0)
         if self.file_combo.count():
+            if self.file_combo.currentIndex() < 0:
+                self.file_combo.setCurrentIndex(0)
             self._file_changed(self.file_combo.currentIndex())
         else:
             self.status.setText("No BlackBox files were found in this project.")
@@ -128,68 +183,124 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
         self.track_source.addItems(list(data.tracks.keys()))
         self._build_channel_tree(data)
         self._redraw()
-        self.status.setText(f"{data.file_info.name}: {data.count:,} samples, {len(data.columns)} QC channels, {len(data.tracks)} tracks")
+        self.status.setText(
+            f"{data.file_info.name}: {data.count:,} samples, "
+            f"{len(data.columns)} QC channels, {len(data.tracks)} coordinate pairs"
+        )
+
+    def _group_for(self, name: str) -> str:
+        low = name.lower()
+        if any(x in low for x in ("hdop", "pdop", "vdop", "nos", "diffage", "fixquality", "refstation")):
+            return "GNSS quality"
+        if any(x in low for x in ("sog", "speed", "hdg", "heading", "cog", "pitch", "roll", "heave")):
+            return "Motion"
+        if any(x in low for x in ("depth", "altitude", "elevation", "barometer")):
+            return "Depth / elevation"
+        return "Other"
 
     def _build_channel_tree(self, data: BlackBoxData) -> None:
+        previous = set(self._selected_channels())
         blocker = QtCore.QSignalBlocker(self.channel_tree)
         self.channel_tree.clear()
-        groups = {
-            "GNSS quality": ["HDOP", "PDOP", "VDOP", "NOS", "DiffAge", "FixQuality"],
-            "Motion": ["SOG", "Speed", "HDG", "Heading", "COG", "Pitch", "Roll", "Heave"],
-            "Depth": ["Depth1", "Depth2", "Depth", "Altitude", "WaterDepth"],
-            "Other": [],
-        }
-        assigned: set[str] = set()
-        for group_name, candidates in groups.items():
-            group = QtWidgets.QTreeWidgetItem([group_name, ""])
-            group.setFlags(group.flags() & ~QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-            for name in candidates:
-                actual = next((key for key in data.columns if key.lower() == name.lower()), None)
-                if actual is None or actual in assigned:
-                    continue
-                child = QtWidgets.QTreeWidgetItem([actual, ""])
-                child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-                child.setCheckState(0, QtCore.Qt.CheckState.Checked if len(assigned) < 6 else QtCore.Qt.CheckState.Unchecked)
-                child.setData(0, QtCore.Qt.ItemDataRole.UserRole, actual)
-                group.addChild(child)
-                assigned.add(actual)
-            if group_name == "Other":
-                for actual in data.columns:
-                    if actual in assigned:
-                        continue
-                    child = QtWidgets.QTreeWidgetItem([actual, ""])
-                    child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-                    child.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
-                    child.setData(0, QtCore.Qt.ItemDataRole.UserRole, actual)
-                    group.addChild(child)
-                    assigned.add(actual)
-            if group.childCount():
+        groups: dict[str, QtWidgets.QTreeWidgetItem] = {}
+        for name in data.columns:
+            group_name = self._group_for(name)
+            group = groups.get(group_name)
+            if group is None:
+                group = QtWidgets.QTreeWidgetItem([group_name, "", ""])
+                group.setFlags(group.flags() & ~QtCore.Qt.ItemFlag.ItemIsUserCheckable)
                 group.setExpanded(group_name != "Other")
                 self.channel_tree.addTopLevelItem(group)
+                groups[group_name] = group
+            style = self._style(name)
+            item = make_swatch_item(name, str(style["color"]), float(style["width"]), name in previous)
+            group.addChild(item)
         del blocker
+        self._update_selected_count()
 
-    def _channel_changed(self, _item: QtWidgets.QTreeWidgetItem, _column: int) -> None:
-        # QTreeWidget can emit several itemChanged signals in one event cycle.
-        # Debouncing prevents pyqtgraph items from being destroyed and recreated
-        # re-entrantly while Qt is still processing an item-change callback.
-        self._redraw_timer.start()
+    def _iter_items(self):
+        for i in range(self.channel_tree.topLevelItemCount()):
+            group = self.channel_tree.topLevelItem(i)
+            for j in range(group.childCount()):
+                yield group.child(j)
 
     def _selected_channels(self) -> list[str]:
-        result: list[str] = []
-        root = self.channel_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            group = root.child(i)
+        return [str(item.data(0, QtCore.Qt.ItemDataRole.UserRole)) for item in self._iter_items()
+                if item.checkState(0) == QtCore.Qt.CheckState.Checked]
+
+    def _channel_changed(self, _item, _column) -> None:
+        self._update_selected_count()
+        self._redraw_timer.start()
+
+    def _update_selected_count(self) -> None:
+        count = len(self._selected_channels())
+        self.selection_label.setText(f"{count} selected")
+
+    def _set_all(self, checked: bool) -> None:
+        blocker = QtCore.QSignalBlocker(self.channel_tree)
+        for item in self._iter_items():
+            item.setCheckState(0, QtCore.Qt.CheckState.Checked if checked else QtCore.Qt.CheckState.Unchecked)
+        del blocker
+        self._update_selected_count()
+        self._redraw()
+
+    def _select_preset(self, tokens: tuple[str, ...]) -> None:
+        blocker = QtCore.QSignalBlocker(self.channel_tree)
+        selected = 0
+        for item in self._iter_items():
+            name = str(item.data(0, QtCore.Qt.ItemDataRole.UserRole) or "")
+            checked = any(token in name.lower() for token in tokens) and selected < self.max_plots.value()
+            item.setCheckState(0, QtCore.Qt.CheckState.Checked if checked else QtCore.Qt.CheckState.Unchecked)
+            selected += int(checked)
+        del blocker
+        self._update_selected_count()
+        self._redraw()
+
+    def _filter_channels(self, text: str) -> None:
+        text = text.strip().lower()
+        for i in range(self.channel_tree.topLevelItemCount()):
+            group = self.channel_tree.topLevelItem(i)
+            visible_count = 0
             for j in range(group.childCount()):
                 child = group.child(j)
-                if child.checkState(0) == QtCore.Qt.CheckState.Checked:
-                    value = child.data(0, QtCore.Qt.ItemDataRole.UserRole)
-                    if value:
-                        result.append(str(value))
-        return result
+                visible = not text or text in child.text(0).lower()
+                child.setHidden(not visible)
+                visible_count += int(visible)
+            group.setHidden(visible_count == 0)
+
+    def _show_channel_context_menu(self, position: QtCore.QPoint) -> None:
+        item = self.channel_tree.itemAt(position)
+        if item is None:
+            return
+        name = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if not name:
+            return
+        name = str(name)
+        style = self._style(name)
+        menu = QtWidgets.QMenu(self)
+        color_action = menu.addAction("Change color…")
+        width_action = menu.addAction("Change line thickness…")
+        reset_action = menu.addAction("Reset style")
+        selected = menu.exec(self.channel_tree.viewport().mapToGlobal(position))
+        if selected is color_action:
+            color = QtWidgets.QColorDialog.getColor(QtGui.QColor(str(style["color"])), self)
+            if color.isValid():
+                style["color"] = color.name()
+        elif selected is width_action:
+            value, ok = QtWidgets.QInputDialog.getDouble(self, "Line thickness", "Width", float(style["width"]), 0.2, 10.0, 1)
+            if ok:
+                style["width"] = value
+        elif selected is reset_action:
+            self._channel_styles.pop(name, None)
+            style = self._style(name)
+        else:
+            return
+        color = QtGui.QColor(str(style["color"]))
+        item.setBackground(1, QtGui.QBrush(color))
+        item.setText(2, f"{float(style['width']):.1f}")
+        self._redraw()
 
     def _redraw(self) -> None:
-        # Public redraw entry point. Queue the actual rebuild so it never runs
-        # recursively from a Qt itemChanged callback.
         self._redraw_timer.start()
 
     def _clear_plots(self) -> None:
@@ -201,65 +312,78 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
                 widget.deleteLater()
         self._plot_widgets.clear()
 
+    def _time_axis(self, data: BlackBoxData) -> tuple[float, str]:
+        duration = float(np.nanmax(data.time_seconds)) if data.time_seconds.size else 0.0
+        if duration >= 7200:
+            return 3600.0, "Elapsed time (h)"
+        if duration >= 300:
+            return 60.0, "Elapsed time (min)"
+        return 1.0, "Elapsed time (s)"
+
     def _redraw_now(self) -> None:
         self._clear_plots()
         data = self._data
-        if data is None or not data.count:
-            return
-
         selected = self._selected_channels()
-        if not selected:
-            label = QtWidgets.QLabel("Select channels in the left panel")
+        if data is None or not selected:
+            label = QtWidgets.QLabel("Select QC channels from the left panel")
             label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             self.plot_layout.addWidget(label, 1)
             return
 
-        previous_plot_item = None
-        for row, name in enumerate(selected):
-            widget = pg.PlotWidget()
-            widget.setBackground(None)
-            plot = widget.getPlotItem()
-            plot.setTitle(name)
-            plot.showGrid(x=True, y=True, alpha=0.2)
-            plot.setLabel("left", name)
+        max_count = self.max_plots.value()
+        if self.layout_combo.currentText() == "Stacked":
+            selected = selected[:max_count]
+            groups = [(name, [name]) for name in selected]
+        else:
+            groups = [("Selected BlackBox channels", selected[:max_count])]
 
-            values = np.asarray(data.columns[name], dtype=float)
+        scale, bottom_label = self._time_axis(data)
+        previous_plot = None
+        for row, (title, channels) in enumerate(groups):
+            axis_items = {
+                "bottom": ElapsedAxis(orientation="bottom", unit_scale=scale),
+                "left": PlainNumberAxis(orientation="left"),
+            }
+            widget = pg.PlotWidget(axisItems=axis_items)
+            widget.setBackground(PLOT_BG)
+            widget.setMinimumHeight(205 if len(groups) > 1 else 500)
+            plot = widget.getPlotItem()
+            style_plot(plot, title, "Value", bottom_label)
+            if previous_plot is not None:
+                plot.setXLink(previous_plot)
+            previous_plot = plot
+            if len(channels) > 1:
+                plot.addLegend(offset=(-10, 10))
+
+            plotted_values = []
             times = np.asarray(data.time_seconds, dtype=float)
-            finite = np.isfinite(values) & np.isfinite(times)
-            if finite.any():
+            for name in channels:
+                values = finite_qc(data.columns[name])
+                finite = np.isfinite(times) & np.isfinite(values)
+                if not finite.any():
+                    continue
+                style = self._style(name)
                 curve = pg.PlotDataItem(
-                    times[finite],
-                    values[finite],
-                    pen=pg.mkPen(width=1),
+                    times[finite], values[finite],
+                    pen=pg.mkPen(QtGui.QColor(str(style["color"])), width=float(style["width"])),
+                    name=name,
                 )
-                # Configure optimization only after the item belongs to a real
-                # PlotItem/ViewBox. This avoids the GraphicsLayoutWidget parent
-                # confusion seen in pyqtgraph's auto-downsample path.
                 plot.addItem(curve)
                 curve.setDownsampling(auto=True, method="peak")
                 curve.setClipToView(True)
-
-            if previous_plot_item is not None:
-                plot.setXLink(previous_plot_item)
-            previous_plot_item = plot
-
-            if row != len(selected) - 1:
+                plotted_values.append(values[finite])
+            y_range = robust_y_range(plotted_values)
+            if y_range:
+                plot.setYRange(*y_range, padding=0)
+            if row != len(groups) - 1:
                 plot.hideAxis("bottom")
-            else:
-                plot.setLabel("bottom", "Elapsed time", units="s")
-
-            widget.setMinimumHeight(145)
             self.plot_layout.addWidget(widget)
             self._plot_widgets.append(widget)
-
         self.plot_layout.addStretch(1)
 
     def _add_track(self) -> None:
-        if self._data is None:
-            return
-        source = self.track_source.currentText()
-        if source:
-            self.add_track_requested.emit(self._data, source)
+        if self._data is not None and self.track_source.currentText():
+            self.add_track_requested.emit(self._data, self.track_source.currentText())
 
     def _add_all_tracks(self) -> None:
         if self._data is not None:
@@ -268,5 +392,4 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
     def _add_all_files(self) -> None:
         file_ids = [info.file_id for info in self._files]
         if file_ids:
-            self.status.setText(f"Loading all coordinate pairs from {len(file_ids)} BlackBox files…")
             self.add_all_files_requested.emit(file_ids)

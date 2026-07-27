@@ -125,3 +125,17 @@ class BlackBoxData:
             if value[0].size:
                 return name, value[0], value[1]
         return None
+
+@dataclass(slots=True)
+class DsrQcData:
+    line: int
+    station: np.ndarray
+    columns: dict[str, np.ndarray] = field(default_factory=dict)
+
+    @property
+    def count(self) -> int:
+        return int(self.station.size)
+
+    @property
+    def channel_names(self) -> list[str]:
+        return list(self.columns.keys())

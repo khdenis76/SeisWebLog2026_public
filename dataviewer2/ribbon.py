@@ -69,6 +69,11 @@ class RibbonBar(QtWidgets.QTabWidget):
     bbox_reload_requested = QtCore.Signal()
     bbox_track_toggle_requested = QtCore.Signal(bool)
     bbox_zoom_requested = QtCore.Signal()
+    dsr_open_qc_requested = QtCore.Signal()
+    dsr_line_changed = QtCore.Signal(int)
+    dsr_station_changed = QtCore.Signal(int, int)
+    dsr_zoom_line_requested = QtCore.Signal(int)
+    dsr_zoom_station_requested = QtCore.Signal(int, int)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -131,6 +136,50 @@ class RibbonBar(QtWidgets.QTabWidget):
         visibility_group.add_button(self.show_all_button)
         visibility_group.add_button(self.hide_all_button)
         self._insert_group(layers, visibility_group)
+
+        _, dsr = self._new_tab("DSR QC")
+
+        dsr_select_group = RibbonGroup("Receiver selection")
+        selector_widget = QtWidgets.QWidget()
+        selector_layout = QtWidgets.QFormLayout(selector_widget)
+        selector_layout.setContentsMargins(4, 0, 4, 0)
+        selector_layout.setHorizontalSpacing(5)
+        selector_layout.setVerticalSpacing(3)
+        self.dsr_line_combo = QtWidgets.QComboBox()
+        self.dsr_line_combo.setEditable(True)
+        self.dsr_line_combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        self.dsr_line_combo.setMinimumWidth(130)
+        self.dsr_station_combo = QtWidgets.QComboBox()
+        self.dsr_station_combo.setEditable(True)
+        self.dsr_station_combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        self.dsr_station_combo.setMinimumWidth(130)
+        selector_layout.addRow("Line:", self.dsr_line_combo)
+        selector_layout.addRow("Station:", self.dsr_station_combo)
+        dsr_select_group.add_widget(selector_widget)
+        self._insert_group(dsr, dsr_select_group)
+
+        dsr_navigation_group = RibbonGroup("Navigation")
+        self.dsr_zoom_line_button = RibbonButton(
+            "Zoom line",
+            self._standard_icon(QtWidgets.QStyle.StandardPixmap.SP_DesktopIcon),
+        )
+        self.dsr_zoom_station_button = RibbonButton(
+            "Zoom station",
+            self._standard_icon(QtWidgets.QStyle.StandardPixmap.SP_DialogOpenButton),
+        )
+        self.dsr_open_qc_button = RibbonButton(
+            "Open QC",
+            self._standard_icon(QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon),
+        )
+        self.dsr_zoom_line_button.clicked.connect(self._emit_dsr_zoom_line)
+        self.dsr_zoom_station_button.clicked.connect(self._emit_dsr_zoom_station)
+        self.dsr_open_qc_button.clicked.connect(self.dsr_open_qc_requested)
+        self.dsr_line_combo.currentIndexChanged.connect(self._emit_dsr_line_changed)
+        self.dsr_station_combo.currentIndexChanged.connect(self._emit_dsr_station_changed)
+        dsr_navigation_group.add_button(self.dsr_zoom_line_button)
+        dsr_navigation_group.add_button(self.dsr_zoom_station_button)
+        dsr_navigation_group.add_button(self.dsr_open_qc_button)
+        self._insert_group(dsr, dsr_navigation_group)
 
         _, bbox = self._new_tab("BlackBox")
         bbox_group = RibbonGroup("Viewer")
@@ -203,6 +252,60 @@ class RibbonBar(QtWidgets.QTabWidget):
         display_group.add_button(self.grid_button)
         display_group.add_button(self.panel_button)
         self._insert_group(view, display_group)
+
+    def set_dsr_lines(self, lines: list[int], selected: int | None = None) -> None:
+        blocker = QtCore.QSignalBlocker(self.dsr_line_combo)
+        self.dsr_line_combo.clear()
+        for line in lines:
+            self.dsr_line_combo.addItem(str(line), int(line))
+        if selected is not None:
+            index = self.dsr_line_combo.findData(int(selected))
+            if index >= 0:
+                self.dsr_line_combo.setCurrentIndex(index)
+        del blocker
+        if self.dsr_line_combo.count() and self.dsr_line_combo.currentIndex() < 0:
+            self.dsr_line_combo.setCurrentIndex(0)
+
+    def set_dsr_stations(self, stations: list[int], selected: int | None = None) -> None:
+        blocker = QtCore.QSignalBlocker(self.dsr_station_combo)
+        self.dsr_station_combo.clear()
+        for station in stations:
+            self.dsr_station_combo.addItem(str(station), int(station))
+        if selected is not None:
+            index = self.dsr_station_combo.findData(int(selected))
+            if index >= 0:
+                self.dsr_station_combo.setCurrentIndex(index)
+        del blocker
+
+    def current_dsr_line(self) -> int | None:
+        value = self.dsr_line_combo.currentData()
+        return None if value is None else int(value)
+
+    def current_dsr_station(self) -> int | None:
+        value = self.dsr_station_combo.currentData()
+        return None if value is None else int(value)
+
+    def _emit_dsr_line_changed(self, _index: int) -> None:
+        line = self.current_dsr_line()
+        if line is not None:
+            self.dsr_line_changed.emit(line)
+
+    def _emit_dsr_station_changed(self, _index: int) -> None:
+        line = self.current_dsr_line()
+        station = self.current_dsr_station()
+        if line is not None and station is not None:
+            self.dsr_station_changed.emit(line, station)
+
+    def _emit_dsr_zoom_line(self) -> None:
+        line = self.current_dsr_line()
+        if line is not None:
+            self.dsr_zoom_line_requested.emit(line)
+
+    def _emit_dsr_zoom_station(self) -> None:
+        line = self.current_dsr_line()
+        station = self.current_dsr_station()
+        if line is not None and station is not None:
+            self.dsr_zoom_station_requested.emit(line, station)
 
     def set_measurement_checked(self, enabled: bool) -> None:
         blocker = QtCore.QSignalBlocker(self.measure_button)

@@ -6,7 +6,7 @@ from typing import Iterable
 
 import numpy as np
 
-from .models import PointLayerData, ProjectShapeDefinition, BlackBoxData, BlackBoxFileInfo
+from .models import PointLayerData, ProjectShapeDefinition, BlackBoxData, BlackBoxFileInfo, DsrQcData
 
 
 class ProjectRepositoryError(RuntimeError):
@@ -111,6 +111,76 @@ class ProjectRepository:
                 params.append(int(line))
             rows = connection.execute(f'SELECT {", ".join(select)} FROM REC_DB WHERE {" AND ".join(where)}', params).fetchall()
         return self._rows_to_layer("REC_DB", rows)
+
+
+    def list_dsr_lines(self) -> list[int]:
+        """Return receiver lines available in DSR, sorted numerically."""
+        with self._connect() as connection:
+            columns = self._table_columns(connection, "DSR")
+            line_col = self._first(columns, ("Line", "RLine", "ReceiverLine"))
+            if not line_col:
+                return []
+            rows = connection.execute(
+                f'SELECT DISTINCT "{line_col}" FROM DSR '
+                f'WHERE "{line_col}" IS NOT NULL ORDER BY CAST("{line_col}" AS INTEGER)'
+            ).fetchall()
+        result: list[int] = []
+        for row in rows:
+            try:
+                result.append(int(row[0]))
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    def load_dsr_qc(self, line: int) -> DsrQcData:
+        """Load all usable numeric DSR parameters for one receiver line.
+
+        Column discovery is dynamic because DSR QC field names differ between
+        projects. Station is used as the common x-axis. Coordinate, offset,
+        sigma, depth and other numeric fields are returned and grouped by the
+        QC window.
+        """
+        with self._connect() as connection:
+            columns = self._table_columns(connection, "DSR")
+            line_col = self._first(columns, ("Line", "RLine", "ReceiverLine"))
+            station_col = self._first(columns, ("Station", "LinePoint", "Point"))
+            if not line_col or not station_col:
+                raise ProjectRepositoryError("DSR Line/Station columns were not found.")
+
+            # Keep all DSR columns so the QC viewer can expose project-specific
+            # metrics. Conversion below discards text/categorical fields.
+            ordered_columns = sorted(columns)
+            select = ", ".join(f'"{name}"' for name in ordered_columns)
+            rows = connection.execute(
+                f'SELECT {select} FROM DSR WHERE "{line_col}" = ? '
+                f'ORDER BY CAST("{station_col}" AS REAL)',
+                (int(line),),
+            ).fetchall()
+
+        count = len(rows)
+        if count == 0:
+            return DsrQcData(int(line), np.array([], dtype=np.float64), {})
+
+        station = self._numeric_array(rows, station_col)
+        exclude = {
+            line_col.lower(), station_col.lower(), "id", "file_fk", "solution_fk",
+            "rlpreplot_fk", "preplot_fk", "node", "node_hex_id", "auqrcode",
+            "remoteunit", "rov", "rov1", "status", "comments",
+        }
+        numeric: dict[str, np.ndarray] = {}
+        minimum_finite = max(3, count // 20)
+        for name in ordered_columns:
+            if name.lower() in exclude:
+                continue
+            values = self._numeric_array(rows, name)
+            if int(np.isfinite(values).sum()) < minimum_finite:
+                continue
+            # Do not add a duplicate of the station axis.
+            if name == station_col:
+                continue
+            numeric[name] = values
+
+        return DsrQcData(int(line), station, numeric)
 
 
     def load_shape_definitions(self) -> list[ProjectShapeDefinition]:

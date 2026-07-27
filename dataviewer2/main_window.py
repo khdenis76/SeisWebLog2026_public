@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import hashlib
 from pathlib import Path
 
 import pyqtgraph as pg
@@ -15,6 +16,7 @@ from .ribbon import RibbonBar
 from .shapes import load_shapefile
 from .workers import FunctionWorker
 from .bbox import BlackBoxWindow
+from .dsr_qc import DsrQcWindow
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -35,6 +37,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bbox_data_by_file: dict[int, BlackBoxData] = {}
         self.bbox_track_layer_names: dict[tuple[int, str], str] = {}
         self.bbox_last_track_layer_name: str | None = None
+        self.dsr_qc_window: DsrQcWindow | None = None
+        self.dsr_qc_cache: dict[int, object] = {}
+        self._dsr_qc_request_line: int | None = None
+        self.dsr_station_marker: pg.ScatterPlotItem | None = None
         self._build_ui()
         self._restore_state()
         self._start_loading()
@@ -87,6 +93,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ribbon.bbox_reload_requested.connect(self._load_bbox_files)
         self.ribbon.bbox_track_toggle_requested.connect(self._toggle_bbox_track)
         self.ribbon.bbox_zoom_requested.connect(self._zoom_bbox_track)
+        self.ribbon.dsr_open_qc_requested.connect(self._open_dsr_qc_window)
+        self.ribbon.dsr_line_changed.connect(self._dsr_line_changed)
+        self.ribbon.dsr_station_changed.connect(self._select_dsr_station)
+        self.ribbon.dsr_zoom_line_requested.connect(self._zoom_dsr_line)
+        self.ribbon.dsr_zoom_station_requested.connect(self._zoom_dsr_station)
 
         epsg = self.repository.project_epsg() or "unknown"
         self.coord_label = QtWidgets.QLabel("X: —   Y: —")
@@ -230,6 +241,8 @@ class MainWindow(QtWidgets.QMainWindow):
         layer.set_data(data)
         layer.selection_changed.connect(self._show_record)
         self._register_layer(group, name, data.count, layer)
+        if name == "DSR Primary":
+            self._populate_dsr_ribbon(data)
         self._finish_load()
 
     def _register_shape_data(self, data: ShapeLayerData) -> None:
@@ -291,6 +304,8 @@ class MainWindow(QtWidgets.QMainWindow):
         down_action.triggered.connect(lambda: self._move_layer(name, "down"))
         bottom_action.triggered.connect(lambda: self._move_layer(name, "bottom"))
         menu.addSeparator()
+        style_action = menu.addAction("Style…")
+        style_action.triggered.connect(lambda: self._edit_layer_style(name))
         properties_action = menu.addAction("Properties")
         properties_action.triggered.connect(lambda: self._show_layer_properties(name))
         reload_action = menu.addAction("Reload all layers")
@@ -384,6 +399,93 @@ class MainWindow(QtWidgets.QMainWindow):
         xmin, xmax, ymin, ymax = layer.bounds
         QtWidgets.QApplication.clipboard().setText(f"{xmin:.3f}, {xmax:.3f}, {ymin:.3f}, {ymax:.3f}")
         self.statusBar().showMessage("Layer extent copied", 2500)
+
+    def _edit_layer_style(self, name: str) -> None:
+        layer = self.layers.get(name)
+        if not isinstance(layer, FastPointLayer):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Layer style",
+                "Style editing is currently available for point and track layers.",
+            )
+            return
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Layer style — {name}")
+        form = QtWidgets.QFormLayout(dialog)
+
+        line_button = QtWidgets.QPushButton(layer.line_color)
+        point_button = QtWidgets.QPushButton(layer.point_color)
+        line_width = QtWidgets.QDoubleSpinBox()
+        line_width.setRange(0.2, 20.0)
+        line_width.setDecimals(1)
+        line_width.setSingleStep(0.5)
+        line_width.setValue(layer.line_width)
+        point_size = QtWidgets.QDoubleSpinBox()
+        point_size.setRange(1.0, 30.0)
+        point_size.setDecimals(1)
+        point_size.setSingleStep(1.0)
+        point_size.setValue(layer.point_size)
+
+        selected = {
+            "line": QtGui.QColor(layer.line_color),
+            "point": QtGui.QColor(layer.point_color),
+        }
+
+        def update_button(button: QtWidgets.QPushButton, color: QtGui.QColor) -> None:
+            button.setText(color.name())
+            foreground = "#000000" if color.lightness() > 150 else "#ffffff"
+            button.setStyleSheet(
+                f"background-color: {color.name()}; color: {foreground};"
+            )
+
+        def choose(key: str, button: QtWidgets.QPushButton) -> None:
+            color = QtWidgets.QColorDialog.getColor(selected[key], dialog)
+            if color.isValid():
+                selected[key] = color
+                update_button(button, color)
+
+        update_button(line_button, selected["line"])
+        update_button(point_button, selected["point"])
+        line_button.clicked.connect(lambda: choose("line", line_button))
+        point_button.clicked.connect(lambda: choose("point", point_button))
+
+        form.addRow("Line color:", line_button)
+        form.addRow("Point color:", point_button)
+        form.addRow("Line thickness:", line_width)
+        form.addRow("Point size:", point_size)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        layer.update_style(
+            line_color=selected["line"].name(),
+            point_color=selected["point"].name(),
+            line_width=line_width.value(),
+            point_size=point_size.value(),
+        )
+        self.statusBar().showMessage(f"Updated style: {name}", 2500)
+
+    @staticmethod
+    def _bbox_layer_color(file_id: int, source: str) -> str:
+        """Return a stable high-contrast color for file + coordinate source."""
+        palette = (
+            "#00E5FF", "#FFD740", "#FF6E40", "#EA80FC",
+            "#69F0AE", "#82B1FF", "#FF80AB", "#B2FF59",
+            "#FFAB40", "#7C4DFF", "#18FFFF", "#FFFF00",
+            "#FF5252", "#40C4FF", "#64FFDA", "#E040FB",
+        )
+        key = f"{int(file_id)}::{source}".encode("utf-8", errors="ignore")
+        digest = hashlib.blake2b(key, digest_size=2).digest()
+        return palette[int.from_bytes(digest, "little") % len(palette)]
 
     def _show_layer_properties(self, name: str) -> None:
         layer = self.layers.get(name)
@@ -497,6 +599,157 @@ class MainWindow(QtWidgets.QMainWindow):
         self.details_dock.show()
         self.details_dock.raise_()
 
+    @staticmethod
+    def _numeric_values(values: np.ndarray | None) -> np.ndarray:
+        if values is None:
+            return np.array([], dtype=np.float64)
+        result = np.empty(len(values), dtype=np.float64)
+        result.fill(np.nan)
+        for index, value in enumerate(values):
+            try:
+                result[index] = float(value)
+            except (TypeError, ValueError):
+                pass
+        return result
+
+    def _dsr_primary_data(self) -> PointLayerData | None:
+        layer = self.layers.get("DSR Primary")
+        if isinstance(layer, FastPointLayer):
+            return layer.data
+        return None
+
+    def _populate_dsr_ribbon(self, data: PointLayerData) -> None:
+        lines = self._numeric_values(data.metadata.get("line"))
+        valid = lines[np.isfinite(lines)]
+        line_list = sorted({int(round(value)) for value in valid})
+        self.ribbon.set_dsr_lines(line_list)
+        if line_list:
+            self._dsr_line_changed(line_list[0])
+
+    def _dsr_line_changed(self, line: int) -> None:
+        data = self._dsr_primary_data()
+        if data is None:
+            return
+        lines = self._numeric_values(data.metadata.get("line"))
+        stations = self._numeric_values(data.metadata.get("station"))
+        rounded_lines = np.zeros(lines.size, dtype=np.int64)
+        finite_lines = np.isfinite(lines)
+        rounded_lines[finite_lines] = np.rint(lines[finite_lines]).astype(np.int64)
+        mask = finite_lines & np.isfinite(stations) & (rounded_lines == int(line))
+        station_list = sorted({int(round(value)) for value in stations[mask]})
+        self.ribbon.set_dsr_stations(station_list)
+        if self.dsr_qc_window is not None and self.dsr_qc_window.isVisible():
+            self.dsr_qc_window.select_line(int(line))
+
+    def _ensure_dsr_qc_window(self) -> DsrQcWindow:
+        if self.dsr_qc_window is None:
+            window = DsrQcWindow(self)
+            window.line_requested.connect(self._load_dsr_qc_line)
+            window.station_selected.connect(self._select_dsr_station)
+            window.zoom_station_requested.connect(self._zoom_dsr_station)
+            self.dsr_qc_window = window
+        return self.dsr_qc_window
+
+    def _open_dsr_qc_window(self) -> None:
+        window = self._ensure_dsr_qc_window()
+        data = self._dsr_primary_data()
+        lines: list[int] = []
+        if data is not None:
+            line_values = self._numeric_values(data.metadata.get("line"))
+            lines = sorted({int(round(value)) for value in line_values[np.isfinite(line_values)]})
+        selected = self.ribbon.current_dsr_line()
+        window.set_lines(lines, selected)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        if selected is not None:
+            self._load_dsr_qc_line(selected)
+
+    def _load_dsr_qc_line(self, line: int) -> None:
+        line = int(line)
+        window = self._ensure_dsr_qc_window()
+        cached = self.dsr_qc_cache.get(line)
+        if cached is not None:
+            window.set_data(cached)
+            return
+        self._dsr_qc_request_line = line
+        window.set_loading(line)
+        worker = FunctionWorker(lambda selected_line=line: self.repository.load_dsr_qc(selected_line))
+        worker.signals.completed.connect(self._dsr_qc_loaded)
+        worker.signals.failed.connect(window.set_error)
+        self._start_worker(worker)
+
+    def _dsr_qc_loaded(self, data: object) -> None:
+        line = int(getattr(data, "line"))
+        self.dsr_qc_cache[line] = data
+        window = self._ensure_dsr_qc_window()
+        if self._dsr_qc_request_line in {None, line}:
+            window.set_data(data)
+
+    def _dsr_indices(self, line: int, station: int | None = None) -> np.ndarray:
+        data = self._dsr_primary_data()
+        if data is None:
+            return np.array([], dtype=np.int64)
+        lines = self._numeric_values(data.metadata.get("line"))
+        finite_lines = np.isfinite(lines)
+        rounded_lines = np.zeros(lines.size, dtype=np.int64)
+        rounded_lines[finite_lines] = np.rint(lines[finite_lines]).astype(np.int64)
+        mask = finite_lines & (rounded_lines == int(line))
+        if station is not None:
+            stations = self._numeric_values(data.metadata.get("station"))
+            finite_stations = np.isfinite(stations)
+            rounded_stations = np.zeros(stations.size, dtype=np.int64)
+            rounded_stations[finite_stations] = np.rint(stations[finite_stations]).astype(np.int64)
+            mask &= finite_stations & (rounded_stations == int(station))
+        mask &= np.isfinite(data.x) & np.isfinite(data.y)
+        return np.flatnonzero(mask)
+
+    def _zoom_dsr_line(self, line: int) -> None:
+        data = self._dsr_primary_data()
+        indices = self._dsr_indices(line)
+        if data is None or indices.size == 0:
+            self.statusBar().showMessage(f"No DSR Primary positions found for line {line}", 4000)
+            return
+        x = data.x[indices]
+        y = data.y[indices]
+        self._set_view_extent((float(x.min()), float(x.max()), float(y.min()), float(y.max())))
+        self.statusBar().showMessage(f"Zoomed to DSR line {line}: {indices.size:,} station record(s)", 3000)
+
+    def _select_dsr_station(self, line: int, station: int) -> None:
+        data = self._dsr_primary_data()
+        indices = self._dsr_indices(line, station)
+        if data is None or indices.size == 0:
+            return
+        index = int(indices[0])
+        x = float(data.x[index])
+        y = float(data.y[index])
+        if self.dsr_station_marker is None:
+            self.dsr_station_marker = pg.ScatterPlotItem(
+                size=18,
+                symbol="o",
+                pen=pg.mkPen("#ffffff", width=2.5),
+                brush=pg.mkBrush("#ff1744"),
+                pxMode=True,
+            )
+            self.dsr_station_marker.setZValue(100000.0)
+            self.plot_item.addItem(self.dsr_station_marker)
+        self.dsr_station_marker.setData([x], [y])
+        self._show_record("DSR Primary", index)
+        self.statusBar().showMessage(f"Selected DSR line {line}, station {station}", 3000)
+
+    def _zoom_dsr_station(self, line: int, station: int) -> None:
+        data = self._dsr_primary_data()
+        indices = self._dsr_indices(line, station)
+        if data is None or indices.size == 0:
+            self.statusBar().showMessage(f"Station {station} was not found on line {line}", 4000)
+            return
+        index = int(indices[0])
+        x = float(data.x[index])
+        y = float(data.y[index])
+        self._select_dsr_station(line, station)
+        radius = 25.0
+        self._set_view_extent((x - radius, x + radius, y - radius, y + radius))
+
     def _ensure_bbox_window(self) -> BlackBoxWindow:
         if self.bbox_window is None:
             window = BlackBoxWindow(self)
@@ -594,14 +847,20 @@ class MainWindow(QtWidgets.QMainWindow):
             "track_group": np.zeros(x.size, dtype=np.int8),
         }
         point_data = PointLayerData(f"BlackBox {source}", x, y, source_index, metadata)
-        palette = {
-            "GNSS1": "#00ffff", "GNSS2": "#ffff00", "Vessel": "#ff8c00",
-            "INS": "#ff4dff", "USBL": "#00ff66", "ROV1": "#66a3ff",
-            "ROV2": "#ff6666",
-        }
-        color = palette.get(source, "#ffffff")
-        layer = FastPointLayer(self.plot_item, point_data.name, color, color, "track_group")
-        layer.curve.setPen(pg.mkPen(color, width=2.5))
+        color = self._bbox_layer_color(data.file_info.file_id, source)
+        layer = FastPointLayer(
+            self.plot_item,
+            point_data.name,
+            color,
+            color,
+            "track_group",
+        )
+        layer.update_style(
+            point_color=color,
+            line_color=color,
+            line_width=2.5,
+            point_size=7.0,
+        )
         layer.curve.setZValue(100)
         layer.scatter.setZValue(100.1)
         layer.scatter.setSize(7)
@@ -664,6 +923,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.layer_items.clear()
         self.bbox_track_layer_names.clear()
         self.bbox_last_track_layer_name = None
+        self.dsr_qc_cache.clear()
+        if self.dsr_station_marker is not None:
+            self.plot_item.removeItem(self.dsr_station_marker)
+            self.dsr_station_marker = None
         self.layer_tree.clear()
         self.measurement.clear()
         self.details.clear()

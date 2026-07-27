@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from .models import PointLayerData
 
@@ -19,8 +19,22 @@ class FastPointLayer(QtCore.QObject):
         self.visible = True
         self.max_visible_points = 30000
         self.show_points_below = 50000
-        self.curve = pg.PlotCurveItem(pen=pg.mkPen(line_color or point_color, width=1), connect="finite", antialias=False)
-        self.scatter = pg.ScatterPlotItem(size=5, pxMode=True, brush=pg.mkBrush(point_color), pen=None, useCache=True)
+        self.point_color = str(point_color)
+        self.line_color = str(line_color or point_color)
+        self.line_width = 1.0
+        self.point_size = 5.0
+        self.curve = pg.PlotCurveItem(
+            pen=pg.mkPen(QtGui.QColor(self.line_color), width=self.line_width),
+            connect="finite",
+            antialias=False,
+        )
+        self.scatter = pg.ScatterPlotItem(
+            size=self.point_size,
+            pxMode=True,
+            brush=pg.mkBrush(QtGui.QColor(self.point_color)),
+            pen=None,
+            useCache=True,
+        )
         self.scatter.sigClicked.connect(self._clicked)
         self.display_indices = np.array([], dtype=np.int64)
         plot_item.addItem(self.curve)
@@ -76,12 +90,38 @@ class FastPointLayer(QtCore.QObject):
         distance = float(np.sqrt(d2[local]))
         return (int(idx[local]), distance) if distance <= tolerance else None
 
-    def _clicked(self, _scatter: pg.ScatterPlotItem, points: list[pg.SpotItem], _event: object) -> None:
-        if not points or self.data is None:
+    def _clicked(self, _scatter: pg.ScatterPlotItem, points, _event: object) -> None:
+        if self.data is None:
+            return
+        if points is None or len(points) == 0:
             return
         local_index = int(points[0].data())
         if 0 <= local_index < self.display_indices.size:
             self.selection_changed.emit(self.name, int(self.display_indices[local_index]))
+
+    def update_style(
+        self,
+        *,
+        point_color: str | None = None,
+        line_color: str | None = None,
+        line_width: float | None = None,
+        point_size: float | None = None,
+    ) -> None:
+        """Update point/track styling without rebuilding the layer data."""
+        if point_color is not None:
+            self.point_color = str(point_color)
+        if line_color is not None:
+            self.line_color = str(line_color)
+        if line_width is not None:
+            self.line_width = max(0.2, float(line_width))
+        if point_size is not None:
+            self.point_size = max(1.0, float(point_size))
+
+        self.curve.setPen(
+            pg.mkPen(QtGui.QColor(self.line_color), width=self.line_width)
+        )
+        self.scatter.setBrush(pg.mkBrush(QtGui.QColor(self.point_color)))
+        self.scatter.setSize(self.point_size)
 
     @property
     def bounds(self):
