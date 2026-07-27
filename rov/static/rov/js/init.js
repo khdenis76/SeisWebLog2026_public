@@ -39,6 +39,7 @@ import {initPlotlyResize} from "./initPlotlyResize.js";
 import {initExportNodePositionReports} from "./initExportNodePositionReports.js";
 import {initPolarHistogramTabs} from "./initPolarHistogramTabs.js";
 import {initDailySMDaySelect} from "./initDailySMSelect.js";
+import {initSMLineSelect} from "./initSMLineSelect.js";
 
 
 
@@ -67,6 +68,7 @@ export function initAllJSForRovUpload() {
   initDsrRovListAutoReload();
   initDailyProdDaySelect();
   initDailySMDaySelect();
+  initSMLineSelect();
   initExportSpsModal();
   initDsrExportSmModal({ rovNames: window.DSR_ROV_NAMES || [] });
   initBBoxFileTable();

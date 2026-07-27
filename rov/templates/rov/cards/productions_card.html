@@ -182,6 +182,25 @@
                 id="sm-day-select"
                 data-dayurl="{% url 'select_sm_day' %}">
         </div>
+        <div class="col-auto">
+
+              <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="sm-line-input"
+                  list="sm-line-list"
+                  placeholder="Select or enter line"
+                  autocomplete="off"
+                  data-lineurl="{% url 'select_sm_line' %}">
+
+              <datalist id="sm-line-list">
+                  {% for line in rl_lines %}
+                      <option value="{{ line.Line }}"></option>
+                  {% endfor %}
+              </datalist>
+        </div>
+
+
     </div>
 
     {% include "rov/partials/sm_daily_production_tabs.html" %}

@@ -4683,6 +4683,7 @@ WHERE Area IS NOT NULL
             if own_conn:
                 conn.close()
 
+
     def refresh_dsr_line_summary_lines(self, lines, conn=None) -> int:
         """
         Incremental refresh for only changed lines.
@@ -4849,6 +4850,59 @@ WHERE Area IS NOT NULL
             rows = conn.execute(query, (date,)).fetchall()
 
         return [dict(row) for row in rows]
+
+    def get_sm_comparison_by_line(self, line):
+        query = """
+            SELECT
+                Line,
+                Station,
+                Node AS DSRNode,
+
+                CASE
+                    WHEN AUQRCode IS NOT NULL
+                         AND TRIM(AUQRCode) <> ''
+                    THEN AUQRCode
+                    ELSE RemoteUnit
+                END AS SMNode,
+
+                ROV,
+
+                PrimaryEasting AS DsrEasting,
+                PrimaryNorthing AS DsrNorthing,
+                PrimaryElevation AS DsrElevation,
+
+                ActualX AS SMEasting,
+                ActualY AS SMNorthing,
+                ActualZ AS SMElevation,
+
+                PrimaryEasting - ActualX AS dX,
+                PrimaryNorthing - ActualY AS dY,
+                ABS(PrimaryElevation) - ABS(ActualZ) AS dZ,
+
+                Comments AS DSRComments
+
+            FROM DSR
+            WHERE Line = ?
+            ORDER BY Line, Station
+        """
+
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, (line,)).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def get_rlsolution_lines(self):
+        query = """
+            SELECT DISTINCT Line
+            FROM DSR_LineSummary 
+            ORDER BY Line
+        """
+
+        with self._connect() as conn:
+            rows = conn.execute(query).fetchall()
+
+        return [row[0] for row in rows]
 
 
 
