@@ -2346,6 +2346,60 @@ WHERE Area IS NOT NULL
             rows = conn.execute(sql, params).fetchall()
 
         return [dict(row) for row in rows]
+    def get_daily_sm(
+            self,
+            date: str | None = None,
+            line: str | None = None,
+            rov: str | None = None,
+            view_name: str = "Daily_Recovery",
+            order_by: str = "ProdDate, Line, ROV",
+    ):
+        """
+        Read data from SQLite view/table (default: Daily_Recovery).
+
+        Parameters:
+            date : 'YYYY-MM-DD'
+            line : line name
+            rov  : rov name
+            view_name : SQLite view or table name
+            order_by : custom ORDER BY clause
+
+        Returns:
+            list of dict rows
+        """
+
+        sql = f"""
+            SELECT
+                ProdDate,
+                Line,
+                ROV,
+                FRP,
+                LRP,
+                TotalNodes
+            FROM {view_name}
+            WHERE 1=1
+        """
+
+        params = []
+
+        if date:
+            sql += " AND ProdDate = ?"
+            params.append(date)
+
+        if line:
+            sql += " AND Line = ?"
+            params.append(line)
+
+        if rov:
+            sql += f" AND ROV = ?"
+            params.append(rov)
+
+        sql += f" ORDER BY {order_by}"
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        return [dict(row) for row in rows]
 
     def export_dsr_to_sm(
             self,
@@ -4752,6 +4806,49 @@ WHERE Area IS NOT NULL
             if own_conn:
                 conn.close()
 
+    def get_daily_sm_comparison(self, date, day_field="Day",rov_field = "ROV"):
+        if day_field not in ("Day", "Day1"):
+            raise ValueError("Invalid day field")
+
+        query = f"""
+            SELECT
+                    Line,
+                    Station,
+                    Node AS DSRNode,
+                
+                    CASE
+                        WHEN AUQRCode IS NOT NULL AND TRIM(AUQRCode) <> ''
+                            THEN AUQRCode
+                        ELSE RemoteUnit
+                    END AS SMNode,
+                
+                    AUQRCode,
+                    {rov_field} as ROV,
+                
+                    PrimaryEasting AS DsrEasting,
+                    PrimaryNorthing AS DsrNorthing,
+                    PrimaryElevation AS DsrElevation,
+                
+                    ActualX AS SMEasting,
+                    ActualY AS SMNorthing,
+                    ActualZ AS SMElevation,
+                
+                    PrimaryEasting - ActualX AS dX,
+                    PrimaryNorthing - ActualY AS dY,
+                    ABS(ABS(PrimaryElevation) - ABS(ActualZ)) AS dZ,
+                
+                    Comments AS DSRComments
+                
+                FROM DSR
+                WHERE {day_field} = ?
+                ORDER BY Line, Station;
+        """
+
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, (date,)).fetchall()
+
+        return [dict(row) for row in rows]
 
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .cleaners import clean_value
+from .cleaners import clean_value, format_value
 
 try:
     import pytesseract
@@ -93,3 +93,8 @@ class OCREngine:
                 best = txt
 
         return best
+
+    def read_roi(self, crop: np.ndarray, roi) -> str:
+        """Recognize and apply the output format stored in an ROIField."""
+        raw = self.read_text(crop, getattr(roi, "field_type", "text"))
+        return format_value(raw, roi)

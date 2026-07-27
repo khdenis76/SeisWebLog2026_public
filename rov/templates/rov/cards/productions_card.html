@@ -28,13 +28,21 @@
                             DAILY PRODUCTION
                        </button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link"
+                        id="sm-tab" data-bs-toggle="pill"
+                        data-bs-target="#pills-sm"
+                        type="button" role="tab" aria-controls="pills-sm" aria-selected="false">
+                    <i class="fas fa-calendar"></i>
+                            SM(Survey manager)
+                       </button>
+            </li>
         </ul>
         <div class="tab-content mt-0" id="pills-tabContent">
                <div class="tab-pane fade show active" id="pills-dsr" role="tabpanel" aria-labelledby="pills-dsr-tab" tabindex="0">
-                     <div class="clearfix mb-1">
-
-                                {% include "rov/partials/dsr_sort_button.html" %}
-                           </div>
+                     <div class="clearfix mb-2 mt-2 bg-body">
+                          {% include "rov/partials/dsr_sort_button.html" %}
+                     </div>
                      {% include "rov/partials/dsr_line_table.html" %}
                       <div class="clearfix mt-2">
                        <button type="button"
@@ -153,14 +161,32 @@
                             </button>
                     </div>
                </div>
-            <div class="tab-pane fade" id="pills-daily-prod" role="tabpanel" aria-labelledby="daily-prod-tab" tabindex="0">
-                <div class="row">
-                    <input type="date" id="production-day-select" data-dayurl ="{% url 'select_prod_day' %}">
-                </div>
-                <div class="w-100" id="daily-prod-container" style="height:45vh">
+               <div class="tab-pane fade" id="pills-daily-prod" role="tabpanel" aria-labelledby="daily-prod-tab" tabindex="0">
+                     <div class="row">
+                            <input type="date" id="production-day-select" data-dayurl ="{% url 'select_prod_day' %}">
+                     </div>
+                     <div class="w-100" id="daily-prod-container" style="height:45vh"></div>
+               </div>
 
-                </div>
-            </div>
+               <div class="tab-pane fade"
+     id="pills-sm"
+     role="tabpanel"
+     aria-labelledby="sm-tab"
+     tabindex="0">
+
+    <div class="row mb-2">
+        <div class="col-auto">
+            <input
+                type="date"
+                class="form-control form-control-sm"
+                id="sm-day-select"
+                data-dayurl="{% url 'select_sm_day' %}">
+        </div>
+    </div>
+
+    {% include "rov/partials/sm_daily_production_tabs.html" %}
+
+</div>
 
         </div>
     </div><!--End of card-body -->

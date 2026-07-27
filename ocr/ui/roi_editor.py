@@ -45,6 +45,8 @@ class RoiRow:
     y: int = 0
     w: int = 100
     h: int = 40
+    digits_before: int = 0
+    digits_after: int = 0
 
 
 class RoiRectItem(QGraphicsRectItem):
@@ -227,8 +229,8 @@ class RoiEditorDialog(QDialog):
 
         right_layout.addWidget(info_box)
 
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["name", "type", "x", "y", "w", "h"])
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels(["name", "type", "digits before", "digits after", "x", "y", "w", "h"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -287,6 +289,8 @@ class RoiEditorDialog(QDialog):
             if isinstance(r, dict):
                 name = r.get("name", "roi")
                 field_type = r.get("field_type", r.get("type", "text"))
+                digits_before = r.get("digits_before", r.get("integer_digits", 0))
+                digits_after = r.get("digits_after", r.get("decimal_digits", 0))
                 x = r.get("x", 0)
                 y = r.get("y", 0)
                 w = r.get("w", 100)
@@ -294,6 +298,8 @@ class RoiEditorDialog(QDialog):
             else:
                 name = getattr(r, "name", "roi")
                 field_type = getattr(r, "field_type", getattr(r, "type", "text"))
+                digits_before = getattr(r, "digits_before", getattr(r, "integer_digits", 0))
+                digits_after = getattr(r, "digits_after", getattr(r, "decimal_digits", 0))
                 x = getattr(r, "x", 0)
                 y = getattr(r, "y", 0)
                 w = getattr(r, "w", 100)
@@ -303,6 +309,8 @@ class RoiEditorDialog(QDialog):
                 RoiRow(
                     name=str(name),
                     field_type=str(field_type),
+                    digits_before=max(0, int(digits_before or 0)),
+                    digits_after=max(0, int(digits_after or 0)),
                     x=int(x),
                     y=int(y),
                     w=int(w),
@@ -401,10 +409,12 @@ class RoiEditorDialog(QDialog):
             return RoiRow(
                 name=(self.table.item(row, 0).text().strip() if self.table.item(row, 0) else "roi"),
                 field_type=(self.table.item(row, 1).text().strip() if self.table.item(row, 1) else "text"),
-                x=int(float(self.table.item(row, 2).text().strip() if self.table.item(row, 2) else 0)),
-                y=int(float(self.table.item(row, 3).text().strip() if self.table.item(row, 3) else 0)),
-                w=max(1, int(float(self.table.item(row, 4).text().strip() if self.table.item(row, 4) else 1))),
-                h=max(1, int(float(self.table.item(row, 5).text().strip() if self.table.item(row, 5) else 1))),
+                digits_before=max(0, int(float(self.table.item(row, 2).text().strip() if self.table.item(row, 2) else 0))),
+                digits_after=max(0, int(float(self.table.item(row, 3).text().strip() if self.table.item(row, 3) else 0))),
+                x=int(float(self.table.item(row, 4).text().strip() if self.table.item(row, 4) else 0)),
+                y=int(float(self.table.item(row, 5).text().strip() if self.table.item(row, 5) else 0)),
+                w=max(1, int(float(self.table.item(row, 6).text().strip() if self.table.item(row, 6) else 1))),
+                h=max(1, int(float(self.table.item(row, 7).text().strip() if self.table.item(row, 7) else 1))),
             )
         except Exception:
             return None
@@ -422,7 +432,7 @@ class RoiEditorDialog(QDialog):
         self.table.setRowCount(len(self.rois))
 
         for i, r in enumerate(self.rois):
-            vals = [r.name, r.field_type, r.x, r.y, r.w, r.h]
+            vals = [r.name, r.field_type, r.digits_before, r.digits_after, r.x, r.y, r.w, r.h]
             for c, v in enumerate(vals):
                 self.table.setItem(i, c, QTableWidgetItem(str(v)))
 
@@ -469,11 +479,12 @@ class RoiEditorDialog(QDialog):
         self.preview.setPixmap(QPixmap(preview_path))
 
         ocr = OCREngine(use_easyocr_first=False)
-        value = ocr.read_text(np.array(crop), roi.field_type)
+        value = ocr.read_roi(np.array(crop), roi)
 
         self.ocr_result.setText(
             f"ROI name: {roi.name}\n"
             f"Type: {roi.field_type}\n"
+            f"Digits: {roi.digits_before} before, {roi.digits_after} after\n"
             f"x={x}, y={y}, w={w}, h={h}\n"
             f"Decoded: {value or '[empty]'}"
         )
@@ -501,7 +512,7 @@ class RoiEditorDialog(QDialog):
             h = max(1, min(roi.h, img_h - y))
 
             crop = img.crop((x, y, x + w, y + h))
-            value = ocr.read_text(np.array(crop), roi.field_type)
+            value = ocr.read_roi(np.array(crop), roi)
 
             results.append(f"{roi.name}: {value or '[empty]'}")
 
@@ -518,6 +529,8 @@ class RoiEditorDialog(QDialog):
                 y=r.y,
                 w=r.w,
                 h=r.h,
+                digits_before=r.digits_before,
+                digits_after=r.digits_after,
             )
             for r in self.rois
         ]

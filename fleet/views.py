@@ -227,6 +227,6 @@ def api_seq_assign_delete(request):
     payload = json.loads(request.body.decode("utf-8") or "{}")
     res = sd.delete_sequence_vessel_assignment(
         row_id=payload.get("id"),
-        hard_delete=bool(payload.get("hard_delete", False)),
+        hard_delete=bool(payload.get("hard_delete", True)),
     )
     return JsonResponse(res, status=200 if res.get("ok") else 400)

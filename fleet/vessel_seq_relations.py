@@ -239,3 +239,55 @@ class VesselSeqRelations:
         rows = [dict(r) for r in cur.fetchall()]
         con.close()
         return rows
+
+    def delete_sequence_vessel_assignment(
+            self,
+            row_id,
+            hard_delete=False,
+    ):
+        """
+        Delete or deactivate a sequence assignment.
+
+        hard_delete=False -> sets is_active = 0
+        hard_delete=True  -> removes the row from the table
+        """
+
+        try:
+            row_id = int(row_id)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Invalid assignment ID"}
+
+        con = self._connect()
+        cur = con.cursor()
+
+        cur.execute(
+            "SELECT id FROM sequence_vessel_assignment WHERE id=?",
+            (row_id,)
+        )
+
+        if cur.fetchone() is None:
+            con.close()
+            return {"ok": False, "error": "Assignment not found"}
+
+        if hard_delete:
+            cur.execute(
+                "DELETE FROM sequence_vessel_assignment WHERE id=?",
+                (row_id,)
+            )
+        else:
+            cur.execute("""
+                UPDATE sequence_vessel_assignment
+                SET is_active=0,
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            """, (row_id,))
+
+        con.commit()
+        affected = cur.rowcount
+        con.close()
+
+        return {
+            "ok": affected == 1,
+            "deleted": bool(hard_delete),
+            "deactivated": not hard_delete,
+        }

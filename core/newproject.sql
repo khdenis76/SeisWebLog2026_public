@@ -1065,7 +1065,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_project_fleet_source_vessel_id
 ON project_fleet(source_vessel_id);
 CREATE TABLE IF NOT EXISTS "sequence_vessel_assignment" (
 	"id"	INTEGER,
-	"seq_first"	INTEGER NOT NULL,
+	"seq_first"	INTEGER,
 	"seq_last"	INTEGER NOT NULL,
 	"vessel_id"	INTEGER NOT NULL,
 	"purpose"	TEXT,
@@ -1077,6 +1077,41 @@ CREATE TABLE IF NOT EXISTS "sequence_vessel_assignment" (
 	PRIMARY KEY("id" AUTOINCREMENT),
 	FOREIGN KEY("vessel_id") REFERENCES "project_fleet"("id") ON DELETE CASCADE
 );
+CREATE TRIGGER IF NOT EXISTS trg_sequence_assignment_purpose_insert
+AFTER INSERT ON sequence_vessel_assignment
+FOR EACH ROW
+BEGIN
+    UPDATE sequence_vessel_assignment
+    SET purpose =
+        CASE NEW.purpose_id
+            WHEN 1 THEN 'Production'
+            WHEN 2 THEN 'Non-Production'
+            WHEN 3 THEN 'Non-Production-Infill'
+            WHEN 4 THEN 'Production-Infill'
+            WHEN 5 THEN 'Test'
+            WHEN 6 THEN 'Other'
+            ELSE NULL
+        END
+    WHERE id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_sequence_assignment_purpose_update
+AFTER UPDATE OF purpose_id ON sequence_vessel_assignment
+FOR EACH ROW
+WHEN NEW.purpose_id IS NOT OLD.purpose_id
+BEGIN
+    UPDATE sequence_vessel_assignment
+    SET purpose =
+        CASE NEW.purpose_id
+            WHEN 1 THEN 'Production'
+            WHEN 2 THEN 'Non-Production'
+            WHEN 3 THEN 'Non-Production-Infill'
+            WHEN 4 THEN 'Production-Infill'
+            WHEN 5 THEN 'Test'
+            WHEN 6 THEN 'Other'
+            ELSE NULL
+        END
+    WHERE id = NEW.id;
+END;
 -- Create main shot table table
 CREATE TABLE IF NOT EXISTS SHOT_TABLE (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,

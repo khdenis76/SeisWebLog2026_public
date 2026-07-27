@@ -1,10 +1,71 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<!-- rov/partials/sm_daily_production_tabs.html -->
+
+<ul class="nav nav-tabs mt-2 mb-2" id="sm-sub-tabs" role="tablist">
+
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link active"
+            id="sm-deployment-tab"
+            data-bs-toggle="tab"
+            data-bs-target="#sm-deployment-pane"
+            type="button"
+            role="tab"
+            aria-controls="sm-deployment-pane"
+            aria-selected="true">
+            <i class="fas fa-arrow-down me-1"></i>
+            Deployment
+        </button>
+    </li>
+
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="sm-recovery-tab"
+            data-bs-toggle="tab"
+            data-bs-target="#sm-recovery-pane"
+            type="button"
+            role="tab"
+            aria-controls="sm-recovery-pane"
+            aria-selected="false">
+            <i class="fas fa-arrow-up me-1"></i>
+            Recovery
+        </button>
+    </li>
+
+</ul>
+
+<div class="tab-content" id="sm-sub-tab-content">
+
+    <!-- ================= DEPLOYMENT ================= -->
+
+    <div
+        class="tab-pane fade show active"
+        id="sm-deployment-pane"
+        role="tabpanel"
+        aria-labelledby="sm-deployment-tab">
+
+        <div
+            id="daily-sm-container"
+            class="w-100 border rounded overflow-auto"
+            style="height:45vh;">
+        </div>
+
+    </div>
+
+    <!-- ================= RECOVERY ================= -->
+
+    <div
+        class="tab-pane fade"
+        id="sm-recovery-pane"
+        role="tabpanel"
+        aria-labelledby="sm-recovery-tab">
+
+        <div
+            id="daily-sm-recovery-container"
+            class="w-100 border rounded overflow-auto"
+            style="height:45vh;">
+        </div>
+
+    </div>
+
+</div>

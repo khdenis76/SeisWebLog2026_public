@@ -79,7 +79,7 @@ def rov_main_view(request):
             size=6,
             alpha=0.9,
             color='lightblue',
-            where=" Status == 'Deployed' ",
+            where=" Deployed == 'Yes' ",
         ),
         dict(
             name="SM (Collected)",
@@ -90,19 +90,9 @@ def rov_main_view(request):
             size=6,
             alpha=0.9,
             color='magenta',
-            where="Status == 'Collected'",
+            where="PickedUp == 'Yes'",
         ),
-        dict(
-            name="SM (Picked Up)",
-            df='dsr',
-            x_col="PrimaryEasting",
-            y_col="PrimaryNorthing",
-            marker="circle",
-            size=6,
-            alpha=0.9,
-            color='lightgreen',
-            where="Status == 'Picked Up'",
-        ),
+
 
         dict(
             name="Recovered Nodes",
@@ -1359,6 +1349,96 @@ def select_prod_day(request):
         "deploy_count": len(deploy_rows),
         "recovery_count": len(rec_rows),
     })
+@require_POST
+@login_required
+def select_sm_day(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "No active project",
+            },
+            status=400,
+        )
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        day = str(payload.get("day") or "").strip()
+
+        if not day:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "Missing day",
+                },
+                status=400,
+            )
+
+    except Exception:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Invalid JSON",
+            },
+            status=400,
+        )
+
+    try:
+        dsrdb = DSRDB(project.db_path)
+
+        # ---------------- Deployment ----------------
+        deploy_rows = dsrdb.get_daily_sm_comparison(
+            date=day,
+            day_field="Day",
+        )
+
+        # ---------------- Recovery ------------------
+        recovery_rows = dsrdb.get_daily_sm_comparison(
+            date=day,
+            day_field="Day1",rov_field="ROV1"
+        )
+
+        deployment_html = render_to_string(
+            "rov/partials/sm_daily_table.html",
+            {
+                "sm_rows": deploy_rows,
+                "mode": "Deployment",
+            },
+            request=request,
+        )
+
+        recovery_html = render_to_string(
+            "rov/partials/sm_daily_table.html",
+            {
+                "sm_rows": recovery_rows,
+                "mode": "Recovery",
+            },
+            request=request,
+        )
+
+        return JsonResponse(
+            {
+                "ok": True,
+
+                "deployment_html": deployment_html,
+                "recovery_html": recovery_html,
+
+                "deployment_count": len(deploy_rows),
+                "recovery_count": len(recovery_rows),
+            }
+        )
+
+    except Exception as ex:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": str(ex),
+            },
+            status=500,
+        )
 @require_POST
 @login_required
 def export_dsr_to_sps(request):

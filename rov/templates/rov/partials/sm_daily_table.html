@@ -1,10 +1,110 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+<div class="table-responsive h-100">
+    <table
+        id="dep-sm-daily-table"
+        class="table table-sm table-striped table-hover table-bordered align-middle mb-0"
+    >
+        <thead class="table-light sticky-top">
+            <tr>
+                <th>#</th>
+                <th>Line</th>
+                <th>Sta</th>
+                <th>DSR Node</th>
+                <th>SM Node</th>
+                <th>ROV</th>
+
+                <th>DSR Easting</th>
+                <th>DSR Northing</th>
+                <th>DSR Elevation</th>
+
+                <th>SM Easting</th>
+                <th>SM Northing</th>
+                <th>SM Elevation</th>
+
+                <th>dX</th>
+                <th>dY</th>
+                <th>dZ</th>
+
+                <th>DSR Comments</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for row in sm_rows %}
+                <tr>
+                    <td>{{ forloop.counter }}</td>
+
+                    <td>{{ row.Line }}</td>
+                    <td>{{ row.Station }}</td>
+                    <td {% if row.DSRNode != row.SMNode %}class="text-danger fw-bold"{% endif %}>
+                        {{ row.DSRNode|default_if_none:"" }}
+                    </td>
+                    <td {% if row.DSRNode != row.SMNode %}class="text-danger fw-bold"{% endif %}>
+                         {{ row.SMNode|default_if_none:"" }}
+                    </td>
+                    <td>{{ row.ROV|default_if_none:"" }}</td>
+                    <td>
+                        {% if row.DsrEasting is not None %}
+                            {{ row.DsrEasting|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if row.DsrNorthing is not None %}
+                            {{ row.DsrNorthing|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if row.DsrElevation is not None %}
+                            {{ row.DsrElevation|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if row.SMEasting is not None %}
+                            {{ row.SMEasting|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if row.SMNorthing is not None %}
+                            {{ row.SMNorthing|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if row.SMElevation is not None %}
+                            {{ row.SMElevation|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td {% if row.dX >= 1 %}class="text-danger fw-bold"{% endif %}>
+                        {% if row.dX is not None %}
+                            {{ row.dX|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td {% if row.dY >= 1 %}class="text-danger fw-bold"{% endif %}>
+                        {% if row.dY is not None %}
+                            {{ row.dY|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td {% if row.dZ >= 1 %}class="text-danger fw-bold"{% endif %}>
+                        {% if row.dZ is not None %}
+                            {{ row.dZ|floatformat:1 }}
+                        {% endif %}
+                    </td>
+
+                    <td>{{ row.DSRComments|default_if_none:"" }}</td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="15" class="text-center text-muted py-4">
+                        No SM data found for {{ selected_day }}.
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

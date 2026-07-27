@@ -155,6 +155,11 @@ Export FB to SPS fixed
 Fixed install librayries.
 Fixed project settings save. 
 ### Changed
+## [2026.1.03.00] - 2026-07-17
+### Added
+### Fixed
+Fixed sequence to vessel assignment 
+### Changed
 
 
   

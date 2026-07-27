@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
@@ -14,6 +13,10 @@ class ROIField:
     w: int = 0
     h: int = 0
 
+    # Output formatting. Zero means "do not force".
+    digits_before: int = 0
+    digits_after: int = 0
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -21,11 +24,13 @@ class ROIField:
     def from_dict(cls, data: Dict[str, Any]) -> "ROIField":
         return cls(
             name=str(data.get("name", "field")),
-            field_type=str(data.get("field_type", "text")),
+            field_type=str(data.get("field_type", data.get("type", "text"))),
             x=int(data.get("x", 0)),
             y=int(data.get("y", 0)),
             w=int(data.get("w", 0)),
             h=int(data.get("h", 0)),
+            digits_before=max(0, int(data.get("digits_before", data.get("integer_digits", 0)) or 0)),
+            digits_after=max(0, int(data.get("digits_after", data.get("decimal_digits", 0)) or 0)),
         )
 
 

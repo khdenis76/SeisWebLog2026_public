@@ -192,7 +192,7 @@ class BatchWorker(QObject):
             row["status"] = "BAD_RESOLUTION"; row["message"] = f"Expected {config.expected_width}x{config.expected_height}, got {w}x{h}"; return row
         for roi in config.roi_fields:
             crop = self._crop(img, roi)
-            row[roi.name] = ocr.read_text(crop, roi.field_type)
+            row[roi.name] = ocr.read_roi(crop, roi)
         file_line = str(row.get("file_line", "")).strip(); file_station = str(row.get("file_station", "")).strip()
         ocr_line = str(row.get("line", "")).strip(); ocr_station = str(row.get("station", "")).strip()
         if file_line and file_station and ocr_line and ocr_station:
