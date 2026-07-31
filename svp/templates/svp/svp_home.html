@@ -88,18 +88,37 @@
           <span>Profile Details</span>
           <span class="text-muted small" id="svpSelectedLabel">Nothing selected</span>
         </div>
-        <div class="card-body svp-detail-scroll">
-          <div id="svpDetailsBox" class="mb-3">
+        <div class="card-body svp-detail-scroll p-0">
+          <ul class="nav nav-tabs px-3 pt-2 svp-view-tabs" id="svpViewTabs" role="tablist">
+            <li class="nav-item" role="presentation"><button class="nav-link active" id="svp-map-tab" data-bs-toggle="tab" data-bs-target="#svp-map-pane" type="button" role="tab">Map</button></li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="svp-plot-tab" data-bs-toggle="tab" data-bs-target="#svp-plot-pane" type="button" role="tab">Plot</button></li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="svp-statistics-tab" data-bs-toggle="tab" data-bs-target="#svp-statistics-pane" type="button" role="tab">Statistics</button></li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="svp-data-tab" data-bs-toggle="tab" data-bs-target="#svp-data-pane" type="button" role="tab">Data Table</button></li>
+          </ul>
+
+          <div id="svpDetailsBox" class="p-3 border-bottom">
             <div class="text-muted">Select an SVP profile from the left table.</div>
           </div>
 
-          <div class="border rounded-3 bg-body-tertiary svp-plot-card">
-            <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom">
-              <div class="fw-semibold">Profile Plot</div>
-              <div class="text-muted small">Sound velocity + salinity</div>
+          <div class="tab-content svp-tab-content" id="svpViewTabContent">
+            <div class="tab-pane fade show active h-100" id="svp-map-pane" role="tabpanel">
+              <div id="svpMapBox" class="svp-view-box"><div class="text-muted small p-3">Loading SVP map...</div></div>
             </div>
-            <div id="svpPlotBox" class="svp-plot-box">
-              <div class="text-muted small p-3">Click an SVP row to load the profile plot.</div>
+            <div class="tab-pane fade h-100" id="svp-plot-pane" role="tabpanel">
+              <div id="svpPlotBox" class="svp-view-box"><div class="text-muted small p-3">Select an SVP profile to load the plot.</div></div>
+            </div>
+            <div class="tab-pane fade h-100" id="svp-statistics-pane" role="tabpanel">
+              <div id="svpStatisticsBox" class="svp-statistics-wrap p-3">
+                <div class="text-muted small">Average curves for all SVP profiles will load here.</div>
+              </div>
+            </div>
+            <div class="tab-pane fade h-100" id="svp-data-pane" role="tabpanel">
+              <div class="table-responsive svp-data-table-wrap">
+                <table class="table table-sm table-striped table-hover mb-0" id="svpDataTable">
+                  <thead class="table-light"><tr><th>#</th><th>Depth (m)</th><th>Velocity (m/s)</th><th>Salinity (PSU)</th><th>Temperature (°C)</th><th>Conductivity (mS/cm)</th><th>Density (kg/m³)</th></tr></thead>
+                  <tbody id="svpDataTableBody"><tr><td colspan="7" class="text-center text-muted py-4">Select an SVP profile.</td></tr></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>

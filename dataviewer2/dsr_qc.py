@@ -7,6 +7,8 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .icons_manager import icon
+
 from .models import DsrQcData
 from .qc_widgets import (
     PLOT_BG,
@@ -62,7 +64,7 @@ class DsrQcWindow(QtWidgets.QMainWindow):
         self.station_combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
         self.station_combo.setMinimumWidth(145)
         self.station_combo.currentIndexChanged.connect(self._station_changed)
-        self.zoom_station_button = QtWidgets.QPushButton("Zoom station")
+        self.zoom_station_button = QtWidgets.QPushButton(icon("zoom_station", size=18), "Zoom station")
         self.zoom_station_button.clicked.connect(self._zoom_station)
 
         self.plot_mode = QtWidgets.QComboBox()
@@ -115,7 +117,15 @@ class DsrQcWindow(QtWidgets.QMainWindow):
             ("All", lambda: self._set_all_checked(True)),
         )
         for index, (text, callback) in enumerate(preset_buttons):
-            button = QtWidgets.QPushButton(text)
+            preset_icon = {
+                "Offsets": icon("activity", size=16),
+                "Sigma": icon("chart", size=16),
+                "Coordinates": icon("map", size=16),
+                "Depth": icon("chart", size=16),
+                "Clear": icon("clear", size=16),
+                "All": icon("show", size=16),
+            }.get(text, QtGui.QIcon())
+            button = QtWidgets.QPushButton(preset_icon, text)
             button.clicked.connect(callback)
             preset_row.addWidget(button, index // 3, index % 3)
         left_layout.addLayout(preset_row)

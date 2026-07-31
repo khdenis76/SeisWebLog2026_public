@@ -203,6 +203,7 @@ class SVPData:
                     temperature_c REAL,
                     salinity_psu REAL,
                     density_kgm3 REAL,
+                    conductivity_mscm REAL,
                     source_row_text TEXT,
                     FOREIGN KEY (svp_id) REFERENCES svp_profiles(id) ON DELETE CASCADE
                 )
@@ -269,6 +270,7 @@ class SVPData:
             self._ensure_column(conn, "svp_profiles", "source_000_raw_header", "TEXT")
             self._ensure_column(conn, "svp_profiles", "source_svp_raw_header", "TEXT")
             self._ensure_column(conn, "svp_profiles", "import_mode", "TEXT")
+            self._ensure_column(conn, "svp_points", "conductivity_mscm", "REAL")
 
     # ------------------------------------------------------------------
     # Read
@@ -329,7 +331,8 @@ class SVPData:
                     velocity_mps,
                     temperature_c,
                     salinity_psu,
-                    density_kgm3
+                    density_kgm3,
+                    conductivity_mscm
                 FROM svp_points
                 WHERE svp_id = ?
                 ORDER BY point_index ASC, depth_m ASC
@@ -344,6 +347,57 @@ class SVPData:
             return None
         profile["points"] = self.get_points(svp_id)
         return profile
+
+    def get_map_data(self) -> dict[str, Any]:
+        """Return all SVP positions and RPPreplot coordinates only."""
+        with self._connect() as conn:
+            svp_rows = [dict(r) for r in conn.execute(
+                "SELECT id, name, rov, timestamp, coord_e, coord_n, bottom_depth FROM svp_profiles "
+                "WHERE coord_e IS NOT NULL AND coord_n IS NOT NULL ORDER BY timestamp, id"
+            ).fetchall()]
+
+            tables = [r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()]
+
+            # RP PREPLOT is the only background layer requested for the SVP map.
+            # Prefer the canonical project table, but keep common Django/legacy names.
+            rp_table = next((name for name in (
+                "RPPreplot",
+                "baseproject_rppreplot",
+                "RP_PREPLOT",
+                "rp_preplot",
+            ) if name in tables), None)
+
+            preplot: list[dict[str, Any]] = []
+            if rp_table:
+                safe = rp_table.replace('"', '""')
+                columns = [r["name"] for r in conn.execute(
+                    f'PRAGMA table_info("{safe}")'
+                ).fetchall()]
+                cmap = {c.lower(): c for c in columns}
+
+                # The primary expected coordinate names are X and Y.
+                xcol = next((cmap[k] for k in ("x", "easting", "preploteasting") if k in cmap), None)
+                ycol = next((cmap[k] for k in ("y", "northing", "preplotnorthing") if k in cmap), None)
+                linecol = next((cmap[k] for k in ("line", "rline", "linename") if k in cmap), None)
+                pointcol = next((cmap[k] for k in ("point", "station", "points") if k in cmap), None)
+
+                if xcol and ycol:
+                    select = [f'"{xcol}" AS x', f'"{ycol}" AS y']
+                    select.append(f'"{linecol}" AS line' if linecol else 'NULL AS line')
+                    select.append(f'"{pointcol}" AS point' if pointcol else 'NULL AS point')
+                    rows = conn.execute(
+                        f'SELECT {", ".join(select)} FROM "{safe}" '
+                        f'WHERE "{xcol}" IS NOT NULL AND "{ycol}" IS NOT NULL'
+                    ).fetchall()
+                    preplot = [{**dict(r), "table": rp_table} for r in rows]
+
+            return {
+                "svp": svp_rows,
+                "preplot": preplot,
+                "preplot_table": rp_table,
+            }
 
     # ------------------------------------------------------------------
     # Create / Update / Delete
@@ -564,6 +618,7 @@ class SVPData:
                     self._to_float(p.get("temperature_c")),
                     self._to_float(p.get("salinity_psu")),
                     self._to_float(p.get("density_kgm3")),
+                    self._to_float(p.get("conductivity_mscm")),
                     p.get("source_row_text"),
                 )
             )
@@ -581,9 +636,10 @@ class SVPData:
                 temperature_c,
                 salinity_psu,
                 density_kgm3,
+                conductivity_mscm,
                 source_row_text
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -623,6 +679,7 @@ class SVPData:
             col_temperature=cfg.get("col_temperature"),
             col_salinity=cfg.get("col_salinity"),
             col_density=cfg.get("col_density"),
+            col_conductivity=cfg.get("col_conductivity"),
             sort_by_depth=bool(cfg.get("sort_by_depth")),
             clamp_negative_depth_to_zero=bool(cfg.get("clamp_negative_depth_to_zero")),
             pressure_is_depth=bool(cfg.get("pressure_is_depth")),
@@ -753,6 +810,55 @@ class SVPData:
 
 
 
+
+    def import_standalone_svp(
+        self,
+        file_svp_obj,
+        *,
+        name: str | None = None,
+        notes: str | None = None,
+        rov: str | None = None,
+        coord_e=None,
+        coord_n=None,
+        instrument_model: str | None = None,
+        config_id: int | None = None,
+    ) -> int:
+        if not file_svp_obj:
+            raise ValueError("Missing .svp file.")
+
+        source_name = getattr(file_svp_obj, "name", "profile.svp")
+        text = self._read_uploaded_text(file_svp_obj)
+        if config_id:
+            parsed = self._parse_text_with_saved_config(
+                text, config_id=int(config_id), detected_name=source_name
+            )
+        else:
+            parsed = self.parse_svp_text(text)
+
+        profile = (parsed.get("profile") or {}).copy()
+        points = parsed.get("points") or []
+        if not points:
+            raise ValueError("No SVP profile points found in .svp file.")
+
+        overrides = {
+            "rov": rov,
+            "coord_e": coord_e,
+            "coord_n": coord_n,
+            "instrument_model": instrument_model,
+        }
+        for key, value in overrides.items():
+            if not self._is_blank(value):
+                profile[key] = self._to_float(value) if key in {"coord_e", "coord_n"} else str(value).strip()
+
+        profile["name"] = name or profile.get("name") or Path(source_name).stem
+        profile["notes"] = notes
+        profile["source_file_name"] = source_name
+        profile["source_svp_file"] = source_name
+        profile["source_svp_raw_header"] = profile.get("raw_header")
+        profile["import_mode"] = "standalone_svp"
+        profile["file_type"] = "svp"
+        return self.create_profile(profile=profile, points=points)
+
     def import_uploaded_batch(
         self,
         files,
@@ -765,31 +871,11 @@ class SVPData:
         instrument_model: str | None = None,
         config_id: int | None = None,
     ) -> dict[str, Any]:
-        """
-        Import many SVP locations in one upload.
-
-        The user selects many .000 and .svp files together.
-        Every .000 file becomes one SVP profile.
-        A matching .svp file is optional and is used only for:
-          - ROV
-          - Easting / Northing
-          - Instrument model
-
-        Matching order:
-          1. exact stem match
-          2. timestamp / serial token match
-          3. best common token score
-
-        Manual modal values are used as fallback and override .svp values.
-        """
         upload_files = list(files or [])
         if not upload_files:
             raise ValueError("No SVP files selected.")
 
-        files_000 = []
-        files_svp = []
-        unsupported = []
-
+        files_000, files_svp, unsupported = [], [], []
         for f in upload_files:
             fname = getattr(f, "name", "") or ""
             ext = Path(fname).suffix.lower()
@@ -799,76 +885,57 @@ class SVPData:
                 files_svp.append(f)
             else:
                 unsupported.append(fname)
-
         if unsupported:
             raise ValueError("Unsupported file type(s): " + ", ".join(unsupported))
 
-        if not files_000:
-            raise ValueError("No .000 files selected. At least one .000 file is required.")
-
-        svp_by_stem = {
-            Path(getattr(f, "name", "")).stem.lower(): f
-            for f in files_svp
-        }
+        svp_by_stem = {Path(getattr(f, "name", "")).stem.lower(): f for f in files_svp}
         unused_svp = set(id(f) for f in files_svp)
-
-        imported = []
-        failed = []
-        missing_svp = []
-
-        single_profile_name = name if len(files_000) == 1 else None
+        imported, failed, missing_svp = [], [], []
+        total_profiles = len(files_000) + (len(files_svp) if not files_000 else 0)
 
         for file_000 in files_000:
             file_name_000 = getattr(file_000, "name", "profile.000")
             matched_svp = self._match_svp_for_000(file_000, files_svp, svp_by_stem, unused_svp)
-
             try:
                 profile_id = self.import_uploaded_profile(
-                    file_000_obj=file_000,
-                    file_svp_obj=matched_svp,
-                    name=single_profile_name,
-                    notes=notes,
-                    rov=rov,
-                    coord_e=coord_e,
-                    coord_n=coord_n,
-                    instrument_model=instrument_model,
+                    file_000_obj=file_000, file_svp_obj=matched_svp,
+                    name=name if total_profiles == 1 else None, notes=notes, rov=rov,
+                    coord_e=coord_e, coord_n=coord_n, instrument_model=instrument_model,
                     config_id=config_id,
                 )
-
-                imported.append({
-                    "profile_id": profile_id,
-                    "file_000": file_name_000,
-                    "file_svp": getattr(matched_svp, "name", None) if matched_svp else None,
-                })
-
+                imported.append({"profile_id": profile_id, "file_000": file_name_000,
+                                 "file_svp": getattr(matched_svp, "name", None) if matched_svp else None})
                 if matched_svp:
                     unused_svp.discard(id(matched_svp))
                 else:
                     missing_svp.append(file_name_000)
-
             except Exception as exc:
-                failed.append({
-                    "file_000": file_name_000,
-                    "file_svp": getattr(matched_svp, "name", None) if matched_svp else None,
-                    "error": str(exc),
-                })
+                failed.append({"file": file_name_000, "file_000": file_name_000,
+                               "file_svp": getattr(matched_svp, "name", None) if matched_svp else None,
+                               "error": str(exc)})
 
-        unmatched_svp = [
-            getattr(f, "name", "profile.svp")
-            for f in files_svp
-            if id(f) in unused_svp
-        ]
+        # A standalone .svp is a complete processed profile. Import every unpaired one.
+        for file_svp in files_svp:
+            if id(file_svp) not in unused_svp:
+                continue
+            file_name_svp = getattr(file_svp, "name", "profile.svp")
+            try:
+                profile_id = self.import_standalone_svp(
+                    file_svp, name=name if total_profiles == 1 else None, notes=notes,
+                    rov=rov, coord_e=coord_e, coord_n=coord_n,
+                    instrument_model=instrument_model, config_id=config_id,
+                )
+                imported.append({"profile_id": profile_id, "file_000": None, "file_svp": file_name_svp})
+                unused_svp.discard(id(file_svp))
+            except Exception as exc:
+                failed.append({"file": file_name_svp, "file_000": None,
+                               "file_svp": file_name_svp, "error": str(exc)})
 
         return {
-            "success": not failed,
-            "imported_count": len(imported),
-            "failed_count": len(failed),
-            "missing_svp_count": len(missing_svp),
-            "unmatched_svp_count": len(unmatched_svp),
-            "imported": imported,
-            "failed": failed,
-            "missing_svp": missing_svp,
-            "unmatched_svp": unmatched_svp,
+            "success": not failed, "imported_count": len(imported),
+            "failed_count": len(failed), "missing_svp_count": len(missing_svp),
+            "unmatched_svp_count": 0, "imported": imported, "failed": failed,
+            "missing_svp": missing_svp, "unmatched_svp": [],
         }
 
     def _match_svp_for_000(self, file_000, files_svp, svp_by_stem: dict[str, Any], unused_svp: set[int]):
@@ -1342,6 +1409,7 @@ class SVPData:
                 col_temperature=cfg.get("col_temperature"),
                 col_salinity=cfg.get("col_salinity"),
                 col_density=cfg.get("col_density"),
+            col_conductivity=cfg.get("col_conductivity"),
                 sort_by_depth=bool(cfg.get("sort_by_depth")),
                 clamp_negative_depth_to_zero=bool(cfg.get("clamp_negative_depth_to_zero")),
                 pressure_is_depth=bool(cfg.get("pressure_is_depth")),
@@ -1368,6 +1436,7 @@ class SVPData:
 
 
     def list_format_configs(self) -> list[dict]:
+        """Return saved configs without duplicate display names (newest wins)."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -1376,7 +1445,15 @@ class SVPData:
                 ORDER BY id DESC
                 """
             ).fetchall()
-            return [dict(r) for r in rows]
+
+        unique = {}
+        for row in rows:
+            item = dict(row)
+            name = str(item.get("name") or item.get("config_name") or "").strip()
+            key = name.casefold()
+            if key not in unique:
+                unique[key] = item
+        return list(unique.values())
 
     def export_format_config_to_json(self, config_id: int) -> str:
         row = self.get_format_config(config_id)

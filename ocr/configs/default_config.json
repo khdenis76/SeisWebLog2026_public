@@ -25,7 +25,9 @@
         "x": 11,
         "y": 1020,
         "w": 134,
-        "h": 35
+        "h": 35,
+        "digits_before": 0,
+        "digits_after": 0
       },
       {
         "name": "line",
@@ -33,7 +35,9 @@
         "x": 225,
         "y": 1020,
         "w": 105,
-        "h": 35
+        "h": 35,
+        "digits_before": 4,
+        "digits_after": 0
       },
       {
         "name": "station",
@@ -41,7 +45,9 @@
         "x": 555,
         "y": 1020,
         "w": 98,
-        "h": 35
+        "h": 35,
+        "digits_before": 4,
+        "digits_after": 0
       },
       {
         "name": "dive",
@@ -49,7 +55,9 @@
         "x": 887,
         "y": 1020,
         "w": 87,
-        "h": 35
+        "h": 35,
+        "digits_before": 0,
+        "digits_after": 0
       },
       {
         "name": "east",
@@ -57,7 +65,9 @@
         "x": 1027,
         "y": 1020,
         "w": 160,
-        "h": 35
+        "h": 35,
+        "digits_before": 6,
+        "digits_after": 2
       },
       {
         "name": "north",
@@ -65,7 +75,9 @@
         "x": 1280,
         "y": 1020,
         "w": 177,
-        "h": 35
+        "h": 35,
+        "digits_before": 7,
+        "digits_after": 2
       },
       {
         "name": "date",
@@ -73,7 +85,9 @@
         "x": 1515,
         "y": 1020,
         "w": 188,
-        "h": 35
+        "h": 35,
+        "digits_before": 0,
+        "digits_after": 0
       },
       {
         "name": "time",
@@ -81,7 +95,9 @@
         "x": 1745,
         "y": 1020,
         "w": 135,
-        "h": 35
+        "h": 35,
+        "digits_before": 0,
+        "digits_after": 0
       }
     ]
   },

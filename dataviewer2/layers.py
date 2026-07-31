@@ -144,81 +144,118 @@ class FastPointLayer(QtCore.QObject):
 class FastShapeLayer(QtCore.QObject):
     """One graphics layer for one database-registered shapefile."""
 
-    def __init__(self, plot_item: pg.PlotItem, data) -> None:
+    def __init__(self, plot_item: pg.PlotItem, data, style_override: dict | None = None) -> None:
         super().__init__()
-        from PySide6 import QtGui
-
         self.plot_item = plot_item
         self.data = data
         self.name = data.name
         self.visible = True
-        self._QtGui = QtGui
+        self.fill_item: QtWidgets.QGraphicsPathItem | None = None
 
-        style_text = (data.definition.line_style or "").lower()
-        qt_style = QtCore.Qt.PenStyle.SolidLine
-        if "dash" in style_text:
-            qt_style = QtCore.Qt.PenStyle.DashLine
-        elif "dot" in style_text:
-            qt_style = QtCore.Qt.PenStyle.DotLine
+        default_line = data.definition.line_color or "#00e5ff"
+        default_fill = data.definition.fill_color or default_line
+        # Black database defaults disappear on the dark canvas. Use a safe
+        # high-contrast fallback unless the user explicitly saved a style.
+        if QtGui.QColor(default_line).lightness() < 35:
+            default_line = "#00e5ff"
+        if QtGui.QColor(default_fill).lightness() < 35:
+            default_fill = default_line
 
-        pen = pg.mkPen(
-            data.definition.line_color,
-            width=float(data.definition.line_width),
-            style=qt_style,
-        )
-        self.curve = pg.PlotCurveItem(pen=pen, connect="finite", antialias=False)
-        self.scatter = pg.ScatterPlotItem(
-            size=max(4.0, float(data.definition.line_width) + 3.0),
-            pxMode=True,
-            brush=pg.mkBrush(data.definition.fill_color or data.definition.line_color),
-            pen=pen,
-            useCache=True,
-        )
-        self.fill_item = None
+        override = style_override or {}
+        self.outline_color = str(override.get("outline_color", default_line))
+        self.outline_width = float(override.get("outline_width", data.definition.line_width or 1.5))
+        self.outline_style = str(override.get("outline_style", data.definition.line_style or "solid"))
+        self.fill_enabled = bool(override.get("fill_enabled", data.definition.is_filled or data.geometry_type == "polygon"))
+        self.fill_color = str(override.get("fill_color", default_fill))
+        self.fill_opacity = int(override.get("fill_opacity", 45))
+        self.layer_opacity = float(override.get("layer_opacity", 1.0))
+        self.point_size = float(override.get("point_size", max(5.0, self.outline_width + 4.0)))
 
-        if data.geometry_type == "point":
-            if data.points.size:
-                self.scatter.setData(x=data.points[:, 0], y=data.points[:, 1])
-            self.curve.setData([], [])
-        else:
-            xs: list[float] = []
-            ys: list[float] = []
-            for part in data.parts:
-                if not part.size:
-                    continue
-                xs.extend(part[:, 0].tolist())
-                ys.extend(part[:, 1].tolist())
-                xs.append(float("nan"))
-                ys.append(float("nan"))
-            self.curve.setData(
-                x=np.asarray(xs, dtype=np.float64),
-                y=np.asarray(ys, dtype=np.float64),
-                connect="finite",
-                skipFiniteCheck=True,
-            )
-            self.scatter.setData([], [])
-
-            if data.geometry_type == "polygon" and data.definition.is_filled:
-                path = QtGui.QPainterPath()
-                path.setFillRule(QtCore.Qt.FillRule.OddEvenFill)
-                for part in data.parts:
-                    if part.shape[0] < 3:
-                        continue
-                    path.moveTo(float(part[0, 0]), float(part[0, 1]))
-                    for point in part[1:]:
-                        path.lineTo(float(point[0]), float(point[1]))
-                    path.closeSubpath()
-                item = QtWidgets.QGraphicsPathItem(path)
-                fill = QtGui.QColor(data.definition.fill_color)
-                fill.setAlpha(70)
-                item.setBrush(QtGui.QBrush(fill))
-                item.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
-                item.setZValue(-10)
-                self.fill_item = item
-                plot_item.addItem(item)
-
+        self.curve = pg.PlotCurveItem(connect="finite", antialias=False)
+        self.scatter = pg.ScatterPlotItem(pxMode=True, useCache=True)
+        self._build_geometry()
         plot_item.addItem(self.curve)
         plot_item.addItem(self.scatter)
+        self.update_style()
+
+    @staticmethod
+    def _qt_pen_style(text: str) -> QtCore.Qt.PenStyle:
+        text = (text or "").lower()
+        if "dash" in text:
+            return QtCore.Qt.PenStyle.DashLine
+        if "dot" in text:
+            return QtCore.Qt.PenStyle.DotLine
+        return QtCore.Qt.PenStyle.SolidLine
+
+    def _build_geometry(self) -> None:
+        if self.data.geometry_type == "point":
+            if self.data.points.size:
+                self.scatter.setData(x=self.data.points[:, 0], y=self.data.points[:, 1])
+            self.curve.setData([], [])
+            return
+
+        xs: list[float] = []
+        ys: list[float] = []
+        for part in self.data.parts:
+            if not part.size:
+                continue
+            xs.extend(part[:, 0].tolist())
+            ys.extend(part[:, 1].tolist())
+            xs.append(float("nan")); ys.append(float("nan"))
+        self.curve.setData(
+            x=np.asarray(xs, dtype=np.float64),
+            y=np.asarray(ys, dtype=np.float64),
+            connect="finite",
+            skipFiniteCheck=True,
+        )
+        self.scatter.setData([], [])
+
+        if self.data.geometry_type == "polygon":
+            path = QtGui.QPainterPath()
+            path.setFillRule(QtCore.Qt.FillRule.OddEvenFill)
+            for part in self.data.parts:
+                if part.shape[0] < 3:
+                    continue
+                path.moveTo(float(part[0, 0]), float(part[0, 1]))
+                for point in part[1:]:
+                    path.lineTo(float(point[0]), float(point[1]))
+                path.closeSubpath()
+            self.fill_item = QtWidgets.QGraphicsPathItem(path)
+            self.plot_item.addItem(self.fill_item)
+
+    def style_dict(self) -> dict:
+        return {
+            "outline_color": self.outline_color,
+            "outline_width": self.outline_width,
+            "outline_style": self.outline_style,
+            "fill_enabled": self.fill_enabled,
+            "fill_color": self.fill_color,
+            "fill_opacity": self.fill_opacity,
+            "layer_opacity": self.layer_opacity,
+            "point_size": self.point_size,
+        }
+
+    def update_style(self, **changes) -> None:
+        for key, value in changes.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+        pen = pg.mkPen(
+            QtGui.QColor(self.outline_color),
+            width=max(0.2, float(self.outline_width)),
+            style=self._qt_pen_style(self.outline_style),
+        )
+        self.curve.setPen(pen)
+        self.scatter.setPen(pen)
+        self.scatter.setBrush(pg.mkBrush(QtGui.QColor(self.fill_color)))
+        self.scatter.setSize(max(1.0, float(self.point_size)))
+        self.curve.setOpacity(max(0.0, min(1.0, float(self.layer_opacity))))
+        self.scatter.setOpacity(max(0.0, min(1.0, float(self.layer_opacity))))
+        if self.fill_item is not None:
+            color = QtGui.QColor(self.fill_color)
+            color.setAlpha(max(0, min(255, int(self.fill_opacity))))
+            self.fill_item.setBrush(QtGui.QBrush(color) if self.fill_enabled else QtGui.QBrush(QtCore.Qt.BrushStyle.NoBrush))
+            self.fill_item.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+            self.fill_item.setOpacity(max(0.0, min(1.0, float(self.layer_opacity))))
 
     def refresh_view(self) -> None:
         return
@@ -241,11 +278,9 @@ class FastShapeLayer(QtCore.QObject):
             if not array.size:
                 continue
             d2 = (array[:, 0] - x) ** 2 + (array[:, 1] - y) ** 2
-            local = int(np.argmin(d2))
-            distance = float(np.sqrt(d2[local]))
+            local = int(np.argmin(d2)); distance = float(np.sqrt(d2[local]))
             if best_distance is None or distance < best_distance:
-                best_distance = distance
-                best_index = running_index + local
+                best_distance = distance; best_index = running_index + local
             running_index += int(array.shape[0])
         if best_distance is None or best_distance > tolerance:
             return None

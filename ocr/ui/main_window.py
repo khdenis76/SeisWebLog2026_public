@@ -20,6 +20,7 @@ from ..core.batch_processor import BatchSettings, BatchWorker
 from ..core.config_manager import default_bundle, load_config_bundle, save_config_bundle
 from ..core.exporters import RESULT_COLUMNS, SUMMARY_COLUMNS, export_csv, export_txt
 from ..core.image_scanner import scan_images
+from ..core.icon_manager import LucideIcons
 from ..core.models import OCRConfig
 from ..core.ocr_db import fetch_results, set_checked, ensure_schema, delete_results_by_paths, delete_results_by_station_keys, delete_results_by_rov, reset_checked_for_paths, distinct_ocr_values, fetch_unchecked_existing_image_paths
 from ..core.project_loader import load_projects
@@ -256,8 +257,13 @@ class OCRMainWindow(QMainWindow):
         self.station_rows: list[dict] = []
         self.station_model = DictTableModel(STATION_COLUMNS)
         self.image_model = DictTableModel(RESULT_TABLE_COLUMNS)
+        self.icons = LucideIcons()
         self.quick_filtered_station_rows: list[dict] = []
         self._build_ui()
+        if self.icons.available:
+            self._log(f"Lucide icons: {self.icons.root}")
+        else:
+            self._log("Lucide icon folder not found; set SEISWEBLOG_ICON_DIR or place OCR beside dataviewer2.")
         self._auto_load_default_config()
         self._auto_load_django_db()
         self._load_projects()
@@ -270,9 +276,9 @@ class OCRMainWindow(QMainWindow):
         top = QWidget(); top_l = QHBoxLayout(top)
         self.project_combo = QComboBox(); self.project_combo.currentIndexChanged.connect(self._on_project_changed)
         self.project_db_edit = QLineEdit(); self.project_db_edit.setReadOnly(True)
-        self.folder_edit = QLineEdit(); btn_folder = QPushButton("Folder..."); btn_folder.clicked.connect(self.browse_folder)
+        self.folder_edit = QLineEdit(); self.btn_folder = QPushButton("Folder..."); self.btn_folder.setIcon(self.icons.icon("folder-open", "folder")); self.btn_folder.clicked.connect(self.browse_folder)
         self.mask_edit = QLineEdit("*.png"); self.include_subfolders_chk = QCheckBox("Include subfolders")
-        for w in [QLabel("Project"), self.project_combo, QLabel("DB"), self.project_db_edit, QLabel("Folder"), self.folder_edit, btn_folder, QLabel("Mask"), self.mask_edit, self.include_subfolders_chk]: top_l.addWidget(w)
+        for w in [QLabel("Project"), self.project_combo, QLabel("DB"), self.project_db_edit, QLabel("Folder"), self.folder_edit, self.btn_folder, QLabel("Mask"), self.mask_edit, self.include_subfolders_chk]: top_l.addWidget(w)
         lay.addWidget(top)
         self._build_summary_cards(lay)
         self._build_quick_filters(lay)
@@ -292,73 +298,94 @@ class OCRMainWindow(QMainWindow):
         bottom_l.addWidget(self.progress_label); bottom_l.addWidget(self.log_edit)
         lay.addWidget(bottom)
 
+    def _menu_action(self, menu: QMenu, text: str, callback, *icon_names: str) -> QAction:
+        action = QAction(self.icons.icon(*icon_names), text, self)
+        action.triggered.connect(callback)
+        menu.addAction(action)
+        return action
+
+    def _top_menu(self, title: str) -> QMenu:
+        """Create a text-only top-level menu in the main menu bar."""
+        return self.menuBar().addMenu(title)
+
+    def _submenu(self, parent, title: str, *icon_names: str) -> QMenu:
+        """Create an icon-bearing submenu below a top-level menu."""
+        return parent.addMenu(self.icons.icon(*icon_names), title)
+
     def _build_menu(self):
         menu = self.menuBar()
-        filem = menu.addMenu("File")
-        filem.addAction("Open folder...", self.browse_folder)
-        filem.addAction("Export CSV", self.export_results_csv)
-        filem.addAction("Export TXT", self.export_results_txt)
-        filem.addSeparator(); filem.addAction("Exit", self.close)
-        settings = menu.addMenu("Settings")
-        settings.addAction("Config settings", self.show_config_dialog)
-        settings.addAction("ROI editor (main)", self.edit_rois)
-        settings.addAction("ROI editor (alt)", self.edit_alt_rois)
-        settings.addAction("Filters", self.show_filter_dialog)
-        tools = menu.addMenu("Tools")
-        tools.addAction("Run QC", self.run_batch)
-        tools.addAction("Stop", self.stop_batch)
-        tools.addAction("Mark selected station checked", lambda: self.set_selected_station_checked(True))
-        tools.addAction("Mark selected station unchecked", lambda: self.set_selected_station_checked(False))
-        dbm = menu.addMenu("Database")
-        dbm.addAction("Delete selected station rows from DB", self.delete_selected_station_rows)
-        dbm.addAction("Delete selected image rows from DB", self.delete_selected_image_rows)
-        dbm.addAction("Delete all visible/filtered rows from DB", self.delete_filtered_rows)
-        dbm.addAction("Delete by ROV...", self.delete_by_rov_dialog)
-        dbm.addSeparator()
-        dbm.addAction("Reset selected checked status", lambda: self.reset_selected_checked(False))
-        dbm.addAction("Set selected checked status", lambda: self.reset_selected_checked(True))
-        dbm.addSeparator()
-        dbm.addAction("Re-check all unchecked files from DB", self.recheck_all_unchecked_from_db)
 
-        selm = menu.addMenu("Selection")
-        posm = selm.addMenu("Positions")
-        posm.addAction("Tick all visible positions", lambda: self._tick_all_visible_positions(True))
-        posm.addAction("Untick all visible positions", lambda: self._tick_all_visible_positions(False))
-        posm.addAction("Invert visible position ticks", self._invert_visible_position_ticks)
-        posm.addSeparator()
-        posm.addAction("Tick highlighted positions", lambda: self._set_station_selected(True))
-        posm.addAction("Untick highlighted positions", lambda: self._set_station_selected(False))
-        posm.addSeparator()
-        posm.addAction("Tick positions by status...", self._tick_positions_by_status_dialog)
-        posm.addAction("Tick positions by ROV / ROV1...", self._tick_positions_by_rov_dialog)
-        posm.addAction("Tick checked positions", self._tick_checked_positions)
-        posm.addAction("Tick unchecked positions", self._tick_unchecked_positions)
+        filem = self._top_menu("File")
+        self._menu_action(filem, "Open folder...", self.browse_folder, "folder-open", "folder")
+        self._menu_action(filem, "Export CSV", self.export_results_csv, "file-spreadsheet", "sheet", "download")
+        self._menu_action(filem, "Export TXT", self.export_results_txt, "file-text", "download")
+        filem.addSeparator()
+        self._menu_action(filem, "Exit", self.close, "log-out", "door-open", "x")
 
-        imgm = selm.addMenu("Images")
-        imgm.addAction("Tick all visible images", lambda: self._tick_all_visible_images(True))
-        imgm.addAction("Untick all visible images", lambda: self._tick_all_visible_images(False))
-        imgm.addAction("Invert visible image ticks", self._invert_visible_image_ticks)
+        settings = self._top_menu("Settings")
+        self._menu_action(settings, "Config settings", self.show_config_dialog, "settings", "sliders-horizontal")
+        self._menu_action(settings, "ROI editor (main)", self.edit_rois, "scan", "scan-line", "crop")
+        self._menu_action(settings, "ROI editor (alt)", self.edit_alt_rois, "scan-search", "scan", "crop")
+        self._menu_action(settings, "Filters", self.show_filter_dialog, "list-filter", "filter")
+
+        tools = self._top_menu("Tools")
+        self._menu_action(tools, "Run QC", self.run_batch, "play", "circle-play")
+        self._menu_action(tools, "Stop", self.stop_batch, "square", "circle-stop", "octagon-x")
+        tools.addSeparator()
+        self._menu_action(tools, "Mark selected station checked", lambda: self.set_selected_station_checked(True), "circle-check", "check")
+        self._menu_action(tools, "Mark selected station unchecked", lambda: self.set_selected_station_checked(False), "circle-x", "x")
+
+        dbm = self._top_menu("Database")
+        self._menu_action(dbm, "Delete selected station rows from DB", self.delete_selected_station_rows, "trash-2", "trash")
+        self._menu_action(dbm, "Delete selected image rows from DB", self.delete_selected_image_rows, "image-minus", "trash-2")
+        self._menu_action(dbm, "Delete all visible/filtered rows from DB", self.delete_filtered_rows, "list-x", "trash-2")
+        self._menu_action(dbm, "Delete by ROV...", self.delete_by_rov_dialog, "bot", "trash-2")
+        dbm.addSeparator()
+        self._menu_action(dbm, "Reset selected checked status", lambda: self.reset_selected_checked(False), "rotate-ccw", "undo-2")
+        self._menu_action(dbm, "Set selected checked status", lambda: self.reset_selected_checked(True), "circle-check", "check-check")
+        dbm.addSeparator()
+        self._menu_action(dbm, "Re-check all unchecked files from DB", self.recheck_all_unchecked_from_db, "refresh-cw", "rotate-cw")
+
+        selm = self._top_menu("Selection")
+        posm = self._submenu(selm, "Positions", "map-pin", "crosshair")
+        self._menu_action(posm, "Tick all visible positions", lambda: self._tick_all_visible_positions(True), "list-checks", "check-check")
+        self._menu_action(posm, "Untick all visible positions", lambda: self._tick_all_visible_positions(False), "list-x", "x")
+        self._menu_action(posm, "Invert visible position ticks", self._invert_visible_position_ticks, "arrow-left-right", "replace")
+        posm.addSeparator()
+        self._menu_action(posm, "Tick highlighted positions", lambda: self._set_station_selected(True), "mouse-pointer-check", "check")
+        self._menu_action(posm, "Untick highlighted positions", lambda: self._set_station_selected(False), "mouse-pointer-2", "x")
+        posm.addSeparator()
+        self._menu_action(posm, "Tick positions by status...", self._tick_positions_by_status_dialog, "badge-check", "circle-check")
+        self._menu_action(posm, "Tick positions by ROV / ROV1...", self._tick_positions_by_rov_dialog, "bot", "ship-wheel")
+        self._menu_action(posm, "Tick checked positions", self._tick_checked_positions, "check-check", "circle-check")
+        self._menu_action(posm, "Tick unchecked positions", self._tick_unchecked_positions, "circle-dashed", "circle")
+
+        imgm = self._submenu(selm, "Images", "images", "image")
+        self._menu_action(imgm, "Tick all visible images", lambda: self._tick_all_visible_images(True), "images", "check-check")
+        self._menu_action(imgm, "Untick all visible images", lambda: self._tick_all_visible_images(False), "image-off", "x")
+        self._menu_action(imgm, "Invert visible image ticks", self._invert_visible_image_ticks, "arrow-left-right", "replace")
         imgm.addSeparator()
-        imgm.addAction("Tick highlighted images", lambda: self._set_image_selected(True))
-        imgm.addAction("Untick highlighted images", lambda: self._set_image_selected(False))
+        self._menu_action(imgm, "Tick highlighted images", lambda: self._set_image_selected(True), "mouse-pointer-check", "image-check")
+        self._menu_action(imgm, "Untick highlighted images", lambda: self._set_image_selected(False), "mouse-pointer-2", "image-x")
         imgm.addSeparator()
-        imgm.addAction("Tick images for ticked positions", self._tick_images_for_ticked_positions)
-        imgm.addAction("Tick positions for ticked images", self._tick_positions_for_ticked_images)
-        imgm.addAction("Tick checked images", self._tick_checked_images)
-        imgm.addAction("Tick unchecked images", self._tick_unchecked_images)
+        self._menu_action(imgm, "Tick images for ticked positions", self._tick_images_for_ticked_positions, "images", "map-pin-check")
+        self._menu_action(imgm, "Tick positions for ticked images", self._tick_positions_for_ticked_images, "map-pin", "images")
+        self._menu_action(imgm, "Tick checked images", self._tick_checked_images, "image-check", "check-check")
+        self._menu_action(imgm, "Tick unchecked images", self._tick_unchecked_images, "image", "circle-dashed")
 
         selm.addSeparator()
-        selm.addAction("Clear all position and image ticks", self._clear_all_ticks)
-        selm.addAction("Show selection counts", self._show_selection_counts)
+        self._menu_action(selm, "Clear all position and image ticks", self._clear_all_ticks, "eraser", "x")
+        self._menu_action(selm, "Show selection counts", self._show_selection_counts, "sigma", "list-ordered")
         selm.addSeparator()
-        selm.addAction("Re-check ticked/selected positions", self.recheck_selected_positions)
-        selm.addAction("Re-check ticked/selected images", self.recheck_selected_images)
-        selm.addAction("Delete ticked/selected positions from DB", self.delete_ticked_station_rows)
-        selm.addAction("Delete ticked/selected images from DB", self.delete_ticked_image_rows)
-        view = menu.addMenu("View")
-        view.addAction("Refresh results", self.refresh_results)
-        view.addAction("Clear filters", self.clear_filters)
-        view.addAction("Station map", self.show_station_map)
+        self._menu_action(selm, "Re-check ticked/selected positions", self.recheck_selected_positions, "refresh-cw", "map-pin")
+        self._menu_action(selm, "Re-check ticked/selected images", self.recheck_selected_images, "refresh-cw", "images")
+        self._menu_action(selm, "Delete ticked/selected positions from DB", self.delete_ticked_station_rows, "trash-2", "map-pin-x")
+        self._menu_action(selm, "Delete ticked/selected images from DB", self.delete_ticked_image_rows, "trash-2", "image-x")
+
+        view = self._top_menu("View")
+        self._menu_action(view, "Refresh results", self.refresh_results, "refresh-cw", "rotate-cw")
+        self._menu_action(view, "Clear filters", self.clear_filters, "filter-x", "eraser")
+        self._menu_action(view, "Station map", self.show_station_map, "map", "map-pinned")
 
     def _build_toolbar(self):
         tb = QToolBar("Main")
@@ -382,20 +409,24 @@ class OCRMainWindow(QMainWindow):
         self.act_map = QAction("Map", self)
         self.act_map.triggered.connect(self.show_station_map)
 
-        tb.addAction(self.style().standardIcon(QStyle.SP_ArrowForward), "Run QC", self.run_batch)
+        self.act_run.setIcon(self.icons.icon("play", "circle-play"))
+        self.act_stop.setIcon(self.icons.icon("square", "circle-stop", "octagon-x"))
+        self.act_refresh.setIcon(self.icons.icon("refresh-cw", "rotate-cw"))
+        self.act_filters.setIcon(self.icons.icon("list-filter", "filter"))
+        self.act_config.setIcon(self.icons.icon("settings", "sliders-horizontal"))
+        self.act_map.setIcon(self.icons.icon("map", "map-pinned"))
 
-        tb.addAction(self.style().standardIcon(QStyle.SP_BrowserStop), "Stop", self.stop_batch)
-
-        tb.addAction(self.style().standardIcon(QStyle.SP_BrowserReload), "Refresh", self.refresh_results)
-
-        tb.addAction(self.style().standardIcon(QStyle.SP_FileDialogDetailedView), "Filters", self.show_filter_dialog)
-
-        tb.addAction(self.style().standardIcon(QStyle.SP_FileDialogContentsView), "Config", self.show_config_dialog)
-
-        tb.addAction(self.style().standardIcon(QStyle.SP_DriveNetIcon), "Map", self.show_station_map)
+        tb.addAction(self.act_run)
+        tb.addAction(self.act_stop)
+        tb.addAction(self.act_refresh)
+        tb.addAction(self.act_filters)
+        tb.addAction(self.act_config)
+        tb.addAction(self.act_map)
 
         tb.addSeparator()
-        tb.addAction(self.style().standardIcon(QStyle.SP_TrashIcon), "Delete selected", self.delete_selected_station_rows)
+        delete_action = QAction(self.icons.icon("trash-2", "trash"), "Delete selected", self)
+        delete_action.triggered.connect(self.delete_selected_station_rows)
+        tb.addAction(delete_action)
 
     def _auto_load_default_config(self):
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -640,6 +671,7 @@ class OCRMainWindow(QMainWindow):
         self.quick_delta_combo = QComboBox()
         self.quick_delta_combo.addItems(["Any delta", "Delta > 1m", "Delta > 2m", "Delta > 5m", "Delta > 10m"])
         self.quick_clear_btn = QPushButton("Clear")
+        self.quick_clear_btn.setIcon(self.icons.icon("x", "eraser"))
         self.quick_clear_btn.clicked.connect(self._clear_quick_filters)
         self.quick_search_edit.textChanged.connect(self._apply_quick_filters)
         self.quick_status_combo.currentTextChanged.connect(self._apply_quick_filters)
@@ -981,26 +1013,26 @@ class OCRMainWindow(QMainWindow):
 
     def _station_context_menu(self, pos):
         menu = QMenu(self)
-        menu.addAction('Tick selected positions', lambda: self._set_station_selected(True))
-        menu.addAction('Untick selected positions', lambda: self._set_station_selected(False))
+        self._menu_action(menu, 'Tick selected positions', lambda: self._set_station_selected(True), 'mouse-pointer-check', 'check')
+        self._menu_action(menu, 'Untick selected positions', lambda: self._set_station_selected(False), 'mouse-pointer-2', 'x')
         menu.addSeparator()
-        menu.addAction('Re-check ticked/selected positions', self.recheck_selected_positions)
-        menu.addAction('Set ticked/selected positions checked', lambda: self._set_checked_for_ticked_stations(True))
-        menu.addAction('Set ticked/selected positions unchecked', lambda: self._set_checked_for_ticked_stations(False))
+        self._menu_action(menu, 'Re-check ticked/selected positions', self.recheck_selected_positions, 'refresh-cw', 'rotate-cw')
+        self._menu_action(menu, 'Set ticked/selected positions checked', lambda: self._set_checked_for_ticked_stations(True), 'circle-check', 'check-check')
+        self._menu_action(menu, 'Set ticked/selected positions unchecked', lambda: self._set_checked_for_ticked_stations(False), 'circle-x', 'x')
         menu.addSeparator()
-        menu.addAction('Delete ticked/selected positions from DB', self.delete_ticked_station_rows)
+        self._menu_action(menu, 'Delete ticked/selected positions from DB', self.delete_ticked_station_rows, 'trash-2', 'map-pin-x')
         menu.exec(self.station_table.viewport().mapToGlobal(pos))
 
     def _image_context_menu(self, pos):
         menu = QMenu(self)
-        menu.addAction('Tick selected images', lambda: self._set_image_selected(True))
-        menu.addAction('Untick selected images', lambda: self._set_image_selected(False))
+        self._menu_action(menu, 'Tick selected images', lambda: self._set_image_selected(True), 'mouse-pointer-check', 'image-check')
+        self._menu_action(menu, 'Untick selected images', lambda: self._set_image_selected(False), 'mouse-pointer-2', 'image-x')
         menu.addSeparator()
-        menu.addAction('Re-check ticked/selected images', self.recheck_selected_images)
-        menu.addAction('Set ticked/selected images checked', lambda: self._set_checked_for_ticked_images(True))
-        menu.addAction('Set ticked/selected images unchecked', lambda: self._set_checked_for_ticked_images(False))
+        self._menu_action(menu, 'Re-check ticked/selected images', self.recheck_selected_images, 'refresh-cw', 'images')
+        self._menu_action(menu, 'Set ticked/selected images checked', lambda: self._set_checked_for_ticked_images(True), 'image-check', 'check-check')
+        self._menu_action(menu, 'Set ticked/selected images unchecked', lambda: self._set_checked_for_ticked_images(False), 'image-x', 'x')
         menu.addSeparator()
-        menu.addAction('Delete ticked/selected images from DB', self.delete_ticked_image_rows)
+        self._menu_action(menu, 'Delete ticked/selected images from DB', self.delete_ticked_image_rows, 'trash-2', 'image-x')
         menu.exec(self.image_table.viewport().mapToGlobal(pos))
 
     def _set_station_selected(self, selected: bool):

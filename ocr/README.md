@@ -46,3 +46,20 @@ This v3 package is a working structured implementation and a solid base for deep
 ## OCR v5 notes
 
 This package preserves the v3 interface and workflow, including menus, toolbar/icons, project DB autoload, ROI editor, config dialog, filters, exports, visit/check workflow, and station map. v5 adds quick filters, better table sorting, summary cards, multi-select station/image rows, database delete/reset tools, and map image-count labels next to DSR points. Run with `python ocr/run_ocr_v5.py` or keep using `python ocr/run_ocr_v3.py`.
+
+## Shared Lucide icons
+
+The OCR interface uses SVG icons directly from `dataviewer2/icons`; icon files are not duplicated.
+The normal project layout is:
+
+```text
+SeisWebLog/
+├── dataviewer2/icons/
+└── ocr/
+```
+
+The icon resolver searches subfolders recursively. For a non-standard layout, set:
+
+```text
+SEISWEBLOG_ICON_DIR=C:\path\to\SeisWebLog\dataviewer2\icons
+```

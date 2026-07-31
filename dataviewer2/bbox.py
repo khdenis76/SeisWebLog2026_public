@@ -6,6 +6,8 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .icons_manager import icon
+
 from .models import BlackBoxData, BlackBoxFileInfo
 from .qc_widgets import (
     ElapsedAxis,
@@ -57,17 +59,17 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
         self.file_combo = QtWidgets.QComboBox()
         self.file_combo.setMinimumWidth(500)
         self.file_combo.currentIndexChanged.connect(self._file_changed)
-        self.reload_button = QtWidgets.QPushButton("Reload")
+        self.reload_button = QtWidgets.QPushButton(icon("reload", size=18), "Reload")
         self.reload_button.clicked.connect(self.reload_files_requested)
         self.track_source = QtWidgets.QComboBox()
         self.track_source.setMinimumWidth(130)
-        self.add_track_button = QtWidgets.QPushButton("Add pair")
+        self.add_track_button = QtWidgets.QPushButton(icon("create", size=18), "Add pair")
         self.add_track_button.clicked.connect(self._add_track)
-        self.add_all_tracks_button = QtWidgets.QPushButton("Add all pairs")
+        self.add_all_tracks_button = QtWidgets.QPushButton(icon("layer", size=18), "Add all pairs")
         self.add_all_tracks_button.clicked.connect(self._add_all_tracks)
-        self.add_all_files_button = QtWidgets.QPushButton("Add all files")
+        self.add_all_files_button = QtWidgets.QPushButton(icon("database", size=18), "Add all files")
         self.add_all_files_button.clicked.connect(self._add_all_files)
-        self.zoom_button = QtWidgets.QPushButton("Zoom tracks")
+        self.zoom_button = QtWidgets.QPushButton(icon("zoom_line", size=18), "Zoom tracks")
         self.zoom_button.clicked.connect(self.zoom_track_requested)
 
         self.layout_combo = QtWidgets.QComboBox()
@@ -112,7 +114,13 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
             ("Depth", lambda: self._select_preset(("depth", "altitude", "elevation"))),
             ("Clear", lambda: self._set_all(False)),
         ):
-            button = QtWidgets.QPushButton(text)
+            preset_icon = {
+                "GNSS": icon("satellite", size=16),
+                "Motion": icon("activity", size=16),
+                "Depth": icon("chart", size=16),
+                "Clear": icon("clear", size=16),
+            }.get(text, QtGui.QIcon())
+            button = QtWidgets.QPushButton(preset_icon, text)
             button.clicked.connect(callback)
             preset_row.addWidget(button)
         left_layout.addLayout(preset_row)

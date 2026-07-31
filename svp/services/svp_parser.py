@@ -29,12 +29,25 @@ class SVPParser:
     @staticmethod
     def _detect_svp_setup(lines: list[str]) -> SVPFormatSetup:
         data_header_idx = None
+        headers = []
         for i, line in enumerate(lines):
-            if "Depth:Meter" in line and "Calculated Sound Velocity" in line:
+            lower = line.lower()
+            if "depth" in lower and "sound velocity" in lower:
                 data_header_idx = i
+                headers = [h.strip() for h in line.split(",")]
                 break
 
-        header_count = data_header_idx if data_header_idx is not None else 0
+        if data_header_idx is None:
+            raise ValueError("SVP data header not found. Expected depth and sound velocity columns.")
+
+        def pick_column(*terms):
+            for header in headers:
+                normalized = header.lower().replace("_", " ")
+                if all(term in normalized for term in terms):
+                    return header
+            return None
+
+        header_count = data_header_idx
 
         return SVPFormatSetup(
             format_name="svx2_svp",
@@ -51,11 +64,15 @@ class SVPParser:
             meta_model_key="Instrument:Model",
             meta_lat_key="Latitude",
             meta_coordinates_key="Coordinates",
-            col_depth="Depth:Meter",
-            col_velocity="Calculated Sound Velocity:m/sec",
-            col_temperature="Temperature:C",
-            col_salinity="Salinity:PSU",
-            col_density="Density:kg/m^3",
+            col_depth=pick_column("depth") or "Depth:Meter",
+            col_velocity=(
+                pick_column("sound", "velocity")
+                or pick_column("velocity")
+            ),
+            col_temperature=pick_column("temperature"),
+            col_salinity=pick_column("salinity"),
+            col_density=pick_column("density"),
+            col_conductivity=pick_column("conductivity") or pick_column("conduct"),
         )
 
     @staticmethod
@@ -85,6 +102,7 @@ class SVPParser:
             col_temperature="TEMPERATURE;C",
             col_salinity="Calc. SALINITY;PSU",
             col_density="Calc. DENSITY;KG/M3",
+            col_conductivity="CONDUCTIVITY;MS/CM",
         )
 
     @staticmethod
@@ -121,8 +139,8 @@ class SVPParser:
             col_temperature=pick("temperature", "temperature_c", "temp"),
             col_salinity=pick("salinity", "salinity_psu", "psu"),
             col_density=pick("density", "density_kgm3"),
+            col_conductivity=pick("conductivity", "conductivity_mscm", "conduct"),
         )
-    @staticmethod
     @staticmethod
     def parse(text: str, setup: SVPFormatSetup) -> dict:
         parser = (getattr(setup, "parser_type", None) or "").lower()
@@ -191,6 +209,7 @@ class SVPParser:
                 "temperature_c": _to_float(row.get(setup.col_temperature)),
                 "salinity_psu": _to_float(row.get(setup.col_salinity)),
                 "density_kgm3": _to_float(row.get(setup.col_density)),
+                "conductivity_mscm": _to_float(row.get(setup.col_conductivity)),
                 "source_row_text": raw,
             })
 
@@ -247,6 +266,7 @@ class SVPParser:
                 "temperature_c": _to_float(row.get(setup.col_temperature)),
                 "salinity_psu": _to_float(row.get(setup.col_salinity)),
                 "density_kgm3": _to_float(row.get(setup.col_density)),
+                "conductivity_mscm": _to_float(row.get(setup.col_conductivity)),
                 "source_row_text": raw,
             })
 
@@ -285,6 +305,7 @@ class SVPParser:
                 "temperature_c": _to_float(row.get(setup.col_temperature)),
                 "salinity_psu": _to_float(row.get(setup.col_salinity)),
                 "density_kgm3": _to_float(row.get(setup.col_density)),
+                "conductivity_mscm": _to_float(row.get(setup.col_conductivity)),
                 "source_row_text": str(row),
             })
 

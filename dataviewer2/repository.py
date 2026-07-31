@@ -460,6 +460,45 @@ class ProjectRepository:
 
         return BlackBoxData(info, seconds, labels, qc_columns, tracks)
 
+    def dsr_columns(self) -> list[str]:
+        with self._connect() as connection:
+            return sorted(self._table_columns(connection, "DSR"), key=str.lower)
+
+    def load_custom_dsr_layer(self, definition) -> PointLayerData:
+        """Load a configured DSR point layer using validated column names."""
+        with self._connect() as connection:
+            columns = self._table_columns(connection, "DSR")
+            required = {definition.x_field, definition.y_field}
+            missing = required - columns
+            if missing:
+                raise ProjectRepositoryError(
+                    "Custom DSR layer is missing column(s): " + ", ".join(sorted(missing))
+                )
+            optional = [name for name in ("ID", "Line", "Station", "LinePoint", "Node", "ROV", "ROV1", "Status", definition.category_field) if name and name in columns]
+            # Preserve order while removing duplicates.
+            optional = list(dict.fromkeys(optional))
+            select = [
+                "rowid AS source_index",
+                f'CAST("{definition.x_field}" AS REAL) AS x',
+                f'CAST("{definition.y_field}" AS REAL) AS y',
+            ] + [f'"{name}" AS "{name.lower()}"' for name in optional]
+            where = [f'"{definition.x_field}" IS NOT NULL', f'"{definition.y_field}" IS NOT NULL']
+            params: list[object] = []
+            field = str(definition.filter_field or "")
+            operator = str(definition.filter_operator or "").upper()
+            if field and field in columns and operator:
+                if operator in {"IS NULL", "IS NOT NULL"}:
+                    where.append(f'"{field}" {operator}')
+                elif operator in {"=", "!=", ">", ">=", "<", "<="}:
+                    where.append(f'"{field}" {operator} ?')
+                    params.append(definition.filter_value)
+            order_parts = [name for name in ("Line", "LinePoint", "Station") if name in columns]
+            sql = f'SELECT {", ".join(select)} FROM DSR WHERE {" AND ".join(where)}'
+            if order_parts:
+                sql += " ORDER BY " + ", ".join(f'"{name}"' for name in order_parts)
+            rows = connection.execute(sql, params).fetchall()
+        return self._rows_to_layer(definition.name, rows)
+
     @staticmethod
     def _rows_to_layer(name: str, rows: list[sqlite3.Row]) -> PointLayerData:
         count = len(rows)

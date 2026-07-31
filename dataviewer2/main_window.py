@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import csv
 import hashlib
+import html
 from pathlib import Path
 
 import pyqtgraph as pg
@@ -17,6 +19,12 @@ from .shapes import load_shapefile
 from .workers import FunctionWorker
 from .bbox import BlackBoxWindow
 from .dsr_qc import DsrQcWindow
+from .config import ProjectViewerConfig, CustomDsrLayerDefinition
+from .custom_dsr_dialog import CustomDsrLayerDialog
+from .icons_manager import icon
+from .projects import ProjectsDatabase, ProjectsDatabaseError
+from .svp3d import WaterColumnWindow
+from .track3d import DsrBBox3DWindow
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -26,6 +34,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.project_path = Path(project_path)
         self.repository = ProjectRepository(project_path)
+        self.viewer_config = ProjectViewerConfig(project_path)
         self.thread_pool = QtCore.QThreadPool.globalInstance()
         self.thread_pool.setMaxThreadCount(2)
         self._workers: set[FunctionWorker] = set()
@@ -38,15 +47,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bbox_track_layer_names: dict[tuple[int, str], str] = {}
         self.bbox_last_track_layer_name: str | None = None
         self.dsr_qc_window: DsrQcWindow | None = None
+        self.svp3d_window: WaterColumnWindow | None = None
+        self.track3d_window: DsrBBox3DWindow | None = None
         self.dsr_qc_cache: dict[int, object] = {}
         self._dsr_qc_request_line: int | None = None
         self.dsr_station_marker: pg.ScatterPlotItem | None = None
+        self._dsr_tree_building = False
+        self._dsr_station_values: list[int] = []
+        self._dsr_auto_zoom = True
+        self._custom_definition_by_layer: dict[str, CustomDsrLayerDefinition] = {}
+        self._dsr_line_overlays: dict[tuple[str, int], FastPointLayer] = {}
+        self._replacement_window: MainWindow | None = None
         self._build_ui()
         self._restore_state()
         self._start_loading()
 
     def _build_ui(self) -> None:
-        self.setWindowTitle(f"SeisWebLog DataViewer 2.0 — {self.project_path.name}")
+        self.setWindowTitle(f"SeisWebLog DataViewer 2.4 — {self.project_path.name}")
+        self.setWindowIcon(icon("app", size=48))
         self.resize(1600, 950)
         self.setDockOptions(
             QtWidgets.QMainWindow.DockOption.AllowTabbedDocks
@@ -98,6 +116,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ribbon.dsr_station_changed.connect(self._select_dsr_station)
         self.ribbon.dsr_zoom_line_requested.connect(self._zoom_dsr_line)
         self.ribbon.dsr_zoom_station_requested.connect(self._zoom_dsr_station)
+        self.ribbon.dsr_previous_station_requested.connect(lambda: self._step_dsr_station(-1))
+        self.ribbon.dsr_next_station_requested.connect(lambda: self._step_dsr_station(1))
+        self.ribbon.dsr_auto_zoom_toggled.connect(self._set_dsr_auto_zoom)
+        self.ribbon.dsr_create_layer_requested.connect(self._create_custom_dsr_layer)
+        self.ribbon.dsr_manage_layers_requested.connect(self._manage_custom_dsr_layers)
+        self.ribbon.project_change_requested.connect(self._change_project)
+        self.ribbon.project_folder_requested.connect(self._open_project_folder)
+        self.ribbon.exit_requested.connect(self.close)
+        self.ribbon.export_map_requested.connect(self._export_map_image)
+        self.ribbon.export_selected_layer_requested.connect(self._export_selected_layer)
+        self.ribbon.export_visible_layers_requested.connect(self._export_visible_layers)
+        self.ribbon.report_project_requested.connect(self._generate_project_report)
+        self.ribbon.report_dsr_line_requested.connect(self._generate_dsr_line_report)
+        self.ribbon.reports_folder_requested.connect(self._open_reports_folder)
+        self.ribbon.svp3d_open_requested.connect(self._open_svp3d_window)
+        self.ribbon.track3d_open_requested.connect(self._open_track3d_window)
 
         epsg = self.repository.project_epsg() or "unknown"
         self.coord_label = QtWidgets.QLabel("X: —   Y: —")
@@ -121,6 +155,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.layer_tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self.layer_tree.customContextMenuRequested.connect(self._show_layer_context_menu)
         self.layer_tree.itemDoubleClicked.connect(self._layer_double_clicked)
+        self.layer_tree.itemExpanded.connect(self._tree_item_expanded)
+        self.layer_tree.itemClicked.connect(self._tree_item_clicked)
         layout.addWidget(self.layer_tree)
         self.layers_dock.setWidget(container)
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, self.layers_dock)
@@ -146,6 +182,229 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, self.measure_dock)
         self.tabifyDockWidget(self.details_dock, self.measure_dock)
         self.details_dock.raise_()
+
+
+    def _open_svp3d_window(self) -> None:
+        try:
+            if self.svp3d_window is None:
+                self.svp3d_window = WaterColumnWindow(self.project_path, self)
+                self.svp3d_window.destroyed.connect(lambda: setattr(self, "svp3d_window", None))
+            self.svp3d_window.show()
+            self.svp3d_window.raise_()
+            self.svp3d_window.activateWindow()
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "3D Water Column Viewer", str(exc))
+
+    def _open_track3d_window(self) -> None:
+        try:
+            if self.track3d_window is None:
+                self.track3d_window = DsrBBox3DWindow(self.project_path, self)
+                self.track3d_window.destroyed.connect(lambda: setattr(self, "track3d_window", None))
+            self.track3d_window.show()
+            self.track3d_window.raise_()
+            self.track3d_window.activateWindow()
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "3D DSR & BlackBox Viewer", str(exc))
+
+    def _root_projects_database(self) -> Path | None:
+        candidates = [
+            Path.cwd() / "db.sqlite3",
+            Path(__file__).resolve().parents[1] / "db.sqlite3",
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate.resolve()
+        return None
+
+    def _change_project(self) -> None:
+        root_db = self._root_projects_database()
+        if root_db is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Change project",
+                "The root SeisWebLog db.sqlite3 could not be found.",
+            )
+            return
+        try:
+            projects = ProjectsDatabase(root_db).read_projects()
+        except ProjectsDatabaseError as exc:
+            QtWidgets.QMessageBox.critical(self, "Change project", str(exc))
+            return
+        available = [p for p in projects if p.project_dir.resolve() != self.project_path.resolve()]
+        if not available:
+            QtWidgets.QMessageBox.information(self, "Change project", "No other projects are available.")
+            return
+        labels = [f"{p.name} — {p.project_dir}" for p in available]
+        selected, accepted = QtWidgets.QInputDialog.getItem(
+            self, "Change project", "Project:", labels, 0, False
+        )
+        if not accepted:
+            return
+        entry = available[labels.index(selected)]
+        try:
+            replacement = MainWindow(entry.project_dir)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Change project", str(exc))
+            return
+        self._replacement_window = replacement
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            setattr(app, "_dataviewer_active_window", replacement)
+        replacement.showMaximized()
+        self.close()
+
+    def _open_project_folder(self) -> None:
+        QtGui.QDesktopServices.openUrl(
+            QtCore.QUrl.fromLocalFile(str(self.project_path.resolve()))
+        )
+
+    def _reports_dir(self) -> Path:
+        path = self.project_path / "reports" / "dataviewer2"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @staticmethod
+    def _safe_filename(value: str) -> str:
+        safe = "".join(char if char.isalnum() or char in "-_." else "_" for char in value)
+        return safe.strip("._") or "layer"
+
+    def _export_map_image(self) -> None:
+        default = self._reports_dir() / f"{self._safe_filename(self.project_path.name)}_map.png"
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export map image", str(default), "PNG image (*.png);;JPEG image (*.jpg *.jpeg)"
+        )
+        if not filename:
+            return
+        pixmap = self.plot_widget.grab()
+        if not pixmap.save(filename):
+            QtWidgets.QMessageBox.warning(self, "Export map", "The map image could not be saved.")
+            return
+        self.statusBar().showMessage(f"Map exported: {filename}", 4000)
+
+    def _selected_layer_name(self) -> str | None:
+        item = self.layer_tree.currentItem()
+        if item is None:
+            return None
+        name = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        return str(name) if name in self.layers else None
+
+    def _write_layer_csv(self, name: str, filename: Path) -> int:
+        layer = self.layers[name]
+        filename.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(layer, FastPointLayer) and layer.data is not None:
+            metadata = list(layer.data.metadata.keys())
+            with filename.open("w", newline="", encoding="utf-8-sig") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["x", "y", *metadata])
+                for index in range(layer.data.count):
+                    row = [layer.data.x[index], layer.data.y[index]]
+                    for key in metadata:
+                        value = layer.data.metadata[key][index]
+                        row.append(value.item() if hasattr(value, "item") else value)
+                    writer.writerow(row)
+            return layer.data.count
+        if isinstance(layer, FastShapeLayer):
+            with filename.open("w", newline="", encoding="utf-8-sig") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["part", "vertex", "x", "y"])
+                count = 0
+                arrays = [layer.data.points] if layer.data.geometry_type == "point" else layer.data.parts
+                for part_index, array in enumerate(arrays):
+                    for vertex_index, point in enumerate(array):
+                        writer.writerow([part_index, vertex_index, point[0], point[1]])
+                        count += 1
+            return count
+        return 0
+
+    def _export_selected_layer(self) -> None:
+        name = self._selected_layer_name()
+        if name is None:
+            QtWidgets.QMessageBox.information(self, "Export layer", "Select a layer in the Layers panel first.")
+            return
+        default = self._reports_dir() / f"{self._safe_filename(name)}.csv"
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export selected layer", str(default), "CSV file (*.csv)"
+        )
+        if not filename:
+            return
+        count = self._write_layer_csv(name, Path(filename))
+        self.statusBar().showMessage(f"Exported {count:,} records from {name}", 4000)
+
+    def _export_visible_layers(self) -> None:
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Export visible layers", str(self._reports_dir() / "layers")
+        )
+        if not directory:
+            return
+        exported = 0
+        for name, layer in self.layers.items():
+            if not layer.visible:
+                continue
+            self._write_layer_csv(name, Path(directory) / f"{self._safe_filename(name)}.csv")
+            exported += 1
+        self.statusBar().showMessage(f"Exported {exported} visible layer(s)", 4000)
+
+    def _report_header(self, title: str) -> str:
+        return f"""<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>
+<style>body{{font-family:Segoe UI,Arial,sans-serif;margin:32px;color:#263238}}
+h1{{color:#1565c0}}table{{border-collapse:collapse;width:100%;margin-top:18px}}
+th,td{{border:1px solid #cfd8dc;padding:6px 9px;text-align:left}}th{{background:#eceff1}}
+img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.escape(title)}</h1>"""
+
+    def _generate_project_report(self) -> None:
+        out = self._reports_dir()
+        image_path = out / "project_map.png"
+        self.plot_widget.grab().save(str(image_path))
+        report_path = out / "project_summary.html"
+        epsg = self.repository.project_epsg() or "unknown"
+        rows = "".join(
+            f"<tr><td>{html.escape(name)}</td><td>{layer.count:,}</td><td>{'Yes' if layer.visible else 'No'}</td></tr>"
+            for name, layer in self.layers.items()
+        )
+        content = self._report_header(f"Project summary — {self.project_path.name}")
+        content += f"<p><b>Project folder:</b> {html.escape(str(self.project_path))}<br><b>EPSG:</b> {html.escape(str(epsg))}</p>"
+        content += "<img src='project_map.png' alt='Project map'>"
+        content += f"<table><thead><tr><th>Layer</th><th>Features</th><th>Visible</th></tr></thead><tbody>{rows}</tbody></table></body></html>"
+        report_path.write_text(content, encoding="utf-8")
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(report_path)))
+
+    def _generate_dsr_line_report(self) -> None:
+        line = self.ribbon.current_dsr_line()
+        layer = self.layers.get("DSR Primary")
+        if line is None or not isinstance(layer, FastPointLayer) or layer.data is None:
+            QtWidgets.QMessageBox.information(self, "Receiver-line report", "DSR Primary and a receiver line are required.")
+            return
+        line_values = self._numeric_values(layer.data.metadata.get("line"))
+        finite = np.isfinite(line_values)
+        rounded = np.zeros(line_values.size, dtype=np.int64)
+        rounded[finite] = np.rint(line_values[finite]).astype(np.int64)
+        indices = np.flatnonzero(finite & (rounded == int(line)))
+        if indices.size == 0:
+            QtWidgets.QMessageBox.information(self, "Receiver-line report", "No DSR Primary records were found for this line.")
+            return
+        out = self._reports_dir()
+        report_path = out / f"receiver_line_{line}.html"
+        fields = [field for field in ("station", "node", "rov", "ROV", "PrimaryRadial", "PrimaryElevation") if field in layer.data.metadata]
+        headings = ["Easting", "Northing", *fields]
+        body_rows = []
+        for index in indices:
+            values = [f"{layer.data.x[index]:.3f}", f"{layer.data.y[index]:.3f}"]
+            for field in fields:
+                value = layer.data.metadata[field][index]
+                value = value.item() if hasattr(value, "item") else value
+                values.append(str(value))
+            body_rows.append("<tr>" + "".join(f"<td>{html.escape(value)}</td>" for value in values) + "</tr>")
+        content = self._report_header(f"Receiver line {line}")
+        content += f"<p><b>Stations/records:</b> {indices.size:,}</p>"
+        content += "<table><thead><tr>" + "".join(f"<th>{html.escape(field)}</th>" for field in headings) + "</tr></thead><tbody>"
+        content += "".join(body_rows) + "</tbody></table></body></html>"
+        report_path.write_text(content, encoding="utf-8")
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(report_path)))
+
+    def _open_reports_folder(self) -> None:
+        QtGui.QDesktopServices.openUrl(
+            QtCore.QUrl.fromLocalFile(str(self._reports_dir()))
+        )
 
     def _start_worker(self, worker: FunctionWorker) -> None:
         """Keep Python worker wrappers alive until their signals finish."""
@@ -192,13 +451,23 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.details.appendPlainText(traceback.format_exc() + "\n")
                 QtWidgets.QApplication.processEvents()
 
-        self._pending = len(jobs)
+        custom_definitions = list(self.viewer_config.custom_dsr_layers)
+        self._pending = len(jobs) + len(custom_definitions)
         self.statusBar().showMessage(f"Loading {self._pending} database layer(s)…")
         for group, name, function, point_color, line_color, connect_by in jobs:
             worker = FunctionWorker(function)
             worker.signals.completed.connect(
                 lambda data, g=group, n=name, pc=point_color, lc=line_color, cb=connect_by:
                 self._point_layer_loaded(g, n, data, pc, lc, cb)
+            )
+            worker.signals.failed.connect(self._load_failed)
+            self._start_worker(worker)
+
+
+        for definition in custom_definitions:
+            worker = FunctionWorker(lambda d=definition: self.repository.load_custom_dsr_layer(d))
+            worker.signals.completed.connect(
+                lambda data, d=definition: self._custom_dsr_layer_loaded(d, data)
             )
             worker.signals.failed.connect(self._load_failed)
             self._start_worker(worker)
@@ -213,12 +482,13 @@ class MainWindow(QtWidgets.QMainWindow):
             if item.text(0) == name:
                 return item
         item = QtWidgets.QTreeWidgetItem([name, ""])
+        item.setIcon(0, icon("group", size=20))
         item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsUserCheckable)
         item.setExpanded(True)
         self.layer_tree.addTopLevelItem(item)
         return item
 
-    def _register_layer(self, group: str, name: str, count: int, layer: FastPointLayer | FastShapeLayer, tooltip: str = "") -> None:
+    def _register_layer(self, group: str, name: str, count: int, layer: FastPointLayer | FastShapeLayer, tooltip: str = "") -> str:
         unique = name
         suffix = 2
         while unique in self.layers:
@@ -228,6 +498,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.layers[unique] = layer
         parent = self._group_item(group)
         item = QtWidgets.QTreeWidgetItem([unique, f"{count:,}"])
+        icon_key = "layer"
+        lower_name = unique.lower()
+        if group == "Project shapes":
+            icon_key = "shape"
+        elif group == "BlackBox":
+            icon_key = "bbox_track"
+        elif group == "Custom DSR Layers":
+            icon_key = "custom_layer"
+        elif "rppreplot" in lower_name or "preplot" in lower_name:
+            icon_key = "preplot"
+        elif "rec_db" in lower_name:
+            icon_key = "rec_db"
+        elif lower_name.startswith("dsr"):
+            icon_key = "receiver"
+        item.setIcon(0, icon(icon_key, size=20))
         item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, QtCore.Qt.CheckState.Checked)
         item.setToolTip(0, tooltip)
@@ -235,18 +520,22 @@ class MainWindow(QtWidgets.QMainWindow):
         parent.addChild(item)
         self.layer_items[unique] = item
         self._update_layer_z_values()
+        return unique
 
     def _point_layer_loaded(self, group: str, name: str, data: PointLayerData, point_color: str, line_color: str | None, connect_by: str | None) -> None:
         layer = FastPointLayer(self.plot_item, name, point_color, line_color, connect_by)
         layer.set_data(data)
         layer.selection_changed.connect(self._show_record)
-        self._register_layer(group, name, data.count, layer)
+        registered_name = self._register_layer(group, name, data.count, layer)
+        if name.startswith("DSR "):
+            self._attach_dsr_hierarchy(registered_name)
         if name == "DSR Primary":
             self._populate_dsr_ribbon(data)
         self._finish_load()
 
     def _register_shape_data(self, data: ShapeLayerData) -> None:
-        layer = FastShapeLayer(self.plot_item, data)
+        style_override = self.viewer_config.shape_styles.get(data.name, {})
+        layer = FastShapeLayer(self.plot_item, data, style_override=style_override)
         tooltip = (f"{data.definition.full_name}\nSource CRS: {data.source_crs}\n"
                    f"Project CRS: {data.target_crs}\nStatus: {data.crs_status}")
         self._register_layer("Project shapes", data.name, data.count, layer, tooltip)
@@ -267,14 +556,296 @@ class MainWindow(QtWidgets.QMainWindow):
         self.details.appendPlainText(error + "\n")
         self._finish_load()
 
+    def _attach_dsr_hierarchy(self, layer_name: str) -> None:
+        layer = self.layers.get(layer_name)
+        item = self.layer_items.get(layer_name)
+        if not isinstance(layer, FastPointLayer) or layer.data is None or item is None:
+            return
+        line_values = self._numeric_values(layer.data.metadata.get("line"))
+        station_values = self._numeric_values(layer.data.metadata.get("station"))
+        if line_values.size == 0 or station_values.size == 0:
+            return
+        finite = np.isfinite(line_values) & np.isfinite(station_values)
+        lines = np.rint(line_values[finite]).astype(np.int64)
+        stations = np.rint(station_values[finite]).astype(np.int64)
+        original_indices = np.flatnonzero(finite)
+        for line in sorted(set(lines.tolist())):
+            mask = lines == line
+            count = int(mask.sum())
+            child = QtWidgets.QTreeWidgetItem([f"Line {line}", f"{count:,}"])
+            child.setIcon(0, icon("line", size=18))
+            child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            child.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 1, "dsr_line")
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 2, layer_name)
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 3, int(line))
+            child.setToolTip(0, "Expand to load stations. Click to select line; double-click to zoom.")
+            dummy = QtWidgets.QTreeWidgetItem(["Loading stations…", ""])
+            dummy.setIcon(0, icon("loading", size=16))
+            dummy.setData(0, QtCore.Qt.ItemDataRole.UserRole + 1, "dummy")
+            child.addChild(dummy)
+            item.addChild(child)
+
+    def _set_dsr_line_overlay(self, layer_name: str, line: int, visible: bool) -> None:
+        key = (layer_name, int(line))
+        overlay = self._dsr_line_overlays.get(key)
+        if not visible:
+            if overlay is not None:
+                overlay.set_visible(False)
+            return
+        if overlay is not None:
+            overlay.set_visible(True)
+            return
+        source = self.layers.get(layer_name)
+        if not isinstance(source, FastPointLayer) or source.data is None:
+            return
+        lines = self._numeric_values(source.data.metadata.get("line"))
+        valid = np.isfinite(lines)
+        rounded = np.zeros(lines.size, dtype=np.int64)
+        rounded[valid] = np.rint(lines[valid]).astype(np.int64)
+        indices = np.flatnonzero(valid & (rounded == int(line)))
+        if indices.size == 0:
+            return
+        data = PointLayerData(
+            f"{layer_name} / Line {line}",
+            source.data.x[indices], source.data.y[indices], source.data.source_index[indices],
+            {name: values[indices] for name, values in source.data.metadata.items()},
+        )
+        color = self._category_color(f"{layer_name}:{line}")
+        overlay = FastPointLayer(self.plot_item, data.name, color, color, "line" if "line" in data.metadata else None)
+        overlay.update_style(point_color=color, line_color=color, line_width=3.0, point_size=9.0)
+        overlay.set_data(data)
+        overlay.curve.setZValue(5000); overlay.scatter.setZValue(5000.1)
+        overlay.selection_changed.connect(
+            lambda _name, index, d=data, title=data.name: self._show_external_record(title, d, index)
+        )
+        self._dsr_line_overlays[key] = overlay
+
+    def _tree_item_expanded(self, item: QtWidgets.QTreeWidgetItem) -> None:
+        kind = item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1)
+        if kind != "dsr_line" or item.childCount() != 1:
+            return
+        first = item.child(0)
+        if first.data(0, QtCore.Qt.ItemDataRole.UserRole + 1) != "dummy":
+            return
+        layer_name = str(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 2) or "")
+        line = int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3))
+        layer = self.layers.get(layer_name)
+        if not isinstance(layer, FastPointLayer) or layer.data is None:
+            return
+        item.takeChildren()
+        line_values = self._numeric_values(layer.data.metadata.get("line"))
+        station_values = self._numeric_values(layer.data.metadata.get("station"))
+        valid = np.isfinite(line_values) & np.isfinite(station_values)
+        indices = np.flatnonzero(valid & (np.rint(line_values).astype(np.int64) == line))
+        # Keep one navigation item per station, even when the DSR table contains
+        # repeated node records. The first valid coordinate is used for selection.
+        seen: set[int] = set()
+        for index in indices:
+            station = int(round(station_values[index]))
+            if station in seen:
+                continue
+            seen.add(station)
+            child = QtWidgets.QTreeWidgetItem([f"Station {station}", ""])
+            child.setIcon(0, icon("station", size=16))
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 1, "dsr_station")
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 2, layer_name)
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 3, line)
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 4, station)
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 5, int(index))
+            child.setToolTip(0, "Click to select and zoom to this station.")
+            item.addChild(child)
+
+    def _tree_item_clicked(self, item: QtWidgets.QTreeWidgetItem, _column: int) -> None:
+        kind = item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1)
+        if kind == "dsr_line":
+            line = int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3))
+            self.ribbon.select_dsr_line(line)
+            return
+        if kind == "dsr_station":
+            layer_name = str(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 2) or "")
+            line = int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3))
+            station = int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 4))
+            index = int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 5))
+            self.ribbon.select_dsr_line(line)
+            self.ribbon.select_dsr_station(station)
+            layer = self.layers.get(layer_name)
+            if isinstance(layer, FastPointLayer) and layer.data is not None and 0 <= index < layer.data.count:
+                x, y = float(layer.data.x[index]), float(layer.data.y[index])
+                self._show_record(layer_name, index)
+                self._set_station_marker(x, y)
+                self._set_view_extent((x - 25.0, x + 25.0, y - 25.0, y + 25.0))
+            else:
+                self._zoom_dsr_station(line, station)
+
+    def _set_dsr_auto_zoom(self, enabled: bool) -> None:
+        self._dsr_auto_zoom = bool(enabled)
+
+    def _step_dsr_station(self, direction: int) -> None:
+        stations = list(self._dsr_station_values)
+        if not stations:
+            return
+        current = self.ribbon.current_dsr_station()
+        try:
+            index = stations.index(int(current)) if current is not None else 0
+        except ValueError:
+            index = 0
+        new_index = max(0, min(len(stations) - 1, index + int(direction)))
+        station = stations[new_index]
+        self.ribbon.select_dsr_station(station)
+        line = self.ribbon.current_dsr_line()
+        if line is None:
+            return
+        if self._dsr_auto_zoom:
+            self._zoom_dsr_station(line, station)
+        else:
+            self._select_dsr_station(line, station)
+
+    @staticmethod
+    def _category_color(value: str) -> str:
+        palette = (
+            "#00e5ff", "#ffd740", "#ff6e40", "#ea80fc", "#69f0ae",
+            "#82b1ff", "#ff80ab", "#b2ff59", "#ffab40", "#7c4dff",
+        )
+        digest = hashlib.blake2b(value.encode("utf-8", errors="ignore"), digest_size=2).digest()
+        return palette[int.from_bytes(digest, "little") % len(palette)]
+
+    def _custom_dsr_layer_loaded(self, definition: CustomDsrLayerDefinition, data: PointLayerData) -> None:
+        if definition.category_field and definition.category_field.lower() in data.metadata:
+            values = data.metadata[definition.category_field.lower()]
+            for category in sorted({str(value) for value in values if value not in {None, ""}}):
+                mask = np.asarray([str(value) == category for value in values], dtype=bool)
+                indices = np.flatnonzero(mask)
+                if indices.size == 0:
+                    continue
+                category_data = PointLayerData(
+                    f"{definition.name} — {category}",
+                    data.x[indices], data.y[indices], data.source_index[indices],
+                    {key: value[indices] for key, value in data.metadata.items()},
+                )
+                color = definition.categories.get(category, {}).get("color", self._category_color(category))
+                layer = FastPointLayer(self.plot_item, category_data.name, color, color, "line" if "line" in category_data.metadata else None)
+                layer.update_style(point_color=color, line_color=color, point_size=definition.point_size, line_width=1.5)
+                layer.set_data(category_data)
+                layer.set_visible(definition.visible)
+                layer.selection_changed.connect(self._show_record)
+                registered = self._register_layer("Custom DSR Layers", category_data.name, category_data.count, layer)
+                self._custom_definition_by_layer[registered] = definition
+                if definition.split_by_line:
+                    self._attach_dsr_hierarchy(registered)
+        else:
+            color = definition.color
+            layer = FastPointLayer(self.plot_item, definition.name, color, color, "line" if "line" in data.metadata else None)
+            layer.update_style(point_color=color, line_color=color, point_size=definition.point_size, line_width=1.5)
+            layer.set_data(data)
+            layer.set_visible(definition.visible)
+            layer.selection_changed.connect(self._show_record)
+            registered = self._register_layer("Custom DSR Layers", definition.name, data.count, layer)
+            self._custom_definition_by_layer[registered] = definition
+            if definition.split_by_line:
+                self._attach_dsr_hierarchy(registered)
+        self._finish_load()
+
+    def _create_custom_dsr_layer(self) -> None:
+        try:
+            columns = self.repository.dsr_columns()
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Custom DSR layer", str(exc))
+            return
+        dialog = CustomDsrLayerDialog(columns, self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        definition = dialog.definition()
+        self.viewer_config.add_custom_layer(definition)
+        worker = FunctionWorker(lambda d=definition: self.repository.load_custom_dsr_layer(d))
+        self._pending += 1
+        worker.signals.completed.connect(lambda data, d=definition: self._custom_dsr_layer_loaded(d, data))
+        worker.signals.failed.connect(self._load_failed)
+        self._start_worker(worker)
+
+    def _manage_custom_dsr_layers(self) -> None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Manage custom DSR layers")
+        dialog.resize(540, 360)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        list_widget = QtWidgets.QListWidget()
+        for definition in self.viewer_config.custom_dsr_layers:
+            item = QtWidgets.QListWidgetItem(definition.name)
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, definition.id)
+            list_widget.addItem(item)
+        layout.addWidget(list_widget)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Close)
+        delete_button = buttons.addButton("Delete saved definition", QtWidgets.QDialogButtonBox.ButtonRole.DestructiveRole)
+        delete_button.clicked.connect(lambda: self._delete_saved_custom_definition(list_widget))
+        buttons.rejected.connect(dialog.reject); buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+        dialog.exec()
+
+    def _delete_saved_custom_definition(self, list_widget: QtWidgets.QListWidget) -> None:
+        item = list_widget.currentItem()
+        if item is None:
+            return
+        definition_id = str(item.data(QtCore.Qt.ItemDataRole.UserRole))
+        self.viewer_config.remove_custom_layer(definition_id)
+        list_widget.takeItem(list_widget.row(item))
+
+    def _edit_shape_style(self, name: str, layer: FastShapeLayer) -> None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Shape style — {name}")
+        form = QtWidgets.QFormLayout(dialog)
+        outline_button = QtWidgets.QPushButton(layer.outline_color)
+        fill_button = QtWidgets.QPushButton(layer.fill_color)
+        width = QtWidgets.QDoubleSpinBox(); width.setRange(0.2, 20); width.setValue(layer.outline_width)
+        style = QtWidgets.QComboBox(); style.addItems(["solid", "dash", "dot"]); style.setCurrentText(layer.outline_style)
+        fill_enabled = QtWidgets.QCheckBox(); fill_enabled.setChecked(layer.fill_enabled)
+        fill_opacity = QtWidgets.QSpinBox(); fill_opacity.setRange(0, 255); fill_opacity.setValue(layer.fill_opacity)
+        layer_opacity = QtWidgets.QDoubleSpinBox(); layer_opacity.setRange(0, 1); layer_opacity.setSingleStep(0.1); layer_opacity.setValue(layer.layer_opacity)
+        point_size = QtWidgets.QDoubleSpinBox(); point_size.setRange(1, 30); point_size.setValue(layer.point_size)
+        selected = {"outline": QtGui.QColor(layer.outline_color), "fill": QtGui.QColor(layer.fill_color)}
+        def choose(key: str, button: QtWidgets.QPushButton) -> None:
+            color = QtWidgets.QColorDialog.getColor(selected[key], dialog)
+            if color.isValid():
+                selected[key] = color; button.setText(color.name()); button.setStyleSheet(f"background:{color.name()}")
+        outline_button.clicked.connect(lambda: choose("outline", outline_button))
+        fill_button.clicked.connect(lambda: choose("fill", fill_button))
+        form.addRow("Outline color:", outline_button); form.addRow("Outline width:", width); form.addRow("Outline style:", style)
+        form.addRow("Enable fill:", fill_enabled); form.addRow("Fill color:", fill_button); form.addRow("Fill opacity (0–255):", fill_opacity)
+        form.addRow("Layer opacity:", layer_opacity); form.addRow("Point size:", point_size)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); form.addRow(buttons)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        layer.update_style(
+            outline_color=selected["outline"].name(), outline_width=width.value(), outline_style=style.currentText(),
+            fill_enabled=fill_enabled.isChecked(), fill_color=selected["fill"].name(), fill_opacity=fill_opacity.value(),
+            layer_opacity=layer_opacity.value(), point_size=point_size.value(),
+        )
+        self.viewer_config.set_shape_style(name, layer.style_dict())
+
     def _tree_item_changed(self, item: QtWidgets.QTreeWidgetItem, column: int) -> None:
-        if column != 0:
+        if column != 0 or self._dsr_tree_building:
+            return
+        kind = item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1)
+        if kind == "dsr_line":
+            layer_name = str(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 2) or "")
+            line = int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3))
+            self._set_dsr_line_overlay(layer_name, line, item.checkState(0) == QtCore.Qt.CheckState.Checked)
             return
         name = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         if name in self.layers:
             self.layers[name].set_visible(item.checkState(0) == QtCore.Qt.CheckState.Checked)
 
     def _layer_double_clicked(self, item: QtWidgets.QTreeWidgetItem, _column: int) -> None:
+        kind = item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1)
+        if kind == "dsr_line":
+            self._zoom_dsr_line(int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3)))
+            return
+        if kind == "dsr_station":
+            self._zoom_dsr_station(
+                int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3)),
+                int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 4)),
+            )
+            return
         name = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         if name in self.layers:
             self._zoom_to_layer(name)
@@ -288,36 +859,36 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         layer = self.layers[name]
         menu = QtWidgets.QMenu(self.layer_tree)
-        zoom_action = menu.addAction("Zoom to layer")
+        zoom_action = menu.addAction(icon("zoom_layer", size=18), "Zoom to layer")
         zoom_action.triggered.connect(lambda: self._zoom_to_layer(name))
-        visibility_action = menu.addAction("Hide layer" if layer.visible else "Show layer")
+        visibility_action = menu.addAction(icon("hide" if layer.visible else "show", size=18), "Hide layer" if layer.visible else "Show layer")
         visibility_action.triggered.connect(lambda: item.setCheckState(0, QtCore.Qt.CheckState.Unchecked if layer.visible else QtCore.Qt.CheckState.Checked))
-        only_action = menu.addAction("Show only this layer")
+        only_action = menu.addAction(icon("show_only", size=18), "Show only this layer")
         only_action.triggered.connect(lambda: self._show_only_layer(name))
         menu.addSeparator()
-        top_action = menu.addAction("Move to top")
-        up_action = menu.addAction("Move up")
-        down_action = menu.addAction("Move down")
-        bottom_action = menu.addAction("Move to bottom")
+        top_action = menu.addAction(icon("move_top", size=18), "Move to top")
+        up_action = menu.addAction(icon("move_up", size=18), "Move up")
+        down_action = menu.addAction(icon("move_down", size=18), "Move down")
+        bottom_action = menu.addAction(icon("move_bottom", size=18), "Move to bottom")
         top_action.triggered.connect(lambda: self._move_layer(name, "top"))
         up_action.triggered.connect(lambda: self._move_layer(name, "up"))
         down_action.triggered.connect(lambda: self._move_layer(name, "down"))
         bottom_action.triggered.connect(lambda: self._move_layer(name, "bottom"))
         menu.addSeparator()
-        style_action = menu.addAction("Style…")
+        style_action = menu.addAction(icon("style", size=18), "Style…")
         style_action.triggered.connect(lambda: self._edit_layer_style(name))
-        properties_action = menu.addAction("Properties")
+        properties_action = menu.addAction(icon("properties", size=18), "Properties")
         properties_action.triggered.connect(lambda: self._show_layer_properties(name))
-        reload_action = menu.addAction("Reload all layers")
+        reload_action = menu.addAction(icon("reload", size=18), "Reload all layers")
         reload_action.triggered.connect(self._reload_layers)
-        copy_action = menu.addAction("Copy extent")
+        copy_action = menu.addAction(icon("copy", size=18), "Copy extent")
         copy_action.triggered.connect(lambda: self._copy_layer_extent(name))
         menu.addSeparator()
-        delete_action = menu.addAction("Delete layer")
+        delete_action = menu.addAction(icon("delete", size=18), "Delete layer")
         delete_action.triggered.connect(lambda: self._delete_layer(name))
         if isinstance(layer, FastShapeLayer):
             menu.addSeparator()
-            folder_action = menu.addAction("Open source folder")
+            folder_action = menu.addAction(icon("open_folder", size=18), "Open source folder")
             folder_action.triggered.connect(lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(layer.data.definition.full_name.parent))))
         menu.exec(self.layer_tree.viewport().mapToGlobal(position))
 
@@ -402,11 +973,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _edit_layer_style(self, name: str) -> None:
         layer = self.layers.get(name)
+        if isinstance(layer, FastShapeLayer):
+            self._edit_shape_style(name, layer)
+            return
         if not isinstance(layer, FastPointLayer):
             QtWidgets.QMessageBox.information(
                 self,
                 "Layer style",
-                "Style editing is currently available for point and track layers.",
+                "This layer does not support runtime style editing.",
             )
             return
 
@@ -590,6 +1164,13 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.measurement.add(x, y)
 
+    def _show_external_record(self, title: str, data: PointLayerData, index: int) -> None:
+        if index < 0 or index >= data.count:
+            return
+        record = data.record(index)
+        self.details.setPlainText(title + "\n\n" + "\n".join(f"{key}: {value}" for key, value in record.items()))
+        self.details_dock.show(); self.details_dock.raise_()
+
     def _show_record(self, layer_name: str, index: int) -> None:
         layer = self.layers.get(layer_name)
         if not isinstance(layer, FastPointLayer) or layer.data is None:
@@ -637,6 +1218,7 @@ class MainWindow(QtWidgets.QMainWindow):
         rounded_lines[finite_lines] = np.rint(lines[finite_lines]).astype(np.int64)
         mask = finite_lines & np.isfinite(stations) & (rounded_lines == int(line))
         station_list = sorted({int(round(value)) for value in stations[mask]})
+        self._dsr_station_values = station_list
         self.ribbon.set_dsr_stations(station_list)
         if self.dsr_qc_window is not None and self.dsr_qc_window.isVisible():
             self.dsr_qc_window.select_line(int(line))
@@ -715,14 +1297,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_view_extent((float(x.min()), float(x.max()), float(y.min()), float(y.max())))
         self.statusBar().showMessage(f"Zoomed to DSR line {line}: {indices.size:,} station record(s)", 3000)
 
-    def _select_dsr_station(self, line: int, station: int) -> None:
-        data = self._dsr_primary_data()
-        indices = self._dsr_indices(line, station)
-        if data is None or indices.size == 0:
-            return
-        index = int(indices[0])
-        x = float(data.x[index])
-        y = float(data.y[index])
+    def _set_station_marker(self, x: float, y: float) -> None:
         if self.dsr_station_marker is None:
             self.dsr_station_marker = pg.ScatterPlotItem(
                 size=18,
@@ -733,7 +1308,17 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self.dsr_station_marker.setZValue(100000.0)
             self.plot_item.addItem(self.dsr_station_marker)
-        self.dsr_station_marker.setData([x], [y])
+        self.dsr_station_marker.setData([float(x)], [float(y)])
+
+    def _select_dsr_station(self, line: int, station: int) -> None:
+        data = self._dsr_primary_data()
+        indices = self._dsr_indices(line, station)
+        if data is None or indices.size == 0:
+            return
+        index = int(indices[0])
+        x = float(data.x[index])
+        y = float(data.y[index])
+        self._set_station_marker(x, y)
         self._show_record("DSR Primary", index)
         self.statusBar().showMessage(f"Selected DSR line {line}, station {station}", 3000)
 
@@ -919,6 +1504,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         for layer in self.layers.values():
             layer.remove()
+        for overlay in self._dsr_line_overlays.values():
+            overlay.remove()
+        self._dsr_line_overlays.clear()
         self.layers.clear()
         self.layer_items.clear()
         self.bbox_track_layer_names.clear()
@@ -933,6 +1521,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_loading()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        if event.key() == QtCore.Qt.Key.Key_Left:
+            self._step_dsr_station(-1)
+            return
+        if event.key() == QtCore.Qt.Key.Key_Right:
+            self._step_dsr_station(1)
+            return
         if event.key() == QtCore.Qt.Key.Key_Backspace:
             self.measurement.remove_last()
             return

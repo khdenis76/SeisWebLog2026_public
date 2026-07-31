@@ -160,6 +160,19 @@ Fixed project settings save.
 ### Fixed
 Fixed sequence to vessel assignment 
 ### Changed
+## [2026.1.04.00] - 2026-07-26
+### Added
+### Fixed
+### Changed
+## [2026.1.05.00] - 2026-07-30
+### Added
+Dataviewer2 added  with new options
+SVP page added and changed 
+### Fixed
+Points comparison fixed pdf export 
+### Changed
+OCR studio button icons changed 
+
 
 
   

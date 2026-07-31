@@ -16,10 +16,9 @@
 
           <div class="alert alert-info py-2 small mb-3">
             <b>Select files together.</b>
-            Choose one or many <b>.000</b> files and optional matching <b>.svp</b> files in the same file picker.
-            Every <b>.000</b> file will create one SVP profile.
-            Matching <b>.svp</b> files are used only for ROV, coordinates, and instrument model.
-            If a .svp file is missing, enter these fields manually.
+            A standalone <b>.svp</b> file is imported as a complete processed profile.
+            Every <b>.000</b> file creates one raw profile; a matching <b>.svp</b> may provide ROV, coordinates, and instrument model.
+            Choose <b>Auto Detect</b> unless a file requires a saved custom configuration.
           </div>
 
           <div class="row g-3">
@@ -29,11 +28,11 @@
             </div>
 
             <div class="col-md-4">
-              <label class="form-label fw-semibold">.000 Config</label>
-              <select class="form-select" name="config_id" id="svpUploadConfigSelect" required>
-                <option value="">-- select config --</option>
+              <label class="form-label fw-semibold">Parser Config</label>
+              <select class="form-select" name="config_id" id="svpUploadConfigSelect">
+                <option value="">Auto Detect</option>
               </select>
-              <div class="form-text">Parser setup for the .000 file.</div>
+              <div class="form-text">Optional. Auto Detect supports standard processed .svp and raw .000 files.</div>
             </div>
 
             <div class="col-md-4">
@@ -54,7 +53,7 @@
                 required
               >
               <div class="form-text">
-                Select many .000 and .svp files. Hold Ctrl or Shift to select multiple files.
+                Select one or many .000 and .svp files. Standalone .svp files are supported.
               </div>
             </div>
 
@@ -89,7 +88,7 @@
 
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-primary" id="btnSubmitSVP">
+        <button class="btn btn-primary" id="btnSubmitSVP" disabled>
           <i class="fa-solid fa-check me-1"></i>
           Upload
         </button>

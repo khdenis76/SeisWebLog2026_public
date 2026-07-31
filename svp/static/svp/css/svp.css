@@ -188,3 +188,12 @@
         display: none;
     }
 }
+.svp-view-tabs { flex: 0 0 auto; background: var(--bs-body-bg); position: sticky; top: 0; z-index: 30; }
+.svp-tab-content { height: calc(100% - 190px); min-height: 520px; }
+.svp-view-box { width: 100%; height: 100%; min-height: 520px; overflow: hidden; }
+.svp-plot-frame { width: 100%; height: 100%; min-height: 680px; border: 0; display: block; }
+.svp-data-table-wrap { height: 100%; min-height: 520px; overflow: auto; }
+.svp-data-table-wrap thead th { position: sticky; top: 0; z-index: 10; white-space: nowrap; }
+#svpDetailsBox { flex: 0 0 auto; }
+.svp-statistics-wrap { height: 100%; min-height: 520px; overflow: auto; }
+.svp-statistics-table-wrap thead th { position: sticky; top: 0; z-index: 10; white-space: nowrap; }

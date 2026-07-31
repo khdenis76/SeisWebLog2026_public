@@ -35,6 +35,7 @@ class SVPFormatSetup:
     col_temperature: str | None = None
     col_salinity: str | None = None
     col_density: str | None = None
+    col_conductivity: str | None = None
 
     # optional transforms
     use_calc_velocity: bool = True

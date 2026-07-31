@@ -1470,35 +1470,30 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         return str(int(value))
 
     def _tex(self, value):
-        """
-        Escape text for LaTeX and remove invalid control chars.
-        """
-
         if value is None:
             return ""
 
         s = str(value)
 
-        # Remove hidden control chars.
-        s = "".join(
-            ch for ch in s
-            if ord(ch) >= 32 or ch in "\n\r\t"
+        # Remove control characters
+        s = "".join(ch for ch in s if ord(ch) >= 32 or ch in "\n\r\t")
+
+        # Normalize Windows paths BEFORE escaping
+        s = s.replace("\\", "/")
+
+        replacements = (
+            ("&", r"\&"),
+            ("%", r"\%"),
+            ("$", r"\$"),
+            ("#", r"\#"),
+            ("_", r"\_"),
+            ("{", r"\{"),
+            ("}", r"\}"),
+            ("~", r"\textasciitilde{}"),
+            ("^", r"\textasciicircum{}"),
         )
 
-        replacements = {
-            "&": r"\&",
-            "%": r"\%",
-            "$": r"\$",
-            "#": r"\#",
-            "_": r"\_",
-            "{": r"\{",
-            "}": r"\}",
-            "~": r"\textasciitilde{}",
-            "^": r"\textasciicircum{}",
-            "\\": r"\textbackslash{}",
-        }
-
-        for old, new in replacements.items():
+        for old, new in replacements:
             s = s.replace(old, new)
 
         return s
