@@ -167,6 +167,9 @@ export function initBBoxConfigDatalist() {
   const rov2El = document.getElementById("rov2-name");
   const gnss1El = document.getElementById("gnss1-name");
   const gnss2El = document.getElementById("gnss2-name");
+  const mru1El = document.getElementById("mru1-name");
+  const mru2El = document.getElementById("mru2-name");
+  const mru3El = document.getElementById("mru3-name");
   const dep1El = document.getElementById("Depth1-name");
   const dep2El = document.getElementById("Depth2-name");
   const fileInput = document.getElementById("bbox-file-input");
@@ -191,7 +194,7 @@ export function initBBoxConfigDatalist() {
   function clearForm() {
     clearAlert(msgWrap);
 
-    [nameInput, vesselEl, rov1El, rov2El, gnss1El, gnss2El, dep1El, dep2El].forEach((el) => {
+    [nameInput, vesselEl, rov1El, rov2El, gnss1El, gnss2El, mru1El, mru2El, mru3El, dep1El, dep2El].forEach((el) => {
       if (el) el.value = "";
     });
 
@@ -245,6 +248,9 @@ export function initBBoxConfigDatalist() {
     setIfExists(rov2El, c.rov2_name);
     setIfExists(gnss1El, c.gnss1_name);
     setIfExists(gnss2El, c.gnss2_name);
+    setIfExists(mru1El, c.mru1_name);
+    setIfExists(mru2El, c.mru2_name);
+    setIfExists(mru3El, c.mru3_name);
     setIfExists(dep1El, c.depth1_name || c.Depth1_name);
     setIfExists(dep2El, c.depth2_name || c.Depth2_name);
 
@@ -343,6 +349,9 @@ export function initBBoxConfigDatalist() {
         rov2_name: normalizeKey(cfg?.rov2_name || ""),
         gnss1_name: normalizeKey(cfg?.gnss1_name || ""),
         gnss2_name: normalizeKey(cfg?.gnss2_name || ""),
+        mru1_name: normalizeKey(cfg?.mru1_name || ""),
+        mru2_name: normalizeKey(cfg?.mru2_name || ""),
+        mru3_name: normalizeKey(cfg?.mru3_name || ""),
         depth1_name: normalizeKey(cfg?.depth1_name || cfg?.Depth1_name || ""),
         depth2_name: normalizeKey(cfg?.depth2_name || cfg?.Depth2_name || ""),
         is_default: !!cfg?.is_default,

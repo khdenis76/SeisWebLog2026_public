@@ -18,3 +18,12 @@
         white-space: nowrap;
         font-size: 0.82rem;
     }
+
+    .mfa-select-column {
+        width: 2.25rem;
+        min-width: 2.25rem;
+    }
+
+    .mfa-files-table tbody tr.mfa-row-selected > td {
+        background-color: rgba(var(--bs-primary-rgb), 0.10);
+    }

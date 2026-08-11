@@ -8,7 +8,7 @@ from PySide6.QtGui import QAction, QIcon
 from ..core.map_loader import load_preplot_points, load_dsr_station_points_from_ocr
 from .map_window import StationMapWindow
 
-from PySide6.QtCore import QThread, Qt, QDate, QSize
+from PySide6.QtCore import QThread, Qt, QDate, QSize, QSettings, QSignalBlocker
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog, QFormLayout, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
@@ -69,6 +69,11 @@ class ConfigDialog(QDialog):
         self.rename_mode = QComboBox(); self.rename_mode.addItems(["off", "copy", "rename"]); self.rename_mode.setCurrentText(str(bundle.get("rename_mode", "copy")))
         self.single_only = QCheckBox("Use only main config for all files"); self.single_only.setChecked(bool(bundle.get("single_config_only", True)))
         self.skip_checked = QCheckBox("Skip already checked files"); self.skip_checked.setChecked(bool(bundle.get("skip_checked", True)))
+        self.include_subfolders = QCheckBox("Include subfolders")
+        self.include_subfolders.setChecked(bool(self.main_cfg.include_subfolders))
+        self.include_subfolders.setToolTip(
+            "Search recursively through every subfolder below the selected image folder."
+        )
         self.main_w = QSpinBox(); self.main_w.setMaximum(100000); self.main_w.setValue(self.main_cfg.expected_width)
         self.main_h = QSpinBox(); self.main_h.setMaximum(100000); self.main_h.setValue(self.main_cfg.expected_height)
         self.alt_w = QSpinBox(); self.alt_w.setMaximum(100000); self.alt_w.setValue(self.alt_cfg.expected_width)
@@ -84,6 +89,7 @@ class ConfigDialog(QDialog):
         form.addRow("Rename mode", self.rename_mode)
         form.addRow("", self.single_only)
         form.addRow("", self.skip_checked)
+        form.addRow("", self.include_subfolders)
         form.addRow("Main width", self.main_w); form.addRow("Main height", self.main_h)
         form.addRow("Alt width", self.alt_w); form.addRow("Alt height", self.alt_h)
         form.addRow("Deploy images", self.deploy); form.addRow("Recovery images", self.recovery)
@@ -100,6 +106,8 @@ class ConfigDialog(QDialog):
         self.bundle["rename_mode"] = self.rename_mode.currentText()
         self.bundle["single_config_only"] = self.single_only.isChecked()
         self.bundle["skip_checked"] = self.skip_checked.isChecked()
+        self.main_cfg.include_subfolders = self.include_subfolders.isChecked()
+        self.alt_cfg.include_subfolders = self.main_cfg.include_subfolders
         self.main_cfg.expected_width = self.main_w.value(); self.main_cfg.expected_height = self.main_h.value()
         self.alt_cfg.expected_width = self.alt_w.value(); self.alt_cfg.expected_height = self.alt_h.value()
         self.main_cfg.deploy_images = self.deploy.value(); self.main_cfg.recovery_images = self.recovery.value()
@@ -240,6 +248,8 @@ class FilterDialog(QDialog):
 
 
 class OCRMainWindow(QMainWindow):
+    LAST_PROJECT_KEY = "startup/last_project_db"
+
     def __init__(self, django_db: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("SeisWebLog OCR v5 - ROV Overlay QC")
@@ -267,7 +277,6 @@ class OCRMainWindow(QMainWindow):
         self._auto_load_default_config()
         self._auto_load_django_db()
         self._load_projects()
-        self.refresh_results()
 
     def _build_ui(self):
         self._build_menu()
@@ -436,6 +445,7 @@ class OCRMainWindow(QMainWindow):
             self.current_config = OCRConfig.from_dict(self.config_bundle["main_config"])
             self.alt_config = OCRConfig.from_dict(self.config_bundle["alt_config"])
             self.current_config_path = config_path
+            self.include_subfolders_chk.setChecked(self.current_config.include_subfolders)
             self._log(f"Default config loaded: {config_path}")
 
     def _auto_load_django_db(self):
@@ -446,19 +456,41 @@ class OCRMainWindow(QMainWindow):
             self.django_db = db_path; self._log(f"Django DB loaded: {db_path}")
 
     def _load_projects(self):
+        remembered_db = QSettings().value(self.LAST_PROJECT_KEY, "", type=str).strip()
+        blocker = QSignalBlocker(self.project_combo)
         self.project_combo.clear()
-        if not self.django_db: return
+        if not self.django_db:
+            del blocker
+            return
         try:
             self.projects = load_projects(self.django_db)
         except Exception as e:
-            self._log(f"Cannot load projects: {e}"); self.projects=[]; return
+            self._log(f"Cannot load projects: {e}")
+            self.projects = []
+            del blocker
+            return
         for p in self.projects:
             self.project_combo.addItem(p["name"], p)
+        selected_index = 0
+        if remembered_db:
+            remembered_path = os.path.normcase(os.path.abspath(remembered_db))
+            for index, project in enumerate(self.projects):
+                project_path = os.path.normcase(os.path.abspath(project.get("db_path", "")))
+                if project_path == remembered_path and os.path.isfile(project_path):
+                    selected_index = index
+                    break
+        if self.projects:
+            self.project_combo.setCurrentIndex(selected_index)
+        del blocker
+        self._on_project_changed()
 
     def _on_project_changed(self):
         data = self.project_combo.currentData()
         self.project_db_edit.setText(data["db_path"] if data else "")
         if data and data.get("db_path"):
+            settings = QSettings()
+            settings.setValue(self.LAST_PROJECT_KEY, os.path.abspath(data["db_path"]))
+            settings.sync()
             ensure_schema(data["db_path"])
             self.refresh_results()
 
@@ -472,6 +504,7 @@ class OCRMainWindow(QMainWindow):
             self.config_bundle = dlg.updated_bundle()
             self.current_config = OCRConfig.from_dict(self.config_bundle["main_config"])
             self.alt_config = OCRConfig.from_dict(self.config_bundle["alt_config"])
+            self.include_subfolders_chk.setChecked(self.current_config.include_subfolders)
             if not self.current_config_path:
                 self.current_config_path = str(Path(__file__).resolve().parents[1] / "configs" / "default_config.json")
             save_config_bundle(self.config_bundle, self.current_config_path)

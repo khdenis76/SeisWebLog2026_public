@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 # Allow running as: python ocr/run_ocr_v3.py
@@ -45,6 +46,8 @@ def find_django_db() -> str:
 
 
 def main() -> int:
+    QCoreApplication.setOrganizationName("SeisWebLog")
+    QCoreApplication.setApplicationName("OCR Studio")
     app = QApplication(sys.argv)
 
     # =========================

@@ -1,14 +1,14 @@
 @echo off
-title SeisWebLog Survey Viewer
-echo ===============================
-echo   Starting Survey Viewer
-echo ===============================
-REM Get the current directory path where the batch file resides
-set "CURRENT_DIR=%~dp0"
-
-ECHO "CURRENT DIR: %CURRENT_DIR%"
-REM Activate virtual environment (must be inside project folder)
-call myenv\Scripts\activate
-ECHO "CURRENT DIR: %CURRENT_DIR%"
-cd %CURRENT_DIR%
-python -m dataviewer.app
+setlocal
+title SeisWebLog Desktop
+cd /d "%~dp0"
+if not exist "myenv\Scripts\activate.bat" (
+  echo Virtual environment not found: %CD%\myenv
+  pause
+  exit /b 1
+)
+call "myenv\Scripts\activate.bat"
+set "PYTHONPATH=%CD%"
+python -m dataviewer2.app %*
+if errorlevel 1 pause
+endlocal

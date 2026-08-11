@@ -189,8 +189,12 @@ export function initSourceUploadModal() {
     const on = !!(detectBySeq && detectBySeq.checked);
     const isSps = (fileType && (fileType.value || "").toUpperCase() === "SPS");
 
+    if (detectBySeq) {
+      detectBySeq.disabled = !isSps;
+    }
+
     if (spsVessel) {
-      spsVessel.disabled = on;
+      spsVessel.disabled = !isSps || on;
       setRequired(spsVessel, isSps && !on);
       if (on) {
         spsVessel.value = "";
@@ -207,10 +211,16 @@ export function initSourceUploadModal() {
   }
 
   function updateAutoYearUI() {
+    const isSps = (fileType && (fileType.value || "").toUpperCase() === "SPS");
     const on = !!(autoYear && autoYear.checked);
+
+    if (autoYear) {
+      autoYear.disabled = !isSps;
+    }
+
     if (spsYear) {
-      spsYear.disabled = on;
-      setRequired(spsYear, !on);
+      spsYear.disabled = !isSps || on;
+      setRequired(spsYear, isSps && !on);
     }
   }
 
@@ -222,6 +232,8 @@ export function initSourceUploadModal() {
       spsBlock && spsBlock.classList.remove("d-none");
       shotBlock && shotBlock.classList.add("d-none");
 
+      if (spsRev) spsRev.disabled = false;
+      if (spsTier) spsTier.disabled = false;
       setRequired(spsRev, true);
       setRequired(spsTier, true);
 
@@ -246,10 +258,17 @@ export function initSourceUploadModal() {
     setRequired(spsTier, false);
     setRequired(spsYear, false);
 
-    if (detectBySeq) detectBySeq.checked = false;
+    // Hidden SPS controls must not participate in browser validation or in
+    // FormData when another file type is selected.
+    if (spsRev) spsRev.disabled = true;
+    if (spsTier) spsTier.disabled = true;
+
+    // Restore the modal defaults while SPS controls are inactive. This also
+    // ensures switching back to SPS starts with sequence detection enabled.
+    if (detectBySeq) detectBySeq.checked = true;
     updateDetectUI();
 
-    if (autoYear) autoYear.checked = true;
+    if (autoYear) autoYear.checked = false;
     updateAutoYearUI();
   }
 
@@ -262,6 +281,16 @@ export function initSourceUploadModal() {
     });
 
     modalEl.dataset.hideGuardBound = "1";
+  }
+
+  if (modalEl && modalEl.dataset.uploadDefaultsBound !== "1") {
+    modalEl.addEventListener("show.bs.modal", function () {
+      // Match the HTML defaults on every fresh opening of the upload modal.
+      if (detectBySeq) detectBySeq.checked = true;
+      if (autoYear) autoYear.checked = false;
+      updateUI();
+    });
+    modalEl.dataset.uploadDefaultsBound = "1";
   }
 
   if (fileType.dataset.uiBound !== "1") {

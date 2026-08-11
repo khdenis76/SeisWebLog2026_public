@@ -4514,6 +4514,7 @@ class SourceData:
                 Northing,
                 Elevation,
                 Day,
+                JDay,
                 Hour,
                 Minute,
                 Second,
@@ -4664,12 +4665,12 @@ class SourceData:
                     ELSE 1
                 END AS diff_Elevation,
 
-                sps.Day                   AS sps_Day,
+                sps.JDay                   AS sps_Day,
                 st.shot_day               AS shot_day,
                 CASE
-                    WHEN sps.Day IS NULL AND st.shot_day IS NULL THEN 0
-                    WHEN sps.Day IS NULL OR st.shot_day IS NULL THEN 1
-                    WHEN sps.Day = st.shot_day THEN 0
+                    WHEN sps.JDay IS NULL AND st.shot_day IS NULL THEN 0
+                    WHEN sps.JDay IS NULL OR st.shot_day IS NULL THEN 1
+                    WHEN sps.JDay = st.shot_day THEN 0
                     ELSE 1
                 END AS diff_Day,
 

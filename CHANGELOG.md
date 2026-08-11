@@ -172,6 +172,14 @@ SVP page added and changed
 Points comparison fixed pdf export 
 ### Changed
 OCR studio button icons changed 
+## [2026.1.06.00] - 2026-08-10
+### Added
+Dataviewer2 is Seisweblog desktop now 
+### Fixed
+Upload DSR data format was fixed  now the export SM is working  
+### Changed
+dataviewer is not in the project any more  
+Dataviewer desktop opens with last edited project and ocr studio do the same 
 
 
 

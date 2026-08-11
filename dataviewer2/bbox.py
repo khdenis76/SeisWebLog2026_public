@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import datetime as _dt
 
 import numpy as np
 import pyqtgraph as pg
@@ -39,6 +40,9 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
         self._files: list[BlackBoxFileInfo] = []
         self._channel_styles: dict[str, dict[str, Any]] = {}
         self._plot_widgets: list[pg.PlotWidget] = []
+        self._timestamp_cursors: list[pg.InfiniteLine] = []
+        self._highlight_timestamp: object | None = None
+        self._highlight_elapsed: float | None = None
         self._redraw_timer = QtCore.QTimer(self)
         self._redraw_timer.setSingleShot(True)
         self._redraw_timer.setInterval(70)
@@ -80,10 +84,16 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
         self.max_plots.setValue(8)
         self.max_plots.setToolTip("Maximum stacked charts displayed at one time")
         self.max_plots.valueChanged.connect(lambda *_: self._redraw())
+        self.view_combo = QtWidgets.QComboBox()
+        self.view_combo.addItems(["Channels", "MRU comparison", "GNSS comparison"])
+        self.view_combo.setToolTip("Choose the BlackBox QC dashboard")
+        self.view_combo.currentIndexChanged.connect(lambda *_: self._redraw())
 
         top_layout.addWidget(QtWidgets.QLabel("BlackBox file"), 0, 0)
         top_layout.addWidget(self.file_combo, 0, 1, 1, 5)
         top_layout.addWidget(self.reload_button, 0, 6)
+        top_layout.addWidget(QtWidgets.QLabel("View"), 0, 7)
+        top_layout.addWidget(self.view_combo, 0, 8, 1, 2)
         top_layout.addWidget(QtWidgets.QLabel("Coordinate pair"), 1, 0)
         top_layout.addWidget(self.track_source, 1, 1)
         top_layout.addWidget(self.add_track_button, 1, 2)
@@ -190,11 +200,73 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
         self.track_source.clear()
         self.track_source.addItems(list(data.tracks.keys()))
         self._build_channel_tree(data)
+        self._update_highlight_elapsed()
         self._redraw()
         self.status.setText(
             f"{data.file_info.name}: {data.count:,} samples, "
             f"{len(data.columns)} QC channels, {len(data.tracks)} coordinate pairs"
         )
+
+    @staticmethod
+    def _parse_timestamp(value: object) -> float | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text or text.lower() in {"none", "nan", "nat"}:
+            return None
+        normalized = text.replace("Z", "+00:00")
+        try:
+            parsed = _dt.datetime.fromisoformat(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+            return float(parsed.timestamp())
+        except Exception:
+            pass
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y/%m/%d %H:%M:%S.%f",
+            "%Y/%m/%d %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
+        ):
+            try:
+                parsed = _dt.datetime.strptime(text, fmt).replace(tzinfo=_dt.timezone.utc)
+                return float(parsed.timestamp())
+            except Exception:
+                continue
+        return None
+
+    def _update_highlight_elapsed(self) -> None:
+        self._highlight_elapsed = None
+        data = self._data
+        target = self._parse_timestamp(self._highlight_timestamp)
+        if data is None or target is None or not data.time_labels.size:
+            return
+        absolute = np.full(data.time_labels.size, np.nan, dtype=float)
+        for index, label in enumerate(data.time_labels):
+            parsed = self._parse_timestamp(label)
+            if parsed is not None:
+                absolute[index] = parsed
+        finite = np.isfinite(absolute) & np.isfinite(data.time_seconds)
+        if not finite.any():
+            return
+        candidates = np.flatnonzero(finite)
+        nearest_local = int(np.argmin(np.abs(absolute[candidates] - target)))
+        nearest = int(candidates[nearest_local])
+        self._highlight_elapsed = float(data.time_seconds[nearest])
+
+    def highlight_timestamp(self, timestamp: object | None) -> None:
+        """Move the white cursor to the BlackBox sample nearest a DSR timestamp."""
+        self._highlight_timestamp = timestamp
+        self._update_highlight_elapsed()
+        self._apply_timestamp_cursor()
+
+    def _apply_timestamp_cursor(self) -> None:
+        visible = self._highlight_elapsed is not None
+        for cursor in self._timestamp_cursors:
+            cursor.setVisible(visible)
+            if visible:
+                cursor.setValue(float(self._highlight_elapsed))
 
     def _group_for(self, name: str) -> str:
         low = name.lower()
@@ -319,6 +391,7 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
                 widget.setParent(None)
                 widget.deleteLater()
         self._plot_widgets.clear()
+        self._timestamp_cursors.clear()
 
     def _time_axis(self, data: BlackBoxData) -> tuple[float, str]:
         duration = float(np.nanmax(data.time_seconds)) if data.time_seconds.size else 0.0
@@ -328,11 +401,168 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
             return 60.0, "Elapsed time (min)"
         return 1.0, "Elapsed time (s)"
 
+    def _absolute_time(self, data: BlackBoxData) -> np.ndarray | None:
+        """Return UTC epoch seconds for DateAxisItem, or None when timestamps cannot be parsed."""
+        if data.time_labels.size == 0:
+            return None
+        values = np.full(data.time_labels.size, np.nan, dtype=np.float64)
+        for index, label in enumerate(data.time_labels):
+            parsed = self._parse_timestamp(label)
+            if parsed is not None:
+                values[index] = parsed
+        finite = np.isfinite(values)
+        if finite.sum() < max(2, values.size // 2):
+            return None
+        return values
+
+    def _comparison_plot(
+        self,
+        title: str,
+        y_label: str,
+        series: list[tuple[str, np.ndarray]],
+        x_values: np.ndarray,
+        previous_plot: pg.PlotItem | None = None,
+    ) -> pg.PlotItem:
+        axis_items = {
+            "bottom": pg.DateAxisItem(orientation="bottom"),
+            "left": PlainNumberAxis(orientation="left"),
+        }
+        widget = pg.PlotWidget(axisItems=axis_items)
+        widget.setBackground(PLOT_BG)
+        widget.setMinimumHeight(235)
+        plot = widget.getPlotItem()
+        style_plot(plot, title, y_label, "Date / time")
+        if previous_plot is not None:
+            plot.setXLink(previous_plot)
+        if len(series) > 1:
+            plot.addLegend(offset=(-10, 10))
+        plotted_values: list[np.ndarray] = []
+        for name, raw_values in series:
+            values = finite_qc(raw_values)
+            finite = np.isfinite(x_values) & np.isfinite(values)
+            if not finite.any():
+                continue
+            style = self._style(name)
+            curve = pg.PlotDataItem(
+                x_values[finite], values[finite],
+                pen=pg.mkPen(QtGui.QColor(str(style["color"])), width=float(style["width"])),
+                name=name,
+            )
+            # Add the PlotDataItem to its PlotItem before enabling view-dependent
+            # optimisations.  With some PyQtGraph/PySide6 versions, calling
+            # setDownsampling()/setClipToView() before the item has a ViewBox
+            # causes GraphicsObject.itemChange() to resolve the parent as the
+            # PlotWidget and raises AttributeError: autoRangeEnabled.
+            plot.addItem(curve)
+            curve.setDownsampling(auto=True, method="peak")
+            curve.setClipToView(True)
+            plotted_values.append(values[finite])
+        y_range = robust_y_range(plotted_values)
+        if y_range:
+            plot.setYRange(*y_range, padding=0)
+        self.plot_layout.addWidget(widget)
+        self._plot_widgets.append(widget)
+        return plot
+
+    def _redraw_mru_comparison(self, data: BlackBoxData) -> None:
+        x_values = self._absolute_time(data)
+        if x_values is None:
+            label = QtWidgets.QLabel("MRU comparison requires valid BlackBox date/time values.")
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.plot_layout.addWidget(label, 1)
+            return
+        columns = data.columns
+        info = data.file_info
+        names = {
+            1: info.mru1_name or "MRU 1",
+            2: info.mru2_name or "MRU 2",
+            3: info.mru3_name or "MRU 3",
+        }
+        previous = None
+        plot_specs = []
+        heading = []
+        if "VesselHDG" in columns:
+            heading.append((f"{info.vessel_name} heading", columns["VesselHDG"]))
+        for number in (1, 2, 3):
+            key = f"Vessel_MRU{number}_HDG"
+            if key in columns:
+                heading.append((names[number], columns[key]))
+        plot_specs.append(("Vessel heading comparison", "Heading (°)", heading))
+        for component, label_text in (("PITCH", "Pitch (°)"), ("ROLL", "Roll (°)")):
+            series = []
+            for number in (1, 2, 3):
+                key = f"Vessel_MRU{number}_{component}"
+                if key in columns:
+                    series.append((names[number], columns[key]))
+            plot_specs.append((f"Vessel MRU {component.title()} comparison", label_text, series))
+        plotted = 0
+        for title, ylabel, series in plot_specs:
+            if not series:
+                continue
+            previous = self._comparison_plot(title, ylabel, series, x_values, previous)
+            plotted += 1
+        if not plotted:
+            label = QtWidgets.QLabel("No Vessel_MRU1/2/3 heading, pitch or roll data were found in this file.")
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.plot_layout.addWidget(label, 1)
+        else:
+            self.plot_layout.addStretch(1)
+
+    def _redraw_gnss_comparison(self, data: BlackBoxData) -> None:
+        x_values = self._absolute_time(data)
+        if x_values is None:
+            label = QtWidgets.QLabel("GNSS comparison requires valid BlackBox date/time values.")
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.plot_layout.addWidget(label, 1)
+            return
+        c = data.columns
+        required = ("GNSS1_Easting", "GNSS1_Northing", "GNSS2_Easting", "GNSS2_Northing")
+        if not all(name in c for name in required):
+            missing = ", ".join(name for name in required if name not in c)
+            label = QtWidgets.QLabel(f"GNSS comparison columns are missing: {missing}")
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.plot_layout.addWidget(label, 1)
+            return
+        info = data.file_info
+        gnss1 = info.gnss1_name or "GNSS1"
+        gnss2 = info.gnss2_name or "GNSS2"
+        de = finite_qc(c["GNSS2_Easting"]) - finite_qc(c["GNSS1_Easting"])
+        dn = finite_qc(c["GNSS2_Northing"]) - finite_qc(c["GNSS1_Northing"])
+        offset = np.hypot(de, dn)
+        previous = self._comparison_plot(
+            "GNSS Easting comparison", "Easting (m)",
+            [(gnss1, c["GNSS1_Easting"]), (gnss2, c["GNSS2_Easting"])], x_values,
+        )
+        previous = self._comparison_plot(
+            "GNSS Northing comparison", "Northing (m)",
+            [(gnss1, c["GNSS1_Northing"]), (gnss2, c["GNSS2_Northing"])], x_values, previous,
+        )
+        previous = self._comparison_plot(
+            "GNSS component differences (GNSS2 − GNSS1)", "Difference (m)",
+            [("ΔE", de), ("ΔN", dn)], x_values, previous,
+        )
+        self._comparison_plot(
+            "GNSS horizontal offset", "Offset (m)", [("2D offset", offset)], x_values, previous,
+        )
+        self.plot_layout.addStretch(1)
+
     def _redraw_now(self) -> None:
         self._clear_plots()
         data = self._data
+        if data is None:
+            label = QtWidgets.QLabel("Select a BlackBox file")
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.plot_layout.addWidget(label, 1)
+            return
+        view = self.view_combo.currentText()
+        if view == "MRU comparison":
+            self._redraw_mru_comparison(data)
+            return
+        if view == "GNSS comparison":
+            self._redraw_gnss_comparison(data)
+            return
         selected = self._selected_channels()
-        if data is None or not selected:
+        if not selected:
             label = QtWidgets.QLabel("Select QC channels from the left panel")
             label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             self.plot_layout.addWidget(label, 1)
@@ -357,6 +587,14 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
             widget.setMinimumHeight(205 if len(groups) > 1 else 500)
             plot = widget.getPlotItem()
             style_plot(plot, title, "Value", bottom_label)
+            cursor = pg.InfiniteLine(
+                angle=90,
+                movable=False,
+                pen=pg.mkPen("#ffffff", width=2.0),
+            )
+            cursor.setZValue(100000.0)
+            plot.addItem(cursor, ignoreBounds=True)
+            self._timestamp_cursors.append(cursor)
             if previous_plot is not None:
                 plot.setXLink(previous_plot)
             previous_plot = plot
@@ -387,6 +625,7 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
                 plot.hideAxis("bottom")
             self.plot_layout.addWidget(widget)
             self._plot_widgets.append(widget)
+        self._apply_timestamp_cursor()
         self.plot_layout.addStretch(1)
 
     def _add_track(self) -> None:

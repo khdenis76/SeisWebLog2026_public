@@ -15,9 +15,9 @@
     "expected_height": 1080,
     "deploy_images": 3,
     "recovery_images": 1,
-    "delta_warning": 10.0,
-    "delta_error": 15.0,
-    "use_easyocr_first": false,
+    "delta_warning": 5.0,
+    "delta_error": 10.0,
+    "use_easyocr_first": true,
     "roi_fields": [
       {
         "name": "rov",
@@ -111,9 +111,9 @@
     "expected_height": 0,
     "deploy_images": 2,
     "recovery_images": 2,
-    "delta_warning": 10.0,
-    "delta_error": 15.0,
-    "use_easyocr_first": false,
+    "delta_warning": 5.0,
+    "delta_error": 10.0,
+    "use_easyocr_first": true,
     "roi_fields": []
   }
 }

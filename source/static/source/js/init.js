@@ -18,6 +18,7 @@ import {initShotSummaryRecalc} from "./initShotSummaryRecalc.js";
 import {initShotSummaryFilters} from "./initShotSummaryFilters.js";
 import {initSourceBathyMaps} from "./initSourceBathyMaps.js";
 import {initMfaUpload} from "./initMfaUpload.js";
+import {initMfaReport} from "./initMfaReport.js";
 
 //import {initRecalcLines} from "./initRecalcLines.js";
 
@@ -44,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initDailyProductionTab();
     initSpsRowLinePlot();
     initMfaUpload();
+    initMfaReport();
     //initShotSummaryBackendFilters();
     initShotSummaryDelete();
     initShotLineSort({ tbodyId: "shot-summary-tbody" }); // <-- your tbody id

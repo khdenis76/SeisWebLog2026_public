@@ -16,6 +16,13 @@ from PySide6 import QtCore, QtWidgets
 
 from .main_window import MainWindow
 from .projects import ProjectsDatabase, ProjectsDatabaseError, is_projects_database
+from .startup_settings import (
+    forget_project,
+    remember_project,
+    remember_projects_database,
+    remembered_project,
+    remembered_projects_database,
+)
 
 
 def choose_project(root_db: Path) -> Path | None:
@@ -24,6 +31,7 @@ def choose_project(root_db: Path) -> Path | None:
     except ProjectsDatabaseError as exc:
         QtWidgets.QMessageBox.critical(None, "DataViewer 2.0", str(exc))
         return None
+    remember_projects_database(root_db)
     labels = [f"{p.name} — {p.project_dir}" for p in projects]
     if not labels:
         QtWidgets.QMessageBox.warning(None, "DataViewer 2.0", "No projects found.")
@@ -32,16 +40,55 @@ def choose_project(root_db: Path) -> Path | None:
     return projects[labels.index(selected)].project_dir if ok else None
 
 
-def resolve_start_path(argument: str | None) -> Path | None:
+def find_projects_database() -> Path:
+    candidates = [
+        remembered_projects_database(),
+        Path.cwd() / "db.sqlite3",
+        Path(__file__).resolve().parents[1] / "db.sqlite3",
+    ]
+    for candidate in candidates:
+        if candidate is not None and is_projects_database(candidate):
+            return candidate.resolve()
+    return Path.cwd() / "db.sqlite3"
+
+
+def resolve_start_path(argument: str | None) -> tuple[Path | None, bool]:
     if not argument:
-        return choose_project(Path.cwd() / "db.sqlite3")
+        previous = remembered_project()
+        if previous is not None and previous.exists():
+            return previous.resolve(), True
+        if previous is not None:
+            forget_project()
+        return choose_project(find_projects_database()), False
     supplied = Path(argument).expanduser().resolve()
     if is_projects_database(supplied):
-        return choose_project(supplied)
+        return choose_project(supplied), False
     root_db = supplied / "db.sqlite3" if supplied.is_dir() else None
     if root_db and is_projects_database(root_db):
-        return choose_project(root_db)
-    return supplied
+        return choose_project(root_db), False
+    return supplied, False
+
+
+def show_startup_error(project_path: Path, text: str) -> None:
+    log_locations = [
+        Path.cwd() / "dataviewer2_startup_error.log",
+        project_path.parent / "dataviewer2_startup_error.log"
+        if project_path.is_file()
+        else project_path / "dataviewer2_startup_error.log",
+    ]
+    saved_to = None
+    for log_path in log_locations:
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text(text, encoding="utf-8")
+            saved_to = log_path
+            break
+        except Exception:
+            continue
+    message = text[-6000:]
+    if saved_to is not None:
+        message += f"\n\nFull traceback saved to:\n{saved_to}"
+    QtWidgets.QMessageBox.critical(None, "DataViewer startup error", message)
 
 
 def main() -> int:
@@ -69,14 +116,31 @@ def main() -> int:
 
     sys.excepthook = exception_hook
     app.setStyle("Fusion")
-    project_path = resolve_start_path(args.path)
+    project_path, is_remembered = resolve_start_path(args.path)
     if project_path is None:
         return 0
     try:
         window = MainWindow(project_path)
-    except Exception as exc:
-        QtWidgets.QMessageBox.critical(None, "DataViewer 2.0", str(exc))
-        return 1
+    except Exception:
+        text = traceback.format_exc()
+        if not is_remembered:
+            show_startup_error(project_path, text)
+            return 1
+        forget_project()
+        QtWidgets.QMessageBox.warning(
+            None,
+            "DataViewer 2.0",
+            "The last project is unavailable or cannot be opened. Please select another project.",
+        )
+        project_path = choose_project(find_projects_database())
+        if project_path is None:
+            return 0
+        try:
+            window = MainWindow(project_path)
+        except Exception:
+            show_startup_error(project_path, traceback.format_exc())
+            return 1
+    remember_project(project_path)
     window.showMaximized()
     return app.exec()
 

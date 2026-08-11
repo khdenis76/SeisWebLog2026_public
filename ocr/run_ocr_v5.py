@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from PySide6.QtGui import QIcon
 
@@ -43,6 +44,8 @@ def find_django_db() -> str:
 
 
 def main() -> int:
+    QCoreApplication.setOrganizationName("SeisWebLog")
+    QCoreApplication.setApplicationName("OCR Studio")
     app = QApplication(sys.argv)
     if IMAGE_PATH.exists():
         app.setWindowIcon(QIcon(str(IMAGE_PATH)))

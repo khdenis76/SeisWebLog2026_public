@@ -41,6 +41,11 @@ class PointLayerData:
 class ProjectShapeDefinition:
     name: str
     full_name: Path
+    source_type: str = "shapefile"
+    source_layer: str = ""
+    database_id: int | None = None
+    container_name: str = ""
+    is_visible: bool = True
     is_filled: bool = False
     fill_color: str = "#000000"
     line_color: str = "#000000"
@@ -92,6 +97,15 @@ class BlackBoxFileInfo:
     start_time: str = ""
     end_time: str = ""
     row_count: int = 0
+    config_id: int | None = None
+    vessel_name: str = "Vessel"
+    rov1_name: str = "ROV 1"
+    rov2_name: str = "ROV 2"
+    gnss1_name: str = "GNSS1"
+    gnss2_name: str = "GNSS2"
+    mru1_name: str = "MRU 1"
+    mru2_name: str = "MRU 2"
+    mru3_name: str = "MRU 3"
 
     @property
     def label(self) -> str:
@@ -110,6 +124,7 @@ class BlackBoxData:
     time_labels: np.ndarray
     columns: dict[str, np.ndarray] = field(default_factory=dict)
     tracks: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
+    track_indices: dict[str, np.ndarray] = field(default_factory=dict)
 
     @property
     def count(self) -> int:

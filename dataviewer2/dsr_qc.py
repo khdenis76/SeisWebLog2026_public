@@ -33,6 +33,9 @@ class DsrQcWindow(QtWidgets.QMainWindow):
         self.resize(1500, 900)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self._data: DsrQcData | None = None
+        # Stores a station requested by the main Receiver QC ribbon.  This is
+        # important when a different receiver line is still loading.
+        self._requested_station: int | None = None
         self._styles: dict[str, dict[str, Any]] = {}
         self._plot_widgets: list[pg.PlotWidget] = []
         self._station_lines: list[pg.InfiniteLine] = []
@@ -170,11 +173,43 @@ class DsrQcWindow(QtWidgets.QMainWindow):
             self.line_combo.setCurrentIndex(0)
 
     def select_line(self, line: int) -> None:
+        """Select a receiver line requested by the main ribbon."""
         index = self.line_combo.findData(int(line))
         if index >= 0:
-            self.line_combo.setCurrentIndex(index)
+            if self.line_combo.currentIndex() != index:
+                self.line_combo.setCurrentIndex(index)
+            elif self._data is None or int(self._data.line) != int(line):
+                # The combo already shows the line but the corresponding data
+                # have not been loaded yet.
+                self.line_requested.emit(int(line))
         else:
             self.line_requested.emit(int(line))
+
+    def select_station(self, line: int, station: int) -> None:
+        """Synchronize the station combo and all white plot cursors.
+
+        This method intentionally blocks the station combo signal so a selection
+        originating from the main ribbon does not bounce back recursively through
+        ``station_selected``.
+        """
+        line = int(line)
+        station = int(station)
+        self._requested_station = station
+
+        # Request the correct line first.  The station is applied after set_data
+        # if that line is still being loaded.
+        if self._data is None or int(self._data.line) != line:
+            self.select_line(line)
+            return
+
+        index = self.station_combo.findData(station)
+        if index < 0:
+            return
+
+        blocker = QtCore.QSignalBlocker(self.station_combo)
+        self.station_combo.setCurrentIndex(index)
+        del blocker
+        self._move_station_cursor(float(station))
 
     def set_loading(self, line: int) -> None:
         self.status.setText(f"Loading DSR QC for line {line}…")
@@ -189,6 +224,17 @@ class DsrQcWindow(QtWidgets.QMainWindow):
             f"{len(data.columns)} numeric QC parameters"
         )
         self._populate_stations()
+
+        # Apply a station selected in the main Receiver QC ribbon before plots
+        # are rebuilt.  _redraw_now() will then position every InfiniteLine at
+        # the selected station as each chart is created.
+        if self._requested_station is not None:
+            station_index = self.station_combo.findData(int(self._requested_station))
+            if station_index >= 0:
+                blocker = QtCore.QSignalBlocker(self.station_combo)
+                self.station_combo.setCurrentIndex(station_index)
+                del blocker
+
         self._populate_channels()
         self._queue_redraw()
 
@@ -218,6 +264,7 @@ class DsrQcWindow(QtWidgets.QMainWindow):
         station = self.station_combo.currentData()
         if station is None:
             return
+        self._requested_station = int(station)
         self._move_station_cursor(float(station))
         self.station_selected.emit(self._data.line, int(station))
 

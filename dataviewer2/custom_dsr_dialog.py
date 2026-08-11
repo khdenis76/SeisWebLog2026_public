@@ -12,7 +12,7 @@ from .config import CustomDsrLayerDefinition
 class CustomDsrLayerDialog(QtWidgets.QDialog):
     """Compact first-version custom DSR layer builder."""
 
-    def __init__(self, columns: Iterable[str], parent=None) -> None:
+    def __init__(self, columns: Iterable[str], groups: Iterable[str] = (), preferred_group: str = "", parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Create custom DSR layer")
         self.resize(520, 430)
@@ -20,6 +20,22 @@ class CustomDsrLayerDialog(QtWidgets.QDialog):
 
         form = QtWidgets.QFormLayout(self)
         self.name_edit = QtWidgets.QLineEdit("Custom DSR layer")
+        self.group_combo = QtWidgets.QComboBox()
+        self.group_combo.setEditable(True)
+        group_names = []
+        for value in groups:
+            name = str(value).strip()
+            if name and name not in group_names:
+                group_names.append(name)
+        if "Custom DSR Layers" not in group_names:
+            group_names.append("Custom DSR Layers")
+        self.group_combo.addItems(group_names)
+        target_group = str(preferred_group or "Custom DSR Layers").strip()
+        index = self.group_combo.findText(target_group)
+        if index >= 0:
+            self.group_combo.setCurrentIndex(index)
+        else:
+            self.group_combo.setEditText(target_group)
         self.x_combo = QtWidgets.QComboBox(); self.x_combo.addItems(columns)
         self.y_combo = QtWidgets.QComboBox(); self.y_combo.addItems(columns)
         self.filter_field = QtWidgets.QComboBox(); self.filter_field.addItem("(none)", ""); self.filter_field.addItems(columns)
@@ -42,6 +58,7 @@ class CustomDsrLayerDialog(QtWidgets.QDialog):
                 combo.setCurrentIndex(index)
 
         form.addRow("Layer name:", self.name_edit)
+        form.addRow("Layer group:", self.group_combo)
         form.addRow("X field:", self.x_combo)
         form.addRow("Y field:", self.y_combo)
         form.addRow("Filter field:", self.filter_field)
@@ -88,4 +105,5 @@ class CustomDsrLayerDialog(QtWidgets.QDialog):
             visible=self.visible.isChecked(),
             split_by_line=self.split_lines.isChecked(),
             show_stations=self.show_stations.isChecked(),
+            group_name=self.group_combo.currentText().strip() or "Custom DSR Layers",
         )

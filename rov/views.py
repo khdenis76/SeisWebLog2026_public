@@ -47,6 +47,7 @@ def rov_main_view(request):
 
 
     dsrdb = DSRDB(project.db_path)
+    dsrdb.ensure_bbox_mru_schema()
 
     pdb=ProjectDB(project.db_path)
 
@@ -730,6 +731,9 @@ def save_bbox_config(request):
         rov2_name = request.POST.get("rov2_name", "").strip()
         gnss1_name = request.POST.get("gnss1_name", "").strip()
         gnss2_name = request.POST.get("gnss2_name", "").strip()
+        mru1_name = request.POST.get("mru1_name", "").strip()
+        mru2_name = request.POST.get("mru2_name", "").strip()
+        mru3_name = request.POST.get("mru3_name", "").strip()
         Depth1_name = request.POST.get("Depth1_name", "").strip()
         Depth2_name = request.POST.get("Depth2_name", "").strip()
 
@@ -759,6 +763,9 @@ def save_bbox_config(request):
             rov2_name=rov2_name,
             gnss1_name=gnss1_name,
             gnss2_name=gnss2_name,
+            mru1_name=mru1_name,
+            mru2_name=mru2_name,
+            mru3_name=mru3_name,
             depth1_name=Depth1_name,
             depth2_name=Depth2_name,
             mapping=mapping,
@@ -2228,6 +2235,9 @@ def bbox_config_import_json(request):
             rov2_name=(cfg.get("rov2_name") or "").strip(),
             gnss1_name=(cfg.get("gnss1_name") or "").strip(),
             gnss2_name=(cfg.get("gnss2_name") or "").strip(),
+            mru1_name=(cfg.get("mru1_name") or "").strip(),
+            mru2_name=(cfg.get("mru2_name") or "").strip(),
+            mru3_name=(cfg.get("mru3_name") or "").strip(),
             depth1_name=(cfg.get("depth1_name") or cfg.get("Depth1_name") or "").strip(),
             depth2_name=(cfg.get("depth2_name") or cfg.get("Depth2_name") or "").strip(),
             mapping=mapping,

@@ -1,10 +1,27 @@
 from __future__ import annotations
 
 import numpy as np
+import tempfile
+from pathlib import Path
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .models import PointLayerData
+
+
+def _text_symbol(text: str) -> QtGui.QPainterPath:
+    """Create a centered vector symbol containing one or two letters."""
+    path = QtGui.QPainterPath()
+    font = QtGui.QFont("Arial")
+    font.setBold(True)
+    font.setPointSizeF(10.0)
+    path.addText(0.0, 0.0, font, str(text))
+    rect = path.boundingRect()
+    transform = QtGui.QTransform()
+    scale = 1.0 / max(rect.width(), rect.height(), 1.0)
+    transform.scale(scale, -scale)
+    transform.translate(-rect.center().x(), -rect.center().y())
+    return transform.map(path)
 
 
 class FastPointLayer(QtCore.QObject):
@@ -15,6 +32,12 @@ class FastPointLayer(QtCore.QObject):
         self.plot_item = plot_item
         self.name = name
         self.data: PointLayerData | None = None
+        self.loaded = True
+        self._cache_path: Path | None = None
+        self._cached_count = 0
+        self._cached_bounds = None
+        self.symbol_name = "circle"
+        self.marker_text = ""
         self.connect_by = connect_by
         self.visible = True
         self.max_visible_points = 30000
@@ -22,6 +45,7 @@ class FastPointLayer(QtCore.QObject):
         self.point_color = str(point_color)
         self.line_color = str(line_color or point_color)
         self.line_width = 1.0
+        self.line_style = "solid"
         self.point_size = 5.0
         self.curve = pg.PlotCurveItem(
             pen=pg.mkPen(QtGui.QColor(self.line_color), width=self.line_width),
@@ -33,15 +57,29 @@ class FastPointLayer(QtCore.QObject):
             pxMode=True,
             brush=pg.mkBrush(QtGui.QColor(self.point_color)),
             pen=None,
+            symbol="o",
             useCache=True,
         )
+        self.selection_scatter = pg.ScatterPlotItem(
+            size=max(9.0, self.point_size + 5.0),
+            pxMode=True,
+            brush=pg.mkBrush(QtGui.QColor("#ffd740")),
+            pen=pg.mkPen(QtGui.QColor("#d32f2f"), width=1.5),
+            symbol="o",
+            useCache=True,
+        )
+        self.selected_indices = np.empty(0, dtype=np.int64)
         self.scatter.sigClicked.connect(self._clicked)
         self.display_indices = np.array([], dtype=np.int64)
         plot_item.addItem(self.curve)
         plot_item.addItem(self.scatter)
+        plot_item.addItem(self.selection_scatter)
 
     def set_data(self, data: PointLayerData) -> None:
         self.data = data
+        self.loaded = True
+        self._cached_count = data.count
+        self._cached_bounds = data.bounds
         self._set_full_curve()
         self.refresh_view()
 
@@ -59,27 +97,80 @@ class FastPointLayer(QtCore.QObject):
         self.curve.setData(x=x, y=y, connect="finite", skipFiniteCheck=True)
 
     def refresh_view(self) -> None:
-        if not self.visible or not self.data or self.data.count == 0:
+        loaded = getattr(self, "loaded", True)
+
+        if (
+                not self.visible
+                or not loaded
+                or self.data is None
+                or self.data.count == 0
+        ):
+            self.display_indices = np.empty(0, dtype=np.int64)
             self.scatter.setData([], [])
+            self.scatter.setVisible(False)
             return
+
+        # The layer is loaded and visible.
+        self.scatter.setVisible(True)
+
         (x_min, x_max), (y_min, y_max) = self.plot_item.vb.viewRange()
-        mask = (self.data.x >= x_min) & (self.data.x <= x_max) & (self.data.y >= y_min) & (self.data.y <= y_max)
+
+        mask = (
+                (self.data.x >= x_min)
+                & (self.data.x <= x_max)
+                & (self.data.y >= y_min)
+                & (self.data.y <= y_max)
+        )
+
         indices = np.flatnonzero(mask)
+
         if indices.size > self.max_visible_points:
             step = int(np.ceil(indices.size / self.max_visible_points))
             indices = indices[::step]
+
         self.display_indices = indices.astype(np.int64, copy=False)
-        if mask.sum() > self.show_points_below:
+
+        # At a wide zoom level, hide individual point symbols.
+        if indices.size > self.show_points_below:
             self.scatter.setData([], [])
-        else:
-            self.scatter.setData(x=self.data.x[indices], y=self.data.y[indices], data=np.arange(indices.size, dtype=np.int64))
+            return
+
+        self.scatter.setData(
+            x=self.data.x[indices],
+            y=self.data.y[indices],
+            data=np.arange(indices.size, dtype=np.int64),
+        )
 
     def set_visible(self, visible: bool) -> None:
+        if visible and not self.loaded:
+            self.reload()
         self.visible = visible
         self.curve.setVisible(visible)
         self.scatter.setVisible(visible)
+        self.selection_scatter.setVisible(visible and self.selected_indices.size > 0)
         if visible:
             self.refresh_view()
+
+    def set_selected_indices(self, indices: np.ndarray | list[int]) -> None:
+        """Store and highlight a multi-node selection using full data indices."""
+        if self.data is None:
+            self.selected_indices = np.empty(0, dtype=np.int64)
+            self.selection_scatter.setData([], [])
+            return
+        values = np.asarray(indices, dtype=np.int64).reshape(-1)
+        values = values[(values >= 0) & (values < self.data.count)]
+        self.selected_indices = np.unique(values)
+        if self.selected_indices.size:
+            self.selection_scatter.setData(
+                x=self.data.x[self.selected_indices],
+                y=self.data.y[self.selected_indices],
+            )
+        else:
+            self.selection_scatter.setData([], [])
+        self.selection_scatter.setVisible(self.visible and self.selected_indices.size > 0)
+
+    def clear_selection(self) -> None:
+        self.set_selected_indices([])
 
     def nearest(self, x: float, y: float, tolerance: float) -> tuple[int, float] | None:
         if not self.visible or not self.data or self.display_indices.size == 0:
@@ -106,6 +197,9 @@ class FastPointLayer(QtCore.QObject):
         line_color: str | None = None,
         line_width: float | None = None,
         point_size: float | None = None,
+        symbol: str | None = None,
+        marker_text: str | None = None,
+        line_style: str | None = None,
     ) -> None:
         """Update point/track styling without rebuilding the layer data."""
         if point_color is not None:
@@ -116,29 +210,101 @@ class FastPointLayer(QtCore.QObject):
             self.line_width = max(0.2, float(line_width))
         if point_size is not None:
             self.point_size = max(1.0, float(point_size))
+        if symbol is not None:
+            self.symbol_name = str(symbol)
+        if marker_text is not None:
+            self.marker_text = str(marker_text).strip()[:2]
+        if line_style is not None:
+            self.line_style = str(line_style).strip().lower()
 
-        self.curve.setPen(
-            pg.mkPen(QtGui.QColor(self.line_color), width=self.line_width)
-        )
+        pen = pg.mkPen(QtGui.QColor(self.line_color), width=self.line_width)
+        pen.setStyle({
+            "solid": QtCore.Qt.PenStyle.SolidLine,
+            "dash": QtCore.Qt.PenStyle.DashLine,
+            "dot": QtCore.Qt.PenStyle.DotLine,
+            "dash dot": QtCore.Qt.PenStyle.DashDotLine,
+            "dash-dot": QtCore.Qt.PenStyle.DashDotLine,
+            "dash dot dot": QtCore.Qt.PenStyle.DashDotDotLine,
+            "dash-dot-dot": QtCore.Qt.PenStyle.DashDotDotLine,
+            "none": QtCore.Qt.PenStyle.NoPen,
+        }.get(self.line_style, QtCore.Qt.PenStyle.SolidLine))
+        self.curve.setPen(pen)
         self.scatter.setBrush(pg.mkBrush(QtGui.QColor(self.point_color)))
         self.scatter.setSize(self.point_size)
+        symbol_map = {
+            "circle": "o", "square": "s", "triangle": "t",
+            "triangle down": "t1", "diamond": "d", "plus": "+",
+            "cross": "x", "star": "star", "pentagon": "p", "hexagon": "h",
+        }
+        if self.marker_text:
+            self.scatter.setSymbol(_text_symbol(self.marker_text))
+        else:
+            self.scatter.setSymbol(symbol_map.get(self.symbol_name.lower(), "o"))
 
     @property
     def bounds(self):
-        return self.data.bounds if self.data is not None else None
+        return self.data.bounds if self.data is not None else self._cached_bounds
 
     @property
     def count(self) -> int:
-        return self.data.count if self.data is not None else 0
+        return self.data.count if self.data is not None else int(self._cached_count)
+
+    def unload(self) -> bool:
+        """Release point arrays and graphics while preserving a disk cache."""
+        if not self.loaded or self.data is None:
+            return False
+        if self._cache_path is None:
+            handle = tempfile.NamedTemporaryFile(prefix="seis_dv_layer_", suffix=".npz", delete=False)
+            handle.close()
+            self._cache_path = Path(handle.name)
+        payload = {"x": self.data.x, "y": self.data.y, "source_index": self.data.source_index}
+        for key, values in self.data.metadata.items():
+            payload[f"meta__{key}"] = values
+        np.savez(self._cache_path, **payload)
+        self._cached_count = self.data.count
+        self._cached_bounds = self.data.bounds
+        self.data = None
+        self.loaded = False
+        self.display_indices = np.array([], dtype=np.int64)
+        self.curve.setData([], [])
+        self.scatter.setData([], [])
+        self.selected_indices = np.empty(0, dtype=np.int64)
+        self.selection_scatter.setData([], [])
+        return True
+
+    def reload(self) -> bool:
+        if self.loaded:
+            return True
+        if self._cache_path is None or not self._cache_path.exists():
+            return False
+        with np.load(self._cache_path, allow_pickle=True) as archive:
+            metadata = {
+                key[6:]: archive[key]
+                for key in archive.files if key.startswith("meta__")
+            }
+            data = PointLayerData(
+                name=self.name, x=archive["x"], y=archive["y"],
+                source_index=archive["source_index"], metadata=metadata,
+            )
+        self.set_data(data)
+        self.set_visible(self.visible)
+        return True
 
     def set_z_value(self, z: float) -> None:
         self.curve.setZValue(z)
         self.scatter.setZValue(z + 0.1)
+        self.selection_scatter.setZValue(z + 0.2)
 
     def remove(self) -> None:
         """Remove this layer's graphics items from the plot."""
         self.plot_item.removeItem(self.curve)
         self.plot_item.removeItem(self.scatter)
+        self.plot_item.removeItem(self.selection_scatter)
+        if self._cache_path is not None:
+            try:
+                self._cache_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 class FastShapeLayer(QtCore.QObject):
@@ -150,16 +316,13 @@ class FastShapeLayer(QtCore.QObject):
         self.data = data
         self.name = data.name
         self.visible = True
+        self.loaded = True
         self.fill_item: QtWidgets.QGraphicsPathItem | None = None
 
+        # Database styles are authoritative. Black is retained when the
+        # project_shapes table explicitly specifies black.
         default_line = data.definition.line_color or "#00e5ff"
         default_fill = data.definition.fill_color or default_line
-        # Black database defaults disappear on the dark canvas. Use a safe
-        # high-contrast fallback unless the user explicitly saved a style.
-        if QtGui.QColor(default_line).lightness() < 35:
-            default_line = "#00e5ff"
-        if QtGui.QColor(default_fill).lightness() < 35:
-            default_fill = default_line
 
         override = style_override or {}
         self.outline_color = str(override.get("outline_color", default_line))
@@ -167,7 +330,8 @@ class FastShapeLayer(QtCore.QObject):
         self.outline_style = str(override.get("outline_style", data.definition.line_style or "solid"))
         self.fill_enabled = bool(override.get("fill_enabled", data.definition.is_filled or data.geometry_type == "polygon"))
         self.fill_color = str(override.get("fill_color", default_fill))
-        self.fill_opacity = int(override.get("fill_opacity", 45))
+        self.fill_opacity = int(override.get("fill_opacity", 120 if data.definition.is_filled else 0))
+        self.hatch_pattern = str(override.get("hatch_pattern", data.definition.hatch_pattern or ""))
         self.layer_opacity = float(override.get("layer_opacity", 1.0))
         self.point_size = float(override.get("point_size", max(5.0, self.outline_width + 4.0)))
 
@@ -180,12 +344,41 @@ class FastShapeLayer(QtCore.QObject):
 
     @staticmethod
     def _qt_pen_style(text: str) -> QtCore.Qt.PenStyle:
-        text = (text or "").lower()
+        text = (text or "").strip().lower().replace("_", "-")
+        if "dash" in text and "dot" in text:
+            return QtCore.Qt.PenStyle.DashDotLine
         if "dash" in text:
             return QtCore.Qt.PenStyle.DashLine
         if "dot" in text:
             return QtCore.Qt.PenStyle.DotLine
         return QtCore.Qt.PenStyle.SolidLine
+
+    @staticmethod
+    def _qt_brush_style(text: str) -> QtCore.Qt.BrushStyle:
+        value = (text or "").strip().lower().replace("_", " ")
+        if not value or value in {"solid", "solidpattern"}:
+            return QtCore.Qt.BrushStyle.SolidPattern
+        if "cross" in value and ("diag" in value or "diagonal" in value):
+            return QtCore.Qt.BrushStyle.DiagCrossPattern
+        if "cross" in value:
+            return QtCore.Qt.BrushStyle.CrossPattern
+        if "back" in value or "bdiag" in value or "\\" in value:
+            return QtCore.Qt.BrushStyle.BDiagPattern
+        if "forward" in value or "fdiag" in value or "/" in value:
+            return QtCore.Qt.BrushStyle.FDiagPattern
+        if "horizontal" in value or value in {"hor", "h"}:
+            return QtCore.Qt.BrushStyle.HorPattern
+        if "vertical" in value or value in {"ver", "v"}:
+            return QtCore.Qt.BrushStyle.VerPattern
+        if "dense1" in value:
+            return QtCore.Qt.BrushStyle.Dense1Pattern
+        if "dense2" in value:
+            return QtCore.Qt.BrushStyle.Dense2Pattern
+        if "dense3" in value:
+            return QtCore.Qt.BrushStyle.Dense3Pattern
+        if "dense4" in value:
+            return QtCore.Qt.BrushStyle.Dense4Pattern
+        return QtCore.Qt.BrushStyle.SolidPattern
 
     def _build_geometry(self) -> None:
         if self.data.geometry_type == "point":
@@ -233,6 +426,7 @@ class FastShapeLayer(QtCore.QObject):
             "fill_opacity": self.fill_opacity,
             "layer_opacity": self.layer_opacity,
             "point_size": self.point_size,
+            "hatch_pattern": self.hatch_pattern,
         }
 
     def update_style(self, **changes) -> None:
@@ -253,7 +447,12 @@ class FastShapeLayer(QtCore.QObject):
         if self.fill_item is not None:
             color = QtGui.QColor(self.fill_color)
             color.setAlpha(max(0, min(255, int(self.fill_opacity))))
-            self.fill_item.setBrush(QtGui.QBrush(color) if self.fill_enabled else QtGui.QBrush(QtCore.Qt.BrushStyle.NoBrush))
+            if self.fill_enabled:
+                brush = QtGui.QBrush(color)
+                brush.setStyle(self._qt_brush_style(self.hatch_pattern))
+                self.fill_item.setBrush(brush)
+            else:
+                self.fill_item.setBrush(QtGui.QBrush(QtCore.Qt.BrushStyle.NoBrush))
             self.fill_item.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
             self.fill_item.setOpacity(max(0.0, min(1.0, float(self.layer_opacity))))
 
@@ -261,11 +460,30 @@ class FastShapeLayer(QtCore.QObject):
         return
 
     def set_visible(self, visible: bool) -> None:
-        self.visible = visible
-        self.curve.setVisible(visible)
-        self.scatter.setVisible(visible)
-        if self.fill_item is not None:
-            self.fill_item.setVisible(visible)
+        """Show or hide every graphics item owned by this shape layer."""
+        self.visible = bool(visible)
+
+        effective_visible = self.visible and getattr(self, "loaded", True)
+
+        items = [
+            getattr(self, "curve", None),
+            getattr(self, "scatter", None),
+            getattr(self, "fill_item", None),
+        ]
+
+        for item in items:
+            if item is None:
+                continue
+
+            item.setVisible(effective_visible)
+            item.setEnabled(effective_visible)
+
+        # Force PyQtGraph/Qt to repaint the canvas.
+        try:
+            self.plot_item.update()
+            self.plot_item.scene().update()
+        except Exception:
+            pass
 
     def nearest(self, x: float, y: float, tolerance: float) -> tuple[int, float] | None:
         if not self.visible:

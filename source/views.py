@@ -11,7 +11,7 @@ from django.views.decorators.csrf import csrf_protect
 
 from core.projectdb import ProjectDB   # <-- change to your real import
 from core.models import UserSettings,SPSRevision
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.views.decorators.http import require_POST
 import re
 import plotly.io as pio
@@ -1317,3 +1317,63 @@ def mfa_upload(request):
         "imported_count": len(imported),
         "failed_count": len(failed),
     })
+
+
+@login_required
+@require_POST
+@log_action("generate MFA PDF report", object_type="SOU_MFA_REPORT")
+def mfa_generate_report(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project or not project.can_view(request.user):
+        return JsonResponse(
+            {"ok": False, "error": "No active project or permission denied."},
+            status=403,
+        )
+
+    try:
+        file_id = int(request.POST.get("mfa_file_id") or "")
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"ok": False, "error": "Select exactly one MFA file."},
+            status=400,
+        )
+
+    db = MFADB(project.db_path)
+    with db.connect() as conn:
+        file_row = conn.execute(
+            "SELECT FileName FROM MFA_Files WHERE ID = ?",
+            (file_id,),
+        ).fetchone()
+    if not file_row:
+        return JsonResponse(
+            {"ok": False, "error": "The selected MFA file was not found."},
+            status=404,
+        )
+
+    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(file_row["FileName"]).stem)
+    reports_root = Path(
+        getattr(project, "reports_dir", None)
+        or Path(project.db_path).parent / "reports"
+    )
+    output_path = reports_root / "source" / "mfa" / f"{safe_stem}_MFA_QC_Report.pdf"
+
+    try:
+        db.generate_pdf_report(
+            file_id=file_id,
+            output_path=output_path,
+            prepared_by=request.user.get_full_name() or request.user.get_username(),
+        )
+    except Exception as exc:
+        return JsonResponse(
+            {"ok": False, "error": f"Could not generate MFA report: {exc}"},
+            status=500,
+        )
+
+    return FileResponse(
+        output_path.open("rb"),
+        as_attachment=True,
+        filename=output_path.name,
+        content_type="application/pdf",
+    )

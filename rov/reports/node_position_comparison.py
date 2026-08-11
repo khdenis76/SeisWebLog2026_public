@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.patches import Circle, Ellipse
+from matplotlib.patches import Circle, Ellipse, Rectangle
 
 
 class NodePositionComparisonReport:
@@ -20,7 +20,8 @@ class NodePositionComparisonReport:
     LaTeX PDF report for node position comparison.
 
     Report structure:
-    - Page 1: front page
+    - Page 1: branded front page with TGS logo
+    - Every content page: TGS report header and page frame
     - Page 2: line information from DSR_LineSummary
     - Next pages: node comparison table, split automatically by row count
     - Next page: XY offsets analysis with red QC circle and 95% coherence ellipse
@@ -28,9 +29,49 @@ class NodePositionComparisonReport:
     - Last page: Station vs In-Line, X-Line, and Radial offsets
     """
 
-    def __init__(self, db_path, project=None):
+    def __init__(self, db_path, project=None, logo_path=None):
         self.db_path = Path(db_path)
         self.project = project
+        self.logo_path = Path(logo_path) if logo_path else None
+
+    def _find_tgs_logo(self):
+        """Locate ``logos/2024_TGS_logo_blue.png`` from the program root."""
+        candidates = []
+        if self.logo_path:
+            candidates.append(self.logo_path)
+
+        module_path = Path(__file__).resolve()
+        if len(module_path.parents) >= 3:
+            candidates.append(module_path.parents[2] / "logos" / "2024_TGS_logo_blue.png")
+
+        candidates.extend([
+            Path.cwd() / "logos" / "2024_TGS_logo_blue.png",
+            self.db_path.parent / "logos" / "2024_TGS_logo_blue.png",
+            self.db_path.parent.parent / "logos" / "2024_TGS_logo_blue.png",
+        ])
+
+        for candidate in candidates:
+            try:
+                candidate = candidate.expanduser().resolve()
+            except Exception:
+                continue
+            if candidate.is_file():
+                return candidate
+
+        checked = "\n - ".join(str(p) for p in candidates)
+        raise FileNotFoundError(
+            "TGS logo was not found. Expected 2024_TGS_logo_blue.png. "
+            f"Checked:\n - {checked}"
+        )
+
+    def _prepare_tgs_logo(self, build_dir):
+        """Copy the logo into the LaTeX build folder and return its path."""
+        source = self._find_tgs_logo()
+        assets_dir = Path(build_dir) / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        target = assets_dir / "tgs_logo.png"
+        shutil.copy2(source, target)
+        return target
 
     # ------------------------------------------------------------------
     # DATA
@@ -278,13 +319,19 @@ class NodePositionComparisonReport:
         charts_dir = build_dir / "charts"
         charts_dir.mkdir(parents=True, exist_ok=True)
 
-        self._make_charts(df, charts_dir)
+        logo_file = self._prepare_tgs_logo(build_dir)
+        self._make_charts(df, charts_dir, line)
 
         tex_path = build_dir / f"{line}_Node_Position_Comparison.tex"
         pdf_path = output_dir / f"{line}_Node_Position_Comparison.pdf"
 
         tex_path.write_text(
-            self._build_tex(line=line, df=df, charts_dir=charts_dir),
+            self._build_tex(
+                line=line,
+                df=df,
+                charts_dir=charts_dir,
+                logo_file=logo_file,
+            ),
             encoding="utf-8",
         )
 
@@ -325,7 +372,7 @@ class NodePositionComparisonReport:
     # ------------------------------------------------------------------
     # LATEX
     # ------------------------------------------------------------------
-    def _build_tex(self, line, df, charts_dir):
+    def _build_tex(self, line, df, charts_dir, logo_file):
         project_name = (
             getattr(self.project, "name", "SeisWebLog Project")
             if self.project
@@ -344,6 +391,7 @@ class NodePositionComparisonReport:
         epsg = project_main.get("epsg", "")
 
         generated_on = datetime.now().strftime("%Y-%m-%d %H:%M")
+        tgs_logo_file = self._tex_path(logo_file)
 
         chart_xy_analysis_file = self._tex_path(
             charts_dir / "node_position_xy_analysis_page.png"
@@ -357,14 +405,31 @@ class NodePositionComparisonReport:
         chart_polar_file = self._tex_path(
             charts_dir / "node_position_polar_offsets_page.png"
         )
+        chart_cdf_boxplots_file = self._tex_path(
+            charts_dir / "node_position_cdf_boxplots_page.png"
+        )
+        chart_heatmap_profile_file = self._tex_path(
+            charts_dir / "node_position_heatmap_depth_profile_page.png"
+        )
+        chart_directional_file = self._tex_path(
+            charts_dir / "node_position_directional_analysis_page.png"
+        )
+        chart_executive_file = self._tex_path(
+            charts_dir / "node_position_executive_summary_page.png"
+        )
+        chart_line_info_file = self._tex_path(
+            charts_dir / "node_position_line_information_page.png"
+        )
+        chart_qc_dashboard_file = self._tex_path(
+            charts_dir / "node_position_qc_dashboard_page.png"
+        )
 
         table_pages = self._build_table_pages(df, rows_per_page=50)
-        line_info_page = self._build_line_info_page(line)
 
         template = r"""
 \documentclass[8pt,landscape]{article}
 
-\usepackage[a4paper,margin=7mm]{geometry}
+\usepackage[a4paper,left=7mm,right=7mm,top=24mm,bottom=10mm]{geometry}
 \usepackage{graphicx}
 \usepackage{array}
 \usepackage{booktabs}
@@ -396,13 +461,43 @@ class NodePositionComparisonReport:
 rectangle
 ([xshift=-4mm,yshift=4mm]current page.south east);
 
-\node[anchor=south east] at
-([xshift=-8mm,yshift=6mm]current page.south east)
-{\textcolor{swlnavy}{\scriptsize Page \thepage\ of \pageref{LastPage}}};
 \end{tikzpicture}
 }
 
+% Branded header for every page after the cover.
+% The title and project line are separate nodes, giving reliable vertical spacing.
+% The compact logo remains fully inside the page frame.
+\newcommand{\swlreportheader}{
+\begin{tikzpicture}[remember picture,overlay]
+\node[anchor=north west,inner sep=0pt] at
+([xshift=12mm,yshift=-7.5mm]current page.north west)
+{\includegraphics[height=7mm,keepaspectratio]{@@TGS_LOGO@@}};
+
+\node[anchor=north west,text=swlnavy] at
+([xshift=24mm,yshift=-7.0mm]current page.north west)
+{\fontsize{10.5}{12}\selectfont\bfseries NODE POSITION COMPARISON REPORT};
+
+\node[anchor=north west,text=swlnavy] at
+([xshift=24mm,yshift=-15.0mm]current page.north west)
+{\fontsize{7.5}{9}\selectfont\normalfont Project: @@HEADER_PROJECT@@\quad\textbar\quad Receiver Line: @@LINE@@};
+
+\node[anchor=north east,text=swlnavy] at
+([xshift=-11mm,yshift=-9mm]current page.north east)
+{\fontsize{7.5}{9}\selectfont Page \thepage\ of \pageref{LastPage}};
+
+\draw[swlnavy,line width=0.55pt]
+([xshift=12mm,yshift=-23mm]current page.north west) --
+([xshift=-12mm,yshift=-23mm]current page.north east);
+\end{tikzpicture}
+}
+
+\newcommand{\swlreportpage}{
+\swlpageframe
+\swlreportheader
+}
+
 \begin{document}
+\pagestyle{empty}
 
 \setlength{\floatsep}{0pt}
 \setlength{\textfloatsep}{0pt}
@@ -416,7 +511,9 @@ rectangle
 \swlpageframe
 
 \begin{center}
-\vspace*{10mm}
+\vspace*{6mm}
+
+\includegraphics[height=34mm,keepaspectratio]{@@TGS_LOGO@@}\\[7mm]
 
 {\Huge\bfseries\textcolor{swlnavy}{NODE POSITIONS COMPARISON REPORT}}\\[5mm]
 
@@ -455,11 +552,37 @@ Generated On & : & @@GENERATED@@ \\
 \end{center}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% LINE INFO PAGE
+%% EXECUTIVE SUMMARY PAGE
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \newpage
-@@LINE_INFO_PAGE@@
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{@@CHART_EXECUTIVE@@}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% LINE INFORMATION PAGE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{@@CHART_LINE_INFO@@}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% QC DASHBOARD PAGE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{@@CHART_QC_DASHBOARD@@}
+\end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% TABLE PAGES
@@ -473,9 +596,9 @@ Generated On & : & @@GENERATED@@ \\
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \newpage
-\swlpageframe
+\swlreportpage
 
-\vspace*{-1mm}
+\vspace*{1mm}
 
 \begin{figure}[H]
 \centering
@@ -487,7 +610,7 @@ Generated On & : & @@GENERATED@@ \\
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \newpage
-\swlpageframe
+\swlreportpage
 
 \begin{center}
 {\Large\bfseries\textcolor{swlnavy}{STATION VS $\Delta X$ / $\Delta Y$ / DEPLOYMENT Z}}
@@ -497,7 +620,7 @@ Generated On & : & @@GENERATED@@ \\
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.985\linewidth]{@@CHART_OFFSETS@@}
+\includegraphics[width=0.985\linewidth,height=147mm,keepaspectratio]{@@CHART_OFFSETS@@}
 \end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -505,7 +628,7 @@ Generated On & : & @@GENERATED@@ \\
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \newpage
-\swlpageframe
+\swlreportpage
 
 \begin{center}
 {\Large\bfseries\textcolor{swlnavy}{INLINE / CROSSLINE / RADIAL OFFSETS VS STATION}}
@@ -515,7 +638,40 @@ Generated On & : & @@GENERATED@@ \\
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.985\linewidth]{@@CHART_IL_XL@@}
+\includegraphics[width=0.985\linewidth,height=147mm,keepaspectratio]{@@CHART_IL_XL@@}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% CDF AND BOXPLOTS PAGE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{@@CHART_CDF_BOXPLOTS@@}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% HEATMAP AND DEPTH PROFILE PAGE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{@@CHART_HEATMAP_PROFILE@@}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% DIRECTIONAL ANALYSIS PAGE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{@@CHART_DIRECTIONAL@@}
 \end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -523,7 +679,7 @@ Generated On & : & @@GENERATED@@ \\
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \newpage
-\swlpageframe
+\swlreportpage
 
 \begin{center}
 {\Large\bfseries\textcolor{swlnavy}{POLAR OFFSET VS AZIMUTH}}
@@ -541,6 +697,8 @@ Generated On & : & @@GENERATED@@ \\
 
         replacements = {
             "@@PROJECT@@": self._tex(project_name),
+            "@@HEADER_PROJECT@@": self._tex(project_name),
+            "@@TGS_LOGO@@": tgs_logo_file,
             "@@LOCATION@@": self._tex(location),
             "@@AREA@@": self._tex(area),
             "@@CLIENT@@": self._tex(client),
@@ -550,12 +708,17 @@ Generated On & : & @@GENERATED@@ \\
             "@@EPSG@@": self._tex(epsg),
             "@@LINE@@": str(line),
             "@@GENERATED@@": generated_on,
-            "@@LINE_INFO_PAGE@@": line_info_page,
+            "@@CHART_EXECUTIVE@@": chart_executive_file,
+            "@@CHART_LINE_INFO@@": chart_line_info_file,
+            "@@CHART_QC_DASHBOARD@@": chart_qc_dashboard_file,
             "@@TABLE_PAGES@@": table_pages,
             "@@CHART_XY_ANALYSIS@@": chart_xy_analysis_file,
             "@@CHART_OFFSETS@@": chart_offsets_file,
             "@@CHART_IL_XL@@": chart_il_xl_file,
             "@@CHART_POLAR@@": chart_polar_file,
+            "@@CHART_CDF_BOXPLOTS@@": chart_cdf_boxplots_file,
+            "@@CHART_HEATMAP_PROFILE@@": chart_heatmap_profile_file,
+            "@@CHART_DIRECTIONAL@@": chart_directional_file,
         }
 
         for old, new in replacements.items():
@@ -568,7 +731,7 @@ Generated On & : & @@GENERATED@@ \\
 
         if not info:
             return r"""
-\swlpageframe
+\swlreportpage
 \begin{center}
 {\Large\bfseries\textcolor{swlnavy}{LINE INFORMATION}}
 
@@ -592,7 +755,7 @@ Generated On & : & @@GENERATED@@ \\
             return self._tex(value)
 
         template = r"""
-\swlpageframe
+\swlreportpage
 
 \begin{center}
 {\Large\bfseries\textcolor{swlnavy}{LINE INFORMATION SUMMARY}}
@@ -723,8 +886,8 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
             rows_tex = self._table_rows(part, start_index=start + 1)
 
             page_tex = rf"""
-\swlpageframe
-\vspace*{{-3mm}}
+\swlreportpage
+\vspace*{{1mm}}
 \begin{{center}}
 {{\large\bfseries\textcolor{{swlnavy}}{{NODE POSITIONS COMPARISON TABLE}}}}\\[-0.8mm]
 {{\scriptsize Line table page {page_idx} of {total_pages}}}
@@ -830,13 +993,178 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
     # ------------------------------------------------------------------
     # CHARTS
     # ------------------------------------------------------------------
-    def _make_charts(self, df, charts_dir):
+    def _make_charts(self, df, charts_dir, line):
         qc = self.load_node_qc_settings()
         max_radial_offset = qc.get("max_radial_offset") or 30.0
+        self._make_executive_summary_page(df, charts_dir, line, float(max_radial_offset))
+        self._make_line_information_page(df, charts_dir, line)
+        self._make_qc_dashboard_page(df, charts_dir, line, float(max_radial_offset))
         self._make_xy_offsets_analysis_page(df=df, charts_dir=charts_dir, max_radial_offset=float(max_radial_offset))
         self._make_chart_page_offsets(df, charts_dir)
         self._make_chart_page_il_xl_radial(df, charts_dir)
+        self._make_cdf_boxplots_page(df, charts_dir, float(max_radial_offset))
+        self._make_heatmap_depth_profile_page(df, charts_dir, float(max_radial_offset))
+        self._make_directional_analysis_page(df, charts_dir)
         self._make_polar_offsets_page(df, charts_dir)
+
+    def _dashboard_status(self, value, warning_limit, fail_limit=None):
+        """Return label and display color for a QC metric."""
+        if value is None or not np.isfinite(value):
+            return "N/A", "#7f8c8d"
+        fail_limit = fail_limit if fail_limit is not None else warning_limit * 1.25
+        if value <= warning_limit:
+            return "PASS", "#2ca02c"
+        if value <= fail_limit:
+            return "WARNING", "#f2a900"
+        return "FAIL", "#d62728"
+
+    def _add_card(self, ax, x, y, w, h, title, value, subtitle="", edge="#d7e0ea", value_color="#0b2a55"):
+        from matplotlib.patches import FancyBboxPatch
+        card = FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.008,rounding_size=0.012",
+                               linewidth=0.9, edgecolor=edge, facecolor="white")
+        ax.add_patch(card)
+        ax.text(x + w/2, y + h*0.66, str(value), ha="center", va="center",
+                fontsize=18, fontweight="bold", color=value_color)
+        ax.text(x + w/2, y + h*0.36, title, ha="center", va="center",
+                fontsize=8.5, fontweight="bold", color="#142b4a")
+        if subtitle:
+            ax.text(x + w/2, y + h*0.15, subtitle, ha="center", va="center",
+                    fontsize=6.8, color="#4a5b70")
+
+    def _make_executive_summary_page(self, df, charts_dir, line, max_radial_offset):
+        info = self.load_line_summary(line)
+        planned = int(info.get("PlannedPoints") or len(df))
+        deployed = int(info.get("DeployedCount") or len(df))
+        recovered = int(info.get("RetrievedCount") or 0)
+        processed = int(info.get("ProcessedCount") or df["fb_x"].notna().sum())
+        dep_pct = 100.0 * deployed / planned if planned else 0.0
+        rec_pct = 100.0 * recovered / planned if planned else 0.0
+        proc_pct = 100.0 * processed / planned if planned else 0.0
+
+        radial = pd.to_numeric(df.get("dep_pp_dr"), errors="coerce").dropna()
+        avg_rad = float(radial.mean()) if len(radial) else float("nan")
+        max_rad = float(radial.max()) if len(radial) else float("nan")
+        p95_rad = float(radial.quantile(0.95)) if len(radial) else float("nan")
+        avg_il = float(pd.to_numeric(df.get("dep_il"), errors="coerce").mean())
+        avg_xl = float(pd.to_numeric(df.get("dep_xl"), errors="coerce").mean())
+        dp_rec = float(pd.to_numeric(df.get("dep_rec_dr"), errors="coerce").mean())
+        mean_depth = float(pd.to_numeric(df.get("dep_z"), errors="coerce").abs().mean())
+
+        overall, overall_color = self._dashboard_status(max_rad, max_radial_offset)
+        project = self.load_project_main()
+
+        fig = plt.figure(figsize=(16.5, 9.0))
+        ax = fig.add_axes([0.03, 0.04, 0.94, 0.91]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.axis("off")
+        ax.text(0.0, 0.965, "EXECUTIVE SUMMARY", fontsize=20, fontweight="bold", color="#0b2a55", va="top")
+        ax.text(0.0, 0.925, f"Receiver Line {line} | {project.get('name','')}", fontsize=9, color="#53657a")
+
+        cards=[("Planned Nodes",planned,""),("Deployed",deployed,f"{dep_pct:.1f}%"),("Recovered",recovered,f"{rec_pct:.1f}%"),("Processed",processed,f"{proc_pct:.1f}%")]
+
+        # Center the four summary cards as one horizontal group.
+        card_w = 0.185
+        card_gap = 0.018
+        cards_total_w = len(cards) * card_w + (len(cards) - 1) * card_gap
+        cards_x0 = (1.0 - cards_total_w) / 2.0
+        for i, (t, v, sub) in enumerate(cards):
+            self._add_card(
+                ax,
+                cards_x0 + i * (card_w + card_gap),
+                0.74,
+                card_w,
+                0.14,
+                t,
+                v,
+                sub,
+            )
+
+        # KPI table
+        from matplotlib.patches import FancyBboxPatch
+        left=FancyBboxPatch((0.0,0.24),0.63,0.45,boxstyle="round,pad=0.008",linewidth=.8,edgecolor="#cbd6e2",facecolor="#f8fafc")
+        ax.add_patch(left); ax.text(0.02,0.655,"KEY PERFORMANCE INDICATORS",fontsize=10,fontweight="bold",color="#0b2a55")
+        rows=[("Average radial offset",avg_rad,"m"),("95th percentile radial",p95_rad,"m"),("Maximum radial offset",max_rad,"m"),("Average inline offset",avg_il,"m"),("Average crossline offset",avg_xl,"m"),("Mean deployment vs REC_DB radial",dp_rec,"m"),("Mean water depth",mean_depth,"m")]
+        y=0.615
+        for label,val,unit in rows:
+            ax.plot([0.02,0.61],[y-0.018,y-0.018],color="#e1e7ee",lw=.6)
+            ax.text(0.025,y,label,fontsize=8.2,color="#23384f",va="center")
+            ax.text(0.60,y,(f"{val:.2f} {unit}" if np.isfinite(val) else "N/A"),fontsize=8.4,fontweight="bold",ha="right",color="#142b4a",va="center")
+            y-=0.053
+
+        status_box=FancyBboxPatch((0.66,0.43),0.32,0.26,boxstyle="round,pad=0.008",linewidth=.8,edgecolor="#cbd6e2",facecolor="white")
+        ax.add_patch(status_box); ax.text(0.82,0.65,"QC OVERALL RESULT",ha="center",fontsize=10,fontweight="bold",color="#0b2a55")
+        ax.text(0.82,0.555,overall,ha="center",fontsize=23,fontweight="bold",color=overall_color)
+        ax.text(0.82,0.47,f"Maximum radial offset {max_rad:.2f} m\nQC threshold {max_radial_offset:.2f} m",ha="center",fontsize=8,color="#45566a")
+
+        # QC status summary
+        # Move the QC status table slightly lower to add breathing room below the KPI panels.
+        table_ax=fig.add_axes([0.065,0.045,0.87,0.19]); table_ax.axis("off")
+        metrics=[("Inline offset",abs(avg_il),max_radial_offset), ("Crossline offset",abs(avg_xl),max_radial_offset), ("Radial offset",max_rad,max_radial_offset), ("DP vs REC_DB radial",dp_rec,max_radial_offset)]
+        data=[]
+        for name,val,limit in metrics:
+            st,_=self._dashboard_status(val,limit); data.append([name,f"{val:.2f} m",st])
+        tbl=table_ax.table(cellText=data,colLabels=["Parameter","Result","Status"],cellLoc="left",colLoc="left",loc="center",bbox=[0,0,1,1])
+        tbl.auto_set_font_size(False); tbl.set_fontsize(8)
+        for (r,c),cell in tbl.get_celld().items():
+            cell.set_linewidth(.5); cell.set_edgecolor("#cbd6e2")
+            if r==0: cell.set_facecolor("#eaf2f8"); cell.set_text_props(weight="bold",color="#0b2a55")
+            elif c==2:
+                st=data[r-1][2]; cell.set_text_props(weight="bold",color={"PASS":"#2ca02c","WARNING":"#f2a900","FAIL":"#d62728"}.get(st,"#555"))
+        fig.savefig(charts_dir / "node_position_executive_summary_page.png", dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+    def _make_line_information_page(self, df, charts_dir, line):
+        info=self.load_line_summary(line); project=self.load_project_main()
+        fig=plt.figure(figsize=(16.5,9.0)); ax=fig.add_axes([0.03,0.04,0.94,0.91]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.axis("off")
+        ax.text(0,0.965,"LINE INFORMATION SUMMARY",fontsize=20,fontweight="bold",color="#0b2a55",va="top")
+        ax.text(0,0.925,f"Project: {project.get('name','')} | Area: {project.get('area','')}",fontsize=9,color="#53657a")
+        left_items=[("Line",line),("Preplot Stations",info.get("Stations",len(df))),("Nodes",info.get("Nodes",len(df))),("Min Station",info.get("MinStation",df['Station'].min())),("Max Station",info.get("MaxStation",df['Station'].max())),("Deployed Nodes",info.get("DeployedCount",len(df))),("Recovered Nodes",info.get("RetrievedCount",0)),("Processed Nodes",info.get("ProcessedCount",df['fb_x'].notna().sum())),("Start of Deployment",info.get("FirstDeployTime","")),("End of Deployment",info.get("LastDeployTime","")),("Deployment Duration",info.get("DeploymentHours","")),("Start of Recovery",info.get("StartOfRec","")),("End of Recovery",info.get("EndOfRec","")),("Recovery Duration",info.get("RecDuration",""))]
+        y=.86
+        for i,(k,v) in enumerate(left_items):
+            if i%2: ax.add_patch(plt.Rectangle((0, y-.018), .52, .04,facecolor="#f4f7fa",edgecolor="none"))
+            ax.text(.015,y,k,fontsize=8.5,fontweight="bold",color="#263b53",va="center"); ax.text(.31,y,str(v if v is not None else ""),fontsize=8.5,color="#152b45",va="center"); y-=.047
+        # right statistics tables
+        stats=[("Delta Easting",df['dep_pp_dx']), ("Delta Northing",df['dep_pp_dy']), ("Radial Offset",df['dep_pp_dr'])]
+        ax.text(.60,.86,"OFFSET STATISTICS",fontsize=11,fontweight="bold",color="#0b2a55")
+        y=.81
+        for name,series in stats:
+            ser=pd.to_numeric(series,errors='coerce').dropna(); vals=[ser.mean(),ser.min(),ser.max()]
+            ax.text(.60,y,name,fontsize=8.2,fontweight="bold",color="#263b53");
+            ax.text(.78,y,f"Avg {vals[0]:.2f}",fontsize=8); ax.text(.87,y,f"Min {vals[1]:.2f}",fontsize=8); ax.text(.95,y,f"Max {vals[2]:.2f}",fontsize=8,ha='right'); y-=.065
+        ax.text(.60,.57,"RADIAL OFFSET SUMMARY",fontsize=11,fontweight="bold",color="#0b2a55")
+        rad=pd.to_numeric(df['dep_pp_dr'],errors='coerce').dropna(); summ=[("P50",rad.quantile(.5)),("P95",rad.quantile(.95)),("Average",rad.mean()),("Minimum",rad.min()),("Maximum",rad.max())]
+        y=.52
+        for k,v in summ: ax.text(.62,y,k,fontsize=8.5,fontweight="bold"); ax.text(.93,y,f"{v:.2f} m",fontsize=8.5,ha='right'); y-=.052
+        # donuts
+        vals=[("DEPLOYMENT",int(info.get('DeployedCount') or len(df)),int(info.get('PlannedPoints') or len(df))), ("RECOVERY",int(info.get('RetrievedCount') or 0),int(info.get('PlannedPoints') or len(df))), ("PROCESSED",int(info.get('ProcessedCount') or df['fb_x'].notna().sum()),int(info.get('PlannedPoints') or len(df)))]
+        # Center all three donut charts horizontally and move the group lower.
+        donut_w = 0.15
+        donut_gap = 0.035
+        donuts_total_w = len(vals) * donut_w + (len(vals) - 1) * donut_gap
+        donuts_x0 = (1.0 - donuts_total_w) / 2.0
+        for i,(name,count,total) in enumerate(vals):
+            a=fig.add_axes([donuts_x0+i*(donut_w+donut_gap),.035,donut_w,.22]); a.axis('equal'); pct=count/total if total else 0; a.pie([pct,max(0,1-pct)],startangle=90,counterclock=False,colors=['#2ca02c','#e5e9ee'],wedgeprops=dict(width=.22,edgecolor='white')); a.text(0,0,f"{pct*100:.1f}%",ha='center',va='center',fontsize=11,fontweight='bold'); a.set_title(f"{name}\n{count} / {total}",fontsize=8,fontweight='bold'); a.axis('off')
+        fig.savefig(charts_dir / "node_position_line_information_page.png",dpi=180,bbox_inches='tight'); plt.close(fig)
+
+    def _make_qc_dashboard_page(self, df, charts_dir, line, max_radial_offset):
+        radial=pd.to_numeric(df['dep_pp_dr'],errors='coerce').dropna(); il=pd.to_numeric(df['dep_il'],errors='coerce').dropna(); xl=pd.to_numeric(df['dep_xl'],errors='coerce').dropna(); dp=pd.to_numeric(df['dep_rec_dr'],errors='coerce').dropna()
+        metrics=[("Average Radial",radial.mean(),max_radial_offset),("Maximum Radial",radial.max(),max_radial_offset),("P95 Radial",radial.quantile(.95),max_radial_offset),("Average Inline",abs(il.mean()),max_radial_offset),("Average Crossline",abs(xl.mean()),max_radial_offset),("DP vs REC_DB",dp.mean(),max_radial_offset)]
+        fig=plt.figure(figsize=(16.5,9.0)); ax=fig.add_axes([.03,.04,.94,.91]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.axis('off')
+        ax.text(0,.965,"QC DASHBOARD",fontsize=20,fontweight='bold',color='#0b2a55',va='top'); ax.text(0,.925,f"Receiver Line {line} | QC radial limit {max_radial_offset:.2f} m",fontsize=9,color='#53657a')
+        for i,(name,val,limit) in enumerate(metrics):
+            row=i//3; col=i%3; x=.02+col*.325; y=.60-row*.30; st,color=self._dashboard_status(float(val),limit)
+            from matplotlib.patches import FancyBboxPatch, Wedge
+            box=FancyBboxPatch((x,y),.29,.24,boxstyle='round,pad=.008',linewidth=.8,edgecolor='#cad5e0',facecolor='white'); ax.add_patch(box)
+            ax.text(x+.145,y+.205,name,ha='center',fontsize=9,fontweight='bold',color='#0b2a55')
+            # gauge arc
+            center=(x+.145,y+.105); ax.add_patch(Wedge(center,.075,0,180,width=.014,facecolor='#e5e9ee',edgecolor='none'))
+            frac=min(max(float(val)/max(limit,1e-9),0),1.5); angle=min(frac,1.0)*180; ax.add_patch(Wedge(center,.075,180-angle,180,width=.014,facecolor=color,edgecolor='none'))
+            ax.text(center[0],center[1]-.005,f"{val:.2f} m",ha='center',va='center',fontsize=13,fontweight='bold',color='#142b4a')
+            ax.text(center[0],y+.035,st,ha='center',fontsize=8.5,fontweight='bold',color=color)
+        # distribution bar
+        bins=[0,1,2,max_radial_offset,float('inf')]; labels=['0-1 m','1-2 m',f'2-{max_radial_offset:.1f} m',f'>{max_radial_offset:.1f} m']; counts=[]
+        for lo,hi in zip(bins[:-1],bins[1:]): counts.append(int(((radial>=lo)&(radial<hi)).sum()))
+        bax=fig.add_axes([.11,.08,.78,.19]); pos=np.arange(len(labels)); bax.barh(pos,counts); bax.set_yticks(pos,labels); bax.invert_yaxis(); bax.set_xlabel('Nodes'); bax.set_title('RADIAL OFFSET DISTRIBUTION',fontsize=10,fontweight='bold'); bax.grid(axis='x',alpha=.25)
+        for p,c in zip(pos,counts): bax.text(c+.2,p,str(c),va='center',fontsize=8)
+        fig.savefig(charts_dir / "node_position_qc_dashboard_page.png",dpi=180,bbox_inches='tight'); plt.close(fig)
 
     def _make_xy_offsets_analysis_page(self, df, charts_dir, max_radial_offset):
         """
@@ -1332,6 +1660,195 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         fig.savefig(charts_dir / "node_position_il_xl_radial_page.png", dpi=180)
         plt.close(fig)
 
+    def _make_cdf_boxplots_page(self, df, charts_dir, max_radial_offset):
+        """Create a combined empirical CDF, percentile table and boxplot page."""
+        plot_df = df.copy().reset_index(drop=True)
+        radial = pd.to_numeric(plot_df["dep_pp_dr"], errors="coerce").dropna().to_numpy(float)
+        inline = np.abs(pd.to_numeric(plot_df["dep_il"], errors="coerce").dropna().to_numpy(float))
+        crossline = np.abs(pd.to_numeric(plot_df["dep_xl"], errors="coerce").dropna().to_numpy(float))
+
+        # A physically meaningful vertical comparison: magnitude of REC_DB depth
+        # minus magnitude of deployment elevation/depth.
+        z_delta = (
+            np.abs(pd.to_numeric(plot_df["fb_z"], errors="coerce"))
+            - np.abs(pd.to_numeric(plot_df["dep_z"], errors="coerce"))
+        ).dropna().to_numpy(float)
+
+        fig = plt.figure(figsize=(18, 10.3))
+        gs = fig.add_gridspec(2, 2, width_ratios=[1.65, 1.0], height_ratios=[1.05, 1.0], hspace=0.36, wspace=0.22)
+        fig.suptitle("CDF & BOXPLOTS", fontsize=20, fontweight="bold", y=0.98)
+
+        ax_cdf = fig.add_subplot(gs[0, 0])
+        for values, label in ((radial, "Radial offset"), (inline, "|In-line offset|"), (crossline, "|Crossline offset|")):
+            values = values[np.isfinite(values)]
+            if values.size:
+                x = np.sort(values)
+                y = np.arange(1, len(x) + 1) / len(x) * 100.0
+                ax_cdf.plot(x, y, linewidth=2.0, label=label)
+        ax_cdf.axvline(max_radial_offset, linestyle="--", linewidth=1.0, label=f"QC limit ({max_radial_offset:.1f} m)")
+        ax_cdf.set_title("CUMULATIVE DISTRIBUTION FUNCTION (CDF)", fontsize=11, fontweight="bold")
+        ax_cdf.set_xlabel("Absolute offset (m)")
+        ax_cdf.set_ylabel("Cumulative percentage (%)")
+        ax_cdf.set_ylim(0, 101)
+        ax_cdf.grid(True, linewidth=0.35, alpha=0.55)
+        ax_cdf.legend(fontsize=8, loc="lower right")
+
+        ax_pct = fig.add_subplot(gs[0, 1])
+        ax_pct.axis("off")
+        percentiles = [50, 75, 90, 95, 99]
+        rows = []
+        for q in percentiles:
+            def qv(a):
+                return f"{np.nanpercentile(a, q):.2f}" if len(a) else ""
+            rows.append([f"{q}%" + (" (Median)" if q == 50 else ""), qv(radial), qv(inline), qv(crossline)])
+        tbl = ax_pct.table(cellText=rows, colLabels=["Percentile", "Radial", "|IL|", "|XL|"], cellLoc="center", colLoc="center", bbox=[0.02, 0.26, 0.96, 0.62])
+        tbl.auto_set_font_size(False); tbl.set_fontsize(9); tbl.scale(1, 1.35)
+        for (r, c), cell in tbl.get_celld().items():
+            cell.set_linewidth(0.5)
+            if r == 0:
+                cell.set_facecolor("#eaf2f8"); cell.set_text_props(weight="bold")
+        ax_pct.set_title("PERCENTILE SUMMARY (m)", fontsize=11, fontweight="bold", pad=10)
+        ax_pct.text(0.05, 0.15, "Green: good (< 1 m)\nYellow: acceptable (1–2 m)\nRed: warning (> 2 m)", transform=ax_pct.transAxes, fontsize=9, va="top")
+
+        ax_box = fig.add_subplot(gs[1, :])
+        datasets = [plot_df["dep_il"].dropna(), plot_df["dep_xl"].dropna(), radial, z_delta]
+        labels = ["In-line (m)", "Crossline (m)", "Radial (m)", "Depth ΔZ (m)"]
+        box = ax_box.boxplot(datasets, labels=labels, patch_artist=True, showmeans=True,
+                             meanprops=dict(marker="D", markerfacecolor="white", markeredgecolor="black", markersize=4))
+        for patch in box["boxes"]:
+            patch.set_alpha(0.65)
+        ax_box.axhline(0, linewidth=0.7, alpha=0.7)
+        ax_box.grid(True, axis="y", linewidth=0.35, alpha=0.5)
+        ax_box.set_title("BOXPLOTS", fontsize=11, fontweight="bold")
+        ax_box.text(0.99, 0.96, "Box: 25–75%\nLine: median\nWhiskers: 1.5×IQR\nDots: outliers", transform=ax_box.transAxes, ha="right", va="top", fontsize=8)
+
+        fig.subplots_adjust(left=0.055, right=0.97, top=0.91, bottom=0.08)
+        fig.savefig(charts_dir / "node_position_cdf_boxplots_page.png", dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+    def _make_heatmap_depth_profile_page(self, df, charts_dir, max_radial_offset):
+        """Create radial-offset heat strip and water-depth/radial profile page."""
+        plot_df = df.copy().sort_values("Station").reset_index(drop=True)
+        station = plot_df["Station"].to_numpy(float)
+        radial = plot_df["dep_pp_dr"].to_numpy(float)
+        depth = np.abs(plot_df["dep_z"].to_numpy(float))
+
+        fig = plt.figure(figsize=(18, 10.3))
+        gs = fig.add_gridspec(3, 1, height_ratios=[0.72, 1.45, 0.45], hspace=0.58)
+        fig.suptitle("HEATMAP & WATER DEPTH PROFILE", fontsize=20, fontweight="bold", y=0.98)
+
+        ax_hm = fig.add_subplot(gs[0, 0])
+        heat = np.tile(radial, (6, 1))
+        im = ax_hm.imshow(heat, aspect="auto", interpolation="nearest", cmap="RdYlGn_r",
+                          vmin=0, vmax=max(max_radial_offset, float(np.nanpercentile(radial, 98))))
+        ax_hm.set_yticks([])
+        tick_idx = np.linspace(0, len(station)-1, min(8, len(station)), dtype=int)
+        ax_hm.set_xticks(tick_idx)
+        ax_hm.set_xticklabels([str(int(station[i])) for i in tick_idx])
+        ax_hm.set_xlabel("Station")
+        ax_hm.set_title("RADIAL OFFSET HEATMAP ALONG LINE", fontsize=11, fontweight="bold")
+        cbar = fig.colorbar(im, ax=ax_hm, orientation="horizontal", pad=0.30, fraction=0.12)
+        cbar.set_label("Radial offset (m)")
+
+        ax_depth = fig.add_subplot(gs[1, 0])
+        ax_rad = ax_depth.twinx()
+        l1, = ax_depth.plot(station, depth, linewidth=1.8, label="Water depth")
+        l2, = ax_rad.plot(station, radial, linewidth=1.5, label="Radial offset")
+        ax_depth.set_xlabel("Station")
+        ax_depth.set_ylabel("Water depth (m)")
+        ax_rad.set_ylabel("Radial offset (m)")
+        ax_depth.grid(True, linewidth=0.35, alpha=0.5)
+        ax_depth.set_title("WATER DEPTH & RADIAL OFFSET PROFILE", fontsize=11, fontweight="bold")
+        ax_depth.legend([l1, l2], [l1.get_label(), l2.get_label()], loc="upper left", fontsize=8)
+
+        ax_sum = fig.add_subplot(gs[2, 0]); ax_sum.axis("off")
+        summary = [
+            ["PROFILE SUMMARY", "Min", "Average", "Max"],
+            ["Water depth (m)", f"{np.nanmin(depth):.1f}", f"{np.nanmean(depth):.1f}", f"{np.nanmax(depth):.1f}"],
+            ["Radial offset (m)", f"{np.nanmin(radial):.2f}", f"{np.nanmean(radial):.2f}", f"{np.nanmax(radial):.2f}"],
+        ]
+        tbl = ax_sum.table(cellText=summary[1:], colLabels=summary[0], cellLoc="center", colLoc="center", bbox=[0.20, 0.02, 0.60, 0.92])
+        tbl.auto_set_font_size(False); tbl.set_fontsize(9); tbl.scale(1, 1.3)
+        for (r, c), cell in tbl.get_celld().items():
+            cell.set_linewidth(0.5)
+            if r == 0:
+                cell.set_facecolor("#eaf2f8"); cell.set_text_props(weight="bold")
+
+        fig.subplots_adjust(left=0.06, right=0.94, top=0.91, bottom=0.07)
+        fig.savefig(charts_dir / "node_position_heatmap_depth_profile_page.png", dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+    def _make_directional_analysis_page(self, df, charts_dir):
+        """Create rose diagram, circular statistics and sector radial table."""
+        clean = df[["dep_pp_az", "dep_pp_dr"]].dropna().copy()
+        az_deg = clean["dep_pp_az"].to_numpy(float)
+        radial = clean["dep_pp_dr"].to_numpy(float)
+        theta = np.deg2rad(az_deg)
+
+        # Circular mean and concentration.
+        sin_mean = float(np.mean(np.sin(theta))) if len(theta) else 0.0
+        cos_mean = float(np.mean(np.cos(theta))) if len(theta) else 0.0
+        mean_dir = (math.degrees(math.atan2(sin_mean, cos_mean)) + 360.0) % 360.0
+        vector_len = math.hypot(sin_mean, cos_mean)
+        circ_std = math.degrees(math.sqrt(max(0.0, -2.0 * math.log(max(vector_len, 1e-12)))))
+
+        bins_deg = np.arange(0, 361, 15)
+        counts, _ = np.histogram(az_deg, bins=bins_deg)
+        centers = np.deg2rad((bins_deg[:-1] + bins_deg[1:]) / 2.0)
+        widths = np.deg2rad(np.diff(bins_deg))
+
+        fig = plt.figure(figsize=(18, 10.3))
+        gs = fig.add_gridspec(2, 2, width_ratios=[1.55, 0.85], height_ratios=[1.0, 0.30], hspace=0.30, wspace=0.25)
+        fig.suptitle("DIRECTIONAL ANALYSIS (ROSE DIAGRAM)", fontsize=20, fontweight="bold", y=0.98)
+
+        ax = fig.add_subplot(gs[0, 0], projection="polar")
+        ax.bar(centers, counts, width=widths, bottom=0.0, alpha=0.78, edgecolor="black", linewidth=0.35)
+        ax.set_theta_zero_location("N"); ax.set_theta_direction(-1)
+        ax.set_title("ROSE DIAGRAM OF DEPLOYMENT RADIAL OFFSETS", fontsize=11, fontweight="bold", pad=18)
+        ax.grid(True, linewidth=0.35, alpha=0.55)
+        ax.plot([math.radians(mean_dir), math.radians(mean_dir)], [0, max(counts.max(), 1)], linewidth=2.2, linestyle="--", label=f"Mean {mean_dir:.1f}°")
+        ax.legend(loc="lower left", bbox_to_anchor=(-0.12, -0.10), fontsize=8)
+
+        ax_tbl = fig.add_subplot(gs[0, 1]); ax_tbl.axis("off")
+        stats_rows = [
+            ["Mean direction", f"{mean_dir:.1f}°"],
+            ["Mean vector length", f"{vector_len:.2f}"],
+            ["Circular std. dev.", f"{circ_std:.1f}°"],
+            ["Observations", str(len(clean))],
+        ]
+        stats = ax_tbl.table(cellText=stats_rows, colLabels=["DIRECTIONAL STATISTICS", "Value"], cellLoc="center", colLoc="center", bbox=[0.02, 0.57, 0.96, 0.38])
+        stats.auto_set_font_size(False); stats.set_fontsize(9)
+        for (r, c), cell in stats.get_celld().items():
+            cell.set_linewidth(0.5)
+            if r == 0:
+                cell.set_facecolor("#eaf2f8"); cell.set_text_props(weight="bold")
+
+        sectors = [(0,45),(45,90),(90,135),(135,180),(180,225),(225,270),(270,315),(315,360)]
+        sec_rows = []
+        sec_means = []
+        for lo, hi in sectors:
+            mask = (az_deg >= lo) & (az_deg < hi)
+            m = float(np.nanmean(radial[mask])) if np.any(mask) else float("nan")
+            sec_means.append(m)
+            sec_rows.append([f"{lo}–{hi}", "" if not np.isfinite(m) else f"{m:.2f}"])
+        sec = ax_tbl.table(cellText=sec_rows, colLabels=["Sector (°)", "Avg radial (m)"], cellLoc="center", colLoc="center", bbox=[0.02, 0.02, 0.96, 0.48])
+        sec.auto_set_font_size(False); sec.set_fontsize(9)
+        for (r, c), cell in sec.get_celld().items():
+            cell.set_linewidth(0.5)
+            if r == 0:
+                cell.set_facecolor("#eaf2f8"); cell.set_text_props(weight="bold")
+
+        best_i = int(np.nanargmax(sec_means)) if any(np.isfinite(sec_means)) else 0
+        lo, hi = sectors[best_i]
+        directions = ["NNE", "ENE", "ESE", "SSE", "SSW", "WSW", "WNW", "NNW"]
+        ax_note = fig.add_subplot(gs[1, :]); ax_note.axis("off")
+        ax_note.text(0.03, 0.5, f"Dominant radial-offset sector: {lo}°–{hi}° ({directions[best_i]} direction).", fontsize=13, fontweight="bold", va="center")
+        ax_note.add_patch(Rectangle((0.01, 0.12), 0.98, 0.75, fill=False, linewidth=0.8, transform=ax_note.transAxes, clip_on=False))
+
+        fig.subplots_adjust(left=0.06, right=0.95, top=0.90, bottom=0.08)
+        fig.savefig(charts_dir / "node_position_directional_analysis_page.png", dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
     def _make_polar_offsets_page(self, df, charts_dir):
         specs = [
             ("Deployment vs Preplot", "dep_pp_az", "dep_pp_dr"),
@@ -1470,33 +1987,37 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         return str(int(value))
 
     def _tex(self, value):
+        """
+        Escape text for LaTeX and remove invalid control chars.
+        """
+
         if value is None:
             return ""
 
         s = str(value)
 
-        # Remove control characters
-        s = "".join(ch for ch in s if ord(ch) >= 32 or ch in "\n\r\t")
-
-        # Normalize Windows paths BEFORE escaping
-        s = s.replace("\\", "/")
-
-        replacements = (
-            ("&", r"\&"),
-            ("%", r"\%"),
-            ("$", r"\$"),
-            ("#", r"\#"),
-            ("_", r"\_"),
-            ("{", r"\{"),
-            ("}", r"\}"),
-            ("~", r"\textasciitilde{}"),
-            ("^", r"\textasciicircum{}"),
+        # Remove hidden control chars.
+        s = "".join(
+            ch for ch in s
+            if ord(ch) >= 32 or ch in "\n\r\t"
         )
 
-        for old, new in replacements:
-            s = s.replace(old, new)
+        # Escape each original character once.  Using translate avoids
+        # re-escaping the backslashes inserted for LaTeX commands.
+        replacements = {
+            ord("\\"): r"\textbackslash{}",
+            ord("&"): r"\&",
+            ord("%"): r"\%",
+            ord("$"): r"\$",
+            ord("#"): r"\#",
+            ord("_"): r"\_",
+            ord("{"): r"\{",
+            ord("}"): r"\}",
+            ord("~"): r"\textasciitilde{}",
+            ord("^"): r"\textasciicircum{}",
+        }
 
-        return s
+        return s.translate(replacements)
 
     def _tex_path(self, path):
         return str(Path(path)).replace("\\", "/")

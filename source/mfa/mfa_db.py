@@ -11,7 +11,9 @@ from typing import Iterable
 from django.template.loader import render_to_string
 
 PAGE_RE = re.compile(
-    r"^#Page\s+(?P<page_no>\d+)\s+(?P<title>.*?)(?:\s+First Online Shot\s+(?P<first_shot>\d+)\s+Last Online Shot\s+(?P<last_shot>\d+))?\s*$"
+    r"^#Page\s+(?P<page_no>\d+)\s+(?P<title>.*?)"
+    r"(?:\s+First(?:\s+Online)?\s+Shot\s+(?P<first_shot>\d+)"
+    r"\s+Last(?:\s+Online)?\s+Shot\s+(?P<last_shot>\d+))?\s*$"
 )
 META_COLUMNS = {
     "Preplot Name",
@@ -258,13 +260,10 @@ class MFADB:
         """
         Parse MFA filename.
 
-        Example:
-            134117000.0.mfa
+        Example: 1103713002.000.mfa / sail line 1103713002.
 
-        Returns:
-            line=1341
-            seq=17
-            attempt='0'
+        Returns: line=11037, seq=13, attempt='002'.  The extension-side
+        ``.000`` is a Gator file suffix, not the production attempt.
         """
 
         stem = Path(file_name).stem
@@ -274,13 +273,18 @@ class MFADB:
         attempt = None
 
         try:
-            left, right = stem.split(".")
+            left = stem.split(".", 1)[0]
+            digits = "".join(ch for ch in left if ch.isdigit())
 
-            if len(left) >= 6:
-                line = int(left[:4])
-                seq = int(left[4:6])
-
-            attempt = right
+            if len(digits) >= 10:
+                line = int(digits[:-5])
+                seq = int(digits[-5:-3])
+                attempt = digits[-3:]
+            elif len(digits) >= 6:
+                # Compatibility with older four-digit line naming.
+                line = int(digits[:4])
+                seq = int(digits[4:6])
+                attempt = digits[6:] or None
 
         except Exception:
             pass
@@ -677,6 +681,23 @@ class MFADB:
         self.ensure_tables()
 
         with self.connect() as conn:
+            # Backfill Line / Seq / Attempt for existing imported MFA files.
+            files = conn.execute(
+                "SELECT ID, FileName FROM MFA_Files"
+            ).fetchall()
+            for file_row in files:
+                line, seq, attempt = self.parse_mfa_filename(file_row["FileName"])
+                conn.execute(
+                    """
+                    UPDATE MFA_Files
+                    SET Line = ?,
+                        Seq = ?,
+                        Attempt = ?
+                    WHERE ID = ?
+                    """,
+                    (line, seq, attempt, file_row["ID"]),
+                )
+
             conn.execute("""
                 UPDATE MFA_Files
                 SET SailLine_FK = (
@@ -776,14 +797,53 @@ class MFADB:
                     f.ID,
                     f.FileName,
                     f.LineName,
+                    f.Line,
+                    f.Seq,
+                    f.Attempt,
+                    f.SailLine_FK,
+                    f.Vessel_FK,
+                    f.TotalShots,
+                    f.FirstOnlineShot,
+                    f.LastOnlineShot,
                     f.ImportedAt,
+                    sl.SailLine,
+                    pf.vessel_name AS vessel_name,
                     COUNT(DISTINCT p.ID) AS Pages,
                     COALESCE(SUM(p.RowCount), 0) AS Rows
                 FROM MFA_Files f
                 LEFT JOIN MFA_Pages p ON p.File_FK = f.ID
+                LEFT JOIN SLSolution sl ON sl.ID = f.SailLine_FK
+                LEFT JOIN project_fleet pf ON pf.id = f.Vessel_FK
                 GROUP BY f.ID
-                ORDER BY f.ID DESC
+                ORDER BY
+                    CASE WHEN f.Line IS NULL THEN 1 ELSE 0 END,
+                    f.Line,
+                    f.Seq,
+                    f.Attempt,
+                    f.ID
             """).fetchall()
+
+    def generate_pdf_report(
+            self,
+            file_id,
+            output_path,
+            logo_path=None,
+            report_title="MFA QUALITY CONTROL REPORT",
+            prepared_by=None,
+            project_info=None,
+    ):
+        """Generate the SeisWebLog PDF report for one MFA database record."""
+        from .mfa_pdf_report import generate_mfa_pdf_report
+
+        return generate_mfa_pdf_report(
+            db_path=self.db_path,
+            file_id=file_id,
+            output_path=output_path,
+            logo_path=logo_path,
+            report_title=report_title,
+            prepared_by=prepared_by,
+            project_info=project_info,
+        )
 
     def render_mfa_files_table_body(self, template_file, request=None):
         """

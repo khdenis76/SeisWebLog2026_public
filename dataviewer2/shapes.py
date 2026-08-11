@@ -99,6 +99,78 @@ def _transform_array(array: np.ndarray, transformer) -> np.ndarray:
     return np.column_stack((np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)))
 
 
+def _geometry_arrays_from_geodataframe(frame) -> tuple[str, list[np.ndarray], np.ndarray]:
+    """Convert GeoPandas/Shapely geometries into the existing fast NumPy format."""
+    parts: list[np.ndarray] = []
+    points: list[tuple[float, float]] = []
+    kinds: set[str] = set()
+
+    def visit(geometry) -> None:
+        if geometry is None or geometry.is_empty:
+            return
+        geom_type = geometry.geom_type
+        if geom_type == "Point":
+            points.append((float(geometry.x), float(geometry.y))); kinds.add("point")
+        elif geom_type == "MultiPoint":
+            for child in geometry.geoms: visit(child)
+        elif geom_type in {"LineString", "LinearRing"}:
+            array = np.asarray(geometry.coords, dtype=np.float64)
+            if array.shape[0]: parts.append(np.ascontiguousarray(array[:, :2])); kinds.add("line")
+        elif geom_type == "MultiLineString":
+            for child in geometry.geoms: visit(child)
+        elif geom_type == "Polygon":
+            exterior = np.asarray(geometry.exterior.coords, dtype=np.float64)
+            if exterior.shape[0]: parts.append(np.ascontiguousarray(exterior[:, :2]))
+            for ring in geometry.interiors:
+                array = np.asarray(ring.coords, dtype=np.float64)
+                if array.shape[0]: parts.append(np.ascontiguousarray(array[:, :2]))
+            kinds.add("polygon")
+        elif geom_type == "MultiPolygon":
+            for child in geometry.geoms: visit(child)
+        elif geom_type == "GeometryCollection":
+            for child in geometry.geoms: visit(child)
+
+    for geometry in frame.geometry:
+        visit(geometry)
+    geometry_type = "polygon" if "polygon" in kinds else ("line" if "line" in kinds else "point")
+    point_array = np.asarray(points, dtype=np.float64).reshape((-1, 2)) if points else np.empty((0, 2), dtype=np.float64)
+    return geometry_type, parts, point_array
+
+
+def load_vector_layer(definition: ProjectShapeDefinition, project_epsg: str) -> ShapeLayerData:
+    path = Path(definition.full_name)
+    if definition.source_type == "gpkg":
+        if not path.exists():
+            raise ShapeLoadError(f"GeoPackage not found: {path}")
+        try:
+            import pyogrio
+        except ImportError as exc:
+            raise ShapeLoadError("GeoPackage support requires pyogrio. Run: python -m pip install pyogrio pyarrow") from exc
+        try:
+            frame = pyogrio.read_dataframe(path, layer=definition.source_layer, use_arrow=True)
+        except Exception as exc:
+            raise ShapeLoadError(f"Cannot read GeoPackage layer '{definition.source_layer}': {exc}") from exc
+        if frame.crs is None and definition.source_epsg:
+            frame = frame.set_crs(definition.source_epsg, allow_override=True)
+        if frame.crs is None:
+            raise ShapeLoadError(f"CRS is unknown for GeoPackage layer '{definition.source_layer}'")
+        if not project_epsg:
+            raise ShapeLoadError("Project EPSG is missing from project_main.epsg")
+        source_text = frame.crs.to_string()
+        try:
+            if str(frame.crs) != str(project_epsg):
+                frame = frame.to_crs(project_epsg)
+                status = "Reprojected to project CRS"
+            else:
+                status = "Already in project CRS"
+        except Exception as exc:
+            raise ShapeLoadError(f"Failed to reproject '{definition.name}': {exc}") from exc
+        geometry_type, parts, points = _geometry_arrays_from_geodataframe(frame)
+        return ShapeLayerData(definition, geometry_type, parts, points,
+                              source_crs=source_text, target_crs=str(project_epsg), crs_status=status)
+    return load_shapefile(definition, project_epsg)
+
+
 def load_shapefile(definition: ProjectShapeDefinition, project_epsg: str) -> ShapeLayerData:
     path = Path(definition.full_name)
     if not path.exists():
