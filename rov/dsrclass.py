@@ -21,18 +21,6 @@ class ProjectDbError(Exception):
     pass
 
 class DSRDB:
-    BBOX_MRU_COLUMNS = {
-        "Vessel_MRU1_HDG": "REAL",
-        "Vessel_MRU1_PITCH": "REAL",
-        "Vessel_MRU1_ROLL": "REAL",
-        "Vessel_MRU2_HDG": "REAL",
-        "Vessel_MRU2_PITCH": "REAL",
-        "Vessel_MRU2_ROLL": "REAL",
-        "Vessel_MRU3_HDG": "REAL",
-        "Vessel_MRU3_PITCH": "REAL",
-        "Vessel_MRU3_ROLL": "REAL",
-    }
-
     def __init__(self, db_path: str):
         self.db_path = Path(db_path)
         self.pdb=ProjectDB(self.db_path)
@@ -89,31 +77,41 @@ class DSRDB:
 
     @staticmethod
     def _parse_ts(ts: str) -> Optional[datetime]:
-        ts = str(ts or "").strip()
+        ts = (ts or "").strip()
         if not ts:
             return None
+        # DSR exports have used both ISO and day-first timestamps.  Normalize
+        # all accepted forms before storing them so SQLite DATE()/julianday()
+        # continue to work reliably.
+        try:
+            return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            pass
 
-        # Survey Manager files may contain ISO timestamps or US-style dates.
-        # Fractional seconds are supported in both formats.
-        formats = (
-            "%Y-%m-%d %H:%M:%S.%f",
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d",
-            "%m/%d/%Y %H:%M:%S.%f",
-            "%m/%d/%Y %H:%M:%S",
-            "%m/%d/%Y",
-        )
-
-        for fmt in formats:
+        for fmt in (
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M",
+            "%d-%m-%Y %H:%M:%S",
+            "%d-%m-%Y %H:%M",
+        ):
             try:
                 return _dt.datetime.strptime(ts, fmt)
             except ValueError:
                 continue
+        return None
 
-        try:
-            return _dt.datetime.fromisoformat(ts.replace("T", " "))
-        except ValueError:
-            return None
+    @staticmethod
+    def _dt_parts(dt: Optional[datetime]):
+        if not dt:
+            return (None, None, None, None, None)
+        iso = dt.isocalendar()
+        return (
+            dt.year,
+            dt.month,
+            int(iso.week),
+            dt.strftime("%a"),
+            dt.timetuple().tm_yday,
+        )
     @staticmethod
     def _node_to_int_12(s: str) -> int:
         """
@@ -214,8 +212,8 @@ class DSRDB:
         insert_cols = [
             "Solution_FK", "RLPreplot_FK", "LinePointIdx", "LinePoint", "RecIdx", "TIER",
             "NODE_HEX_ID",
-            "Date", "Year", "Month", "Week", "Day", "JDay",
-            "Date1", "Year1", "Month1", "Week1", "Day1", "JDay1",
+            "Year", "Month", "Week", "Day", "JDay",
+            "Year1", "Month1", "Week1", "Day1", "JDay1",
             *file_cols,
         ]
 
@@ -296,13 +294,11 @@ class DSRDB:
                     "RecIdx": rec_idx,
                     "TIER": tier,
                     "NODE_HEX_ID": node_id,
-                    "Date": dt.strftime("%Y-%m-%d") if dt else None,
                     "Year": y,
                     "Month": m,
                     "Week": w,
                     "Day": d,
                     "JDay": j,
-                    "Date1": dt1.strftime("%Y-%m-%d") if dt1 else None,
                     "Year1": y1,
                     "Month1": m1,
                     "Week1": w1,
@@ -322,8 +318,10 @@ class DSRDB:
                     elif col == "ROV":
                         values[col] = self._to_text(rov_raw)
                     elif col == "TimeStamp":
-                        values[col] = self._to_text(ts_raw)
-                    elif col in {"Quality", "ROV1", "TimeStamp1", "Quality1", "Comments"}:
+                        values[col] = dt.isoformat(sep=" ") if dt else self._to_text(ts_raw)
+                    elif col == "TimeStamp1":
+                        values[col] = dt1.isoformat(sep=" ") if dt1 else self._to_text(raw)
+                    elif col in {"Quality", "ROV1", "Quality1", "Comments"}:
                         values[col] = self._to_text(raw)
                     else:
                         values[col] = self._to_float(raw)
@@ -383,7 +381,6 @@ class DSRDB:
             conn.commit()
 
     def get_bbox_db_fieldnames(self):
-        self.ensure_bbox_mru_schema()
         exclude = {"ID", "File_FK"}
 
         with self._connect() as conn:
@@ -434,9 +431,6 @@ class DSRDB:
             rov2_name: str = "",
             gnss1_name: str = "",
             gnss2_name: str = "",
-            mru1_name: str = "",
-            mru2_name: str = "",
-            mru3_name: str = "",
             depth1_name: str = "",
             depth2_name: str = "",
 
@@ -467,20 +461,14 @@ class DSRDB:
             # 1) Upsert config header
             conn.execute(
                 """
-                INSERT INTO BBox_Configs_List (Name, Vessel_name, IsDefault, rov1_name, rov2_name, gnss1_name, gnss2_name, mru1_name, mru2_name, mru3_name, Depth1_name, Depth2_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO BBox_Configs_List (Name, Vessel_name,IsDefault, rov1_name, rov2_name, gnss1_name, gnss2_name,depth1_name, depth2_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(Name) DO UPDATE SET
-                    Vessel_name = excluded.Vessel_name,
                     IsDefault = excluded.IsDefault,
                     rov1_name = excluded.rov1_name,
                     rov2_name = excluded.rov2_name,
                     gnss1_name = excluded.gnss1_name,
-                    gnss2_name = excluded.gnss2_name,
-                    mru1_name = excluded.mru1_name,
-                    mru2_name = excluded.mru2_name,
-                    mru3_name = excluded.mru3_name,
-                    Depth1_name = excluded.Depth1_name,
-                    Depth2_name = excluded.Depth2_name
+                    gnss2_name = excluded.gnss2_name
                 """,
                 (
                     name,vessel_name,
@@ -489,9 +477,6 @@ class DSRDB:
                     rov2_name,
                     gnss1_name,
                     gnss2_name,
-                    mru1_name,
-                    mru2_name,
-                    mru3_name,
                     depth1_name,
                     depth2_name
                 ),
@@ -527,24 +512,51 @@ class DSRDB:
             return cfg_id
     def ensure_recover_daily_view_schema(self):
         sql="""
-                  DROP VIEW IF EXISTS Daily_Recovery;
-                        CREATE VIEW IF NOT EXISTS Daily_Recovery AS
-                        SELECT
-                            DATE(TimeStamp1)                AS ProdDate,
-                            TRIM(Line)                      AS Line,
-                            TRIM(ROV1)                      AS ROV,
-                            MIN(CAST(NULLIF(Station,'') AS REAL)) AS FRP,
-                            MAX(CAST(NULLIF(Station,'') AS REAL)) AS LRP,
-                            COUNT(*)                        AS TotalNodes
-                        FROM DSR
-                        WHERE TimeStamp1 IS NOT NULL
-                          AND TRIM(TimeStamp1) <> ''
-                          AND ROV1 IS NOT NULL
-                          AND TRIM(ROV1) <> ''
-                        GROUP BY
-                            DATE(TimeStamp1),
-                            TRIM(Line),
-                            TRIM(ROV1);
+            DROP VIEW IF EXISTS Daily_Deployment;
+            CREATE VIEW Daily_Deployment AS
+            SELECT
+                COALESCE(
+                    DATE(NULLIF(TRIM(Day), '')),
+                    DATE(TimeStamp),
+                    CASE
+                        WHEN TRIM(TimeStamp) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]*'
+                        THEN DATE(SUBSTR(TRIM(TimeStamp), 7, 4) || '-' ||
+                                  SUBSTR(TRIM(TimeStamp), 4, 2) || '-' ||
+                                  SUBSTR(TRIM(TimeStamp), 1, 2))
+                    END
+                ) AS ProdDate,
+                TRIM(Line) AS Line,
+                TRIM(ROV) AS ROV,
+                MIN(CAST(NULLIF(Station,'') AS REAL)) AS FRP,
+                MAX(CAST(NULLIF(Station,'') AS REAL)) AS LRP,
+                COUNT(*) AS TotalNodes
+            FROM DSR
+            WHERE TimeStamp IS NOT NULL AND TRIM(TimeStamp) <> ''
+              AND ROV IS NOT NULL AND TRIM(ROV) <> ''
+            GROUP BY ProdDate, TRIM(Line), TRIM(ROV);
+
+            DROP VIEW IF EXISTS Daily_Recovery;
+            CREATE VIEW Daily_Recovery AS
+            SELECT
+                COALESCE(
+                    DATE(NULLIF(TRIM(Day1), '')),
+                    DATE(TimeStamp1),
+                    CASE
+                        WHEN TRIM(TimeStamp1) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]*'
+                        THEN DATE(SUBSTR(TRIM(TimeStamp1), 7, 4) || '-' ||
+                                  SUBSTR(TRIM(TimeStamp1), 4, 2) || '-' ||
+                                  SUBSTR(TRIM(TimeStamp1), 1, 2))
+                    END
+                ) AS ProdDate,
+                TRIM(Line) AS Line,
+                TRIM(ROV1) AS ROV,
+                MIN(CAST(NULLIF(Station,'') AS REAL)) AS FRP,
+                MAX(CAST(NULLIF(Station,'') AS REAL)) AS LRP,
+                COUNT(*) AS TotalNodes
+            FROM DSR
+            WHERE TimeStamp1 IS NOT NULL AND TRIM(TimeStamp1) <> ''
+              AND ROV1 IS NOT NULL AND TRIM(ROV1) <> ''
+            GROUP BY ProdDate, TRIM(Line), TRIM(ROV1);
         """
         with self._connect() as conn:
             conn.executescript(sql)
@@ -564,9 +576,6 @@ class DSRDB:
             rov2_name TEXT,
             gnss1_name TEXT,
             gnss2_name TEXT,
-            mru1_name TEXT,
-            mru2_name TEXT,
-            mru3_name TEXT,
             Vessel_name TEXT,
             Depth1_name TEXT,
             Depth2_name TEXT,
@@ -615,26 +624,10 @@ class DSRDB:
 
             if "Vessel_name" not in cols:
                 conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN Vessel_name TEXT')
-            if "mru1_name" not in cols:
-                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN mru1_name TEXT')
-            if "mru2_name" not in cols:
-                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN mru2_name TEXT')
-            if "mru3_name" not in cols:
-                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN mru3_name TEXT')
             if "Depth1_name" not in cols:
                 conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN Depth1_name TEXT')
             if "Depth2_name" not in cols:
                 conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN Depth2_name TEXT')
-
-            for field_name in self.BBOX_MRU_COLUMNS:
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO BBox_Config
-                        (FieldName, FileColumn, inUse, CONFIG_FK)
-                    SELECT ?, '', 0, ID FROM BBox_Configs_List
-                    """,
-                    (field_name,),
-                )
 
             conn.commit()
 
@@ -656,9 +649,6 @@ class DSRDB:
                     rov2_name,
                     gnss1_name,
                     gnss2_name,
-                    mru1_name,
-                    mru2_name,
-                    mru3_name,
                     Depth1_name,
                     Depth2_name 
                 FROM BBox_Configs_List
@@ -676,9 +666,6 @@ class DSRDB:
                 "rov2_name": r["rov2_name"],
                 "gnss1_name": r["gnss1_name"],
                 "gnss2_name": r["gnss2_name"],
-                "mru1_name": r["mru1_name"],
-                "mru2_name": r["mru2_name"],
-                "mru3_name": r["mru3_name"],
                 "Depth1_name": r["Depth1_name"],
                 "Depth2_name": r["Depth2_name"],
             }
@@ -736,15 +723,6 @@ class DSRDB:
             VesselNorthing REAL,
             VesselElevation REAL,
             VesselHDG REAL,
-            Vessel_MRU1_HDG REAL,
-            Vessel_MRU1_PITCH REAL,
-            Vessel_MRU1_ROLL REAL,
-            Vessel_MRU2_HDG REAL,
-            Vessel_MRU2_PITCH REAL,
-            Vessel_MRU2_ROLL REAL,
-            Vessel_MRU3_HDG REAL,
-            Vessel_MRU3_PITCH REAL,
-            Vessel_MRU3_ROLL REAL,
             VesselSOG REAL,
             VesselCOG REAL,
 
@@ -821,15 +799,6 @@ class DSRDB:
         with self._connect() as conn:
             conn.execute("PRAGMA foreign_keys = ON;")
             conn.executescript(ddl)
-            existing = {row["name"] for row in conn.execute("PRAGMA table_info(BlackBox)").fetchall()}
-            for column_name, sql_type in self.BBOX_MRU_COLUMNS.items():
-                if column_name not in existing:
-                    conn.execute(f'ALTER TABLE BlackBox ADD COLUMN "{column_name}" {sql_type}')
-            conn.commit()
-
-    def ensure_bbox_mru_schema(self):
-        self.ensure_blackbox_schema()
-        self.ensure_bbox_config_schema()
 
     def get_bbox_config_mapping(self, config_id: int) -> dict[str, str]:
         """
@@ -2279,15 +2248,201 @@ WHERE Area IS NOT NULL
             station_from=None,
             station_to=None,
     ):
+        import datetime as _dt
         import sqlite3
 
-        status = (status or "deployed").lower()
+        status = (status or "deployed").strip().lower()
+
+        if status == "recovered":
+            rov_col = "ROV1"
+            ts_col = "TimeStamp1"
+        else:
+            rov_col = "ROV"
+            ts_col = "TimeStamp"
+
+        ts_value = f"TRIM(COALESCE({ts_col}, ''))"
+
+        # Positions used for M/D/YYYY and MM/DD/YYYY timestamps.
+        first_slash = f"INSTR({ts_value}, '/')"
+        after_first_slash = (
+            f"SUBSTR({ts_value}, ({first_slash}) + 1)"
+        )
+        second_slash = (
+            f"INSTR({after_first_slash}, '/')"
+        )
+        space_position = f"INSTR({ts_value}, ' ')"
+
+        # Normalize stored timestamps into YYYY-MM-DD HH:MM:SS.
+        timestamp_sql = f"""
+            CASE
+                WHEN {ts_value} = ''
+                    THEN NULL
+
+                -- ISO:
+                -- YYYY-MM-DD HH:MM:SS
+                -- YYYY-MM-DDTHH:MM:SS
+                WHEN {ts_value} GLOB
+                     '[0-9][0-9][0-9][0-9]-*'
+                    THEN DATETIME(
+                        REPLACE({ts_value}, 'T', ' ')
+                    )
+
+                -- US format with one- or two-digit month/day:
+                -- M/D/YYYY
+                -- MM/DD/YYYY
+                -- M/D/YYYY HH:MM:SS.s
+                WHEN ({first_slash}) > 0
+                     AND ({second_slash}) > 0
+                    THEN DATETIME(
+                        PRINTF(
+                            '%04d-%02d-%02d',
+                            CAST(
+                                SUBSTR(
+                                    {after_first_slash},
+                                    ({second_slash}) + 1,
+                                    4
+                                ) AS INTEGER
+                            ),
+                            CAST(
+                                SUBSTR(
+                                    {ts_value},
+                                    1,
+                                    ({first_slash}) - 1
+                                ) AS INTEGER
+                            ),
+                            CAST(
+                                SUBSTR(
+                                    {after_first_slash},
+                                    1,
+                                    ({second_slash}) - 1
+                                ) AS INTEGER
+                            )
+                        ) ||
+                        CASE
+                            WHEN ({space_position}) > 0
+                                THEN ' ' || SUBSTR(
+                                    {ts_value},
+                                    ({space_position}) + 1
+                                )
+                            ELSE ' 00:00:00'
+                        END
+                    )
+
+                ELSE NULL
+            END
+        """
+
+        where = [
+            f"TRIM(COALESCE({rov_col}, '')) <> ''",
+            f"({timestamp_sql}) IS NOT NULL",
+        ]
+        params = []
+
+        def _normalize_datetime(value, end_of_day=False):
+            if value is None:
+                return None
+
+            # Also support Python date/datetime objects.
+            if isinstance(value, _dt.datetime):
+                parsed = value
+                contains_time = True
+
+            elif isinstance(value, _dt.date):
+                parsed = _dt.datetime.combine(
+                    value,
+                    _dt.time.min,
+                )
+                contains_time = False
+
+            else:
+                value = str(value).strip()
+
+                if not value:
+                    return None
+
+                value = value.replace("T", " ")
+                contains_time = ":" in value
+
+                formats = (
+                    "%Y-%m-%d %H:%M:%S.%f",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%Y-%m-%d",
+                    "%m/%d/%Y %H:%M:%S.%f",
+                    "%m/%d/%Y %H:%M:%S",
+                    "%m/%d/%Y %H:%M",
+                    "%m/%d/%Y",
+                )
+
+                parsed = None
+
+                for date_format in formats:
+                    try:
+                        parsed = _dt.datetime.strptime(
+                            value,
+                            date_format,
+                        )
+                        break
+                    except ValueError:
+                        continue
+
+                if parsed is None:
+                    raise ValueError(
+                        f"Unsupported date/time format: {value!r}"
+                    )
+
+            if end_of_day and not contains_time:
+                parsed = parsed.replace(
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=0,
+                )
+
+            return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+        mode = (mode or "day").strip().lower()
+
+        if mode == "day" and day:
+            normalized_day = _normalize_datetime(day)
+
+            where.append(
+                f"DATE({timestamp_sql}) = DATE(?)"
+            )
+            params.append(normalized_day)
+
+        elif mode == "interval":
+            normalized_from = _normalize_datetime(dt_from)
+            normalized_to = _normalize_datetime(
+                dt_to,
+                end_of_day=True,
+            )
+
+            if normalized_from:
+                where.append(
+                    f"{timestamp_sql} >= DATETIME(?)"
+                )
+                params.append(normalized_from)
+
+            if normalized_to:
+                where.append(
+                    f"{timestamp_sql} <= DATETIME(?)"
+                )
+                params.append(normalized_to)
 
         def _clean_int(value):
-            value = str(value or "").strip()
+            if value is None:
+                return None
+
+            value = str(value).strip()
+
             if not value:
                 return None
-            return int(value)
+
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return None
 
         lf = _clean_int(line_from)
         lt = _clean_int(line_to)
@@ -2296,133 +2451,49 @@ WHERE Area IS NOT NULL
 
         if lf is not None and lt is None:
             lt = lf
-        if lt is not None and lf is None:
+        elif lt is not None and lf is None:
             lf = lt
+
         if sf is not None and st is None:
             st = sf
-        if st is not None and sf is None:
+        elif st is not None and sf is None:
             sf = st
-        if lf is not None and lt is not None and lf > lt:
-            lf, lt = lt, lf
-        if sf is not None and st is not None and sf > st:
-            sf, st = st, sf
-
-        def _range_sql():
-            clauses = []
-            values = []
-            if lf is not None and lt is not None:
-                clauses.append("CAST(Line AS INTEGER) BETWEEN ? AND ?")
-                values.extend([lf, lt])
-            if sf is not None and st is not None:
-                clauses.append("CAST(Station AS INTEGER) BETWEEN ? AND ?")
-                values.extend([sf, st])
-            return clauses, values
-
-        if mode == "day" and day:
-            # A day must show every vehicle used on that calendar date:
-            # deployment ROV/TimeStamp UNION recovery ROV1/TimeStamp1.
-            # The timestamp fallback also supports rows imported before the
-            # normalized Day/Day1 columns were populated.
-            selected_day = str(day).strip()[:10]
-            deploy_range, deploy_range_params = _range_sql()
-            recover_range, recover_range_params = _range_sql()
-            deploy_where = [
-                "TRIM(COALESCE(ROV, '')) <> ''",
-                "(Day = ? OR SUBSTR(REPLACE(TimeStamp, 'T', ' '), 1, 10) = ?)",
-                *deploy_range,
-            ]
-            recover_where = [
-                "TRIM(COALESCE(ROV1, '')) <> ''",
-                "(Day1 = ? OR SUBSTR(REPLACE(TimeStamp1, 'T', ' '), 1, 10) = ?)",
-                *recover_range,
-            ]
-            sql = f"""
-                SELECT DISTINCT rov
-                FROM (
-                    SELECT TRIM(ROV) AS rov
-                    FROM DSR
-                    WHERE {" AND ".join(deploy_where)}
-                    UNION
-                    SELECT TRIM(ROV1) AS rov
-                    FROM DSR
-                    WHERE {" AND ".join(recover_where)}
-                )
-                WHERE rov <> ''
-                ORDER BY rov COLLATE NOCASE
-            """
-            params = [
-                selected_day, selected_day, *deploy_range_params,
-                selected_day, selected_day, *recover_range_params,
-            ]
-            with self._connect() as conn:
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute(sql, params).fetchall()
-            return [r["rov"] for r in rows if r["rov"]]
-
-        if status == "recovered":
-            rov_col = "ROV1"
-            ts_col = "TimeStamp1"
-            day_col = "Day1"
-        else:
-            rov_col = "ROV"
-            ts_col = "TimeStamp"
-            day_col = "Day"
-
-        where = [
-            f"TRIM(COALESCE({rov_col}, '')) <> ''"
-        ]
-
-        params = []
-
-        def _norm_dt(s):
-            s = (s or "").replace("T", " ").strip()
-            if len(s) == 16:
-                s += ":00"
-            return s
-
-        if mode == "day" and day:
-            # Day/Day1 are normalized to YYYY-MM-DD when DSR data is loaded.
-            # Use the same columns as export_dsr_to_sm().  SQLite DATE() on the
-            # original survey timestamp can return NULL for non-ISO formats,
-            # which made a valid day appear to contain no ROVs.
-            where.append(f"{day_col} = ?")
-            params.append(str(day).strip()[:10])
-
-        elif mode == "interval" and dt_from and dt_to:
-            where.append(f"{ts_col} >= ?")
-            where.append(f"{ts_col} <= ?")
-            params.extend([
-                _norm_dt(dt_from),
-                _norm_dt(dt_to),
-            ])
 
         if lf is not None and lt is not None:
             if lf > lt:
                 lf, lt = lt, lf
 
-            where.append("CAST(Line AS INTEGER) BETWEEN ? AND ?")
+            where.append(
+                "CAST(Line AS INTEGER) BETWEEN ? AND ?"
+            )
             params.extend([lf, lt])
 
         if sf is not None and st is not None:
             if sf > st:
                 sf, st = st, sf
 
-            where.append("CAST(Station AS INTEGER) BETWEEN ? AND ?")
+            where.append(
+                "CAST(Station AS INTEGER) BETWEEN ? AND ?"
+            )
             params.extend([sf, st])
 
         sql = f"""
-            SELECT DISTINCT TRIM({rov_col}) AS rov
+            SELECT DISTINCT
+                TRIM({rov_col}) AS rov
             FROM DSR
             WHERE {" AND ".join(where)}
-            ORDER BY TRIM({rov_col})
+            ORDER BY rov COLLATE NOCASE
         """
 
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(sql, params).fetchall()
 
-        return [r["rov"] for r in rows if r["rov"]]
-
+        return [
+            row["rov"]
+            for row in rows
+            if row["rov"]
+        ]
     def get_daily_recovery(
             self,
             date: str | None = None,
@@ -5034,6 +5105,8 @@ WHERE Area IS NOT NULL
             rows = conn.execute(query).fetchall()
 
         return [row[0] for row in rows]
+
+
 
 
 

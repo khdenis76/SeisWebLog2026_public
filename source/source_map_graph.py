@@ -960,7 +960,7 @@ class SourceMapGraphics:
             self,
             is_show: bool = False,
             json_return: bool = False,
-            title: str = "Source — Vessel → Purpose → Shot totals",
+            title: str = "Source — Preplot Progress and Vessel Production",
             drop_zeros: bool = True,
             theme: str = "light",  # "light" or "dark"
             legend_bottom: bool = True,
@@ -1008,29 +1008,21 @@ class SourceMapGraphics:
             }
         try:
             sql = """
-            SELECT vessel_name, purpose, 'ProductionTotal' AS metric, COALESCE(ProductionTotal,0) AS value
-            FROM V_SLSolution_VesselPurposeSummary
-            UNION ALL
-            SELECT vessel_name, purpose, 'NonProductionTotal', COALESCE(NonProductionTotal,0)
-            FROM V_SLSolution_VesselPurposeSummary
-            UNION ALL
-            SELECT vessel_name, purpose, 'KillTotal', COALESCE(KillTotal,0)
+            SELECT
+                COALESCE(NULLIF(TRIM(vessel_name), ''), 'Unknown Vessel') AS vessel_name,
+                COALESCE(NULLIF(TRIM(purpose), ''), 'Other') AS purpose,
+                COALESCE(ProductionTotal, 0) AS production,
+                COALESCE(NonProductionTotal, 0) AS non_production,
+                COALESCE(KillTotal, 0) AS kill
             FROM V_SLSolution_VesselPurposeSummary
             """
 
             with self.get_conn() as conn:
                 df = pd.read_sql(sql, conn)
-            # -----------------------------
-            # Clean NULL values (IMPORTANT)
-            # -----------------------------
-            df["vessel_name"] = df["vessel_name"].fillna("Unknown Vessel").astype(str).str.strip()
-            df["purpose"] = df["purpose"].fillna("Other").astype(str).str.strip()
-            df["metric"] = df["metric"].fillna("Other").astype(str).str.strip()
+                preplot_total = conn.execute(
+                    "SELECT COUNT(*) FROM SPPreplot"
+                ).fetchone()[0]
 
-            # also clean empty strings
-            df.loc[df["vessel_name"] == "", "vessel_name"] = "Unknown Vessel"
-            df.loc[df["purpose"] == "", "purpose"] = "Other"
-            df.loc[df["metric"] == "", "metric"] = "Other"
             if df is None or df.empty:
                 return self._plotly_error_html(
                     title="No data",
@@ -1041,7 +1033,29 @@ class SourceMapGraphics:
                     json_return=json_return,
                 )
 
-            df["value"] = pd.to_numeric(df["value"], errors="coerce").fillna(0)
+            df["vessel_name"] = df["vessel_name"].fillna("Unknown Vessel").astype(str).str.strip()
+            df.loc[df["vessel_name"] == "", "vessel_name"] = "Unknown Vessel"
+            df["production"] = pd.to_numeric(df["production"], errors="coerce").fillna(0)
+            df["non_production"] = pd.to_numeric(df["non_production"], errors="coerce").fillna(0)
+            df["kill"] = pd.to_numeric(df["kill"], errors="coerce").fillna(0)
+
+            # Only Production and Production-Infill purposes count toward
+            # SPPreplot completion. ProductionTotal recorded against Test (or
+            # any other purpose) is displayed, but does not increase progress.
+            qualifying_purposes = {"production", "production-infill"}
+            purpose_key = df["purpose"].str.casefold()
+            df["qualifying_production"] = df["production"].where(
+                purpose_key.isin(qualifying_purposes), 0
+            )
+            df["test_other"] = df["production"].where(
+                ~purpose_key.isin(qualifying_purposes), 0
+            )
+            df["value"] = (
+                df["qualifying_production"]
+                + df["test_other"]
+                + df["non_production"]
+                + df["kill"]
+            )
 
             if drop_zeros:
                 df = df[df["value"] > 0].copy()
@@ -1056,13 +1070,6 @@ class SourceMapGraphics:
                     json_return=json_return,
                 )
 
-            # Outer ring labels
-            df["metric_label"] = df["metric"].map({
-                "ProductionTotal": "Production",
-                "NonProductionTotal": "Non-Production",
-                "KillTotal": "Kill",
-            }).fillna(df["metric"])
-
             # -----------------------------
             # Deterministic colors (NO hardcoded vessel names)
             # -----------------------------
@@ -1072,14 +1079,11 @@ class SourceMapGraphics:
                 "#2E86C1", "#28B463", "#AF7AC5", "#F5B041", "#EC7063",
                 "#45B39D", "#5D6D7E", "#DC7633", "#922B21", "#1ABC9C",
             ]
-            purpose_palette = [
-                "#16a085", "#27ae60", "#2980b9", "#8e44ad", "#2c3e50",
-                "#f39c12", "#d35400", "#c0392b", "#7f8c8d", "#34495e",
-            ]
             metric_colors = {
                 "Production": "#2ecc71",
                 "Non-Production": "#f39c12",
                 "Kill": "#e74c3c",
+                "Test / Other": "#9b59b6",
             }
 
             def _pick_from_palette(key, palette):
@@ -1089,101 +1093,133 @@ class SourceMapGraphics:
                     h = (h * 31 + ord(ch)) & 0xFFFFFFFF
                 return palette[h % len(palette)]
 
-            # Purpose colors: stable + fallback
-            purpose_colors = {
-                "Production": "#1abc9c",
-                "Non-Production": "#f39c12",
-                "Non-Production-Infill": "#f1c40f",
-                "Production-Infill": "#3498db",
-                "Test": "#9b59b6",
-                "Other": "#95a5a6",
-            }
+            grp_vessel = df.groupby(["vessel_name"], as_index=False, dropna=False)[
+                [
+                    "qualifying_production", "test_other",
+                    "non_production", "kill", "value",
+                ]
+            ].sum()
 
-            # -----------------------------
-            # Build explicit node arrays (so each ring has its own color set)
-            # -----------------------------
-            grp_purpose = df.groupby(["vessel_name", "purpose"], as_index=False, dropna=False)["value"].sum()
-            grp_vessel = df.groupby(["vessel_name"], as_index=False, dropna=False)["value"].sum()
+            produced_total = float(grp_vessel["qualifying_production"].sum())
+            preplot_total = float(preplot_total or 0)
+            preplot_remaining = max(preplot_total - produced_total, 0.0)
+            overrun = max(produced_total - preplot_total, 0.0)
+            completion_pct = (
+                produced_total / preplot_total * 100.0
+                if preplot_total > 0 else 0.0
+            )
 
-            labels, parents, values, ids, colors = [], [], [], [], []
-
-            ROOT_ID = "root"
-            labels.append("All Vessels")
-            parents.append("")
-            values.append(float(grp_vessel["value"].sum()))
-            ids.append(ROOT_ID)
-            colors.append("#ffffff")
-
-            # Ring 1: vessels (each vessel different)
+            # Ring 2 uses all acquired operational points by vessel. It is
+            # intentionally independent from the inner SPPreplot progress ring.
             vessel_color_map = {}
             for _, r in grp_vessel.iterrows():
                 v = r["vessel_name"]
                 vessel_color_map[v] = _pick_from_palette(v, vessel_palette)
 
-                v_id = f"v|{v}"
-                labels.append(str(v))
-                parents.append(ROOT_ID)
-                values.append(float(r["value"]))
-                ids.append(v_id)
-                colors.append(vessel_color_map[v])
-
-            # Ring 2: purposes (each purpose different)
-            purpose_color_map = {}
-            for _, r in grp_purpose.iterrows():
-                v = r["vessel_name"]
-                p = r["purpose"]
-
-                # fixed map if known, otherwise deterministic fallback (still from DB value)
-                purpose_color_map[p] = purpose_colors.get(p, _pick_from_palette(p, purpose_palette))
-
-                v_id = f"v|{v}"
-                p_id = f"p|{v}|{p}"
-                labels.append(str(p))
-                parents.append(v_id)
-                values.append(float(r["value"]))
-                ids.append(p_id)
-                colors.append(purpose_color_map[p])
-
-            # Ring 3: metric categories (each category different)
-            for _, r in df.iterrows():
-                v = r["vessel_name"]
-                p = r["purpose"]
-                m = r["metric_label"]
-                val = float(r["value"])
-
-                p_id = f"p|{v}|{p}"
-                m_id = f"m|{v}|{p}|{m}"
-
-                labels.append(str(m))
-                parents.append(p_id)
-                values.append(val)
-                ids.append(m_id)
-                colors.append(metric_colors.get(m, "#bdc3c7"))
-
             fig = go.Figure()
 
-            fig.add_trace(
-                go.Sunburst(
-                    ids=ids,
-                    labels=labels,
-                    parents=parents,
-                    values=values,
-                    branchvalues="total",
-                    marker=dict(colors=colors, line=dict(color=line_color, width=1)),
-                    hovertemplate="<b>%{label}</b><br>Value: %{value}<br>%{percentParent} of parent<extra></extra>",
-                    # ✅ NO showlegend here (Sunburst doesn't support it)
-                )
-            )
+            progress_labels = ["Production Done", "Preplot Remaining"]
+            progress_values = [min(produced_total, preplot_total), preplot_remaining]
+            progress_colors = ["#20b894", "#d9dee3"]
+            if overrun > 0:
+                progress_labels = ["Preplot Completed", "Production Overrun"]
+                progress_values = [preplot_total, overrun]
+                progress_colors = ["#20b894", "#148f77"]
+
+            fig.add_trace(go.Pie(
+                labels=progress_labels,
+                values=progress_values,
+                name="Preplot Progress",
+                domain=dict(x=[0.30, 0.70], y=[0.30, 0.70]),
+                hole=0.44,
+                sort=False,
+                direction="clockwise",
+                marker=dict(colors=progress_colors,
+                            line=dict(color=line_color, width=1)),
+                textinfo="label+percent",
+                hovertemplate=(
+                    "<b>%{label}</b><br>Points: %{value:,.0f}"
+                    "<br>%{percent}<extra>Preplot Progress</extra>"
+                ),
+                showlegend=False,
+            ))
+
+            fig.add_trace(go.Pie(
+                labels=grp_vessel["vessel_name"].tolist(),
+                values=grp_vessel["value"].astype(float).tolist(),
+                name="Vessels",
+                domain=dict(x=[0.14, 0.86], y=[0.14, 0.86]),
+                hole=0.58,
+                sort=False,
+                direction="clockwise",
+                marker=dict(
+                    colors=[vessel_color_map[v] for v in grp_vessel["vessel_name"]],
+                    line=dict(color=line_color, width=1),
+                ),
+                textinfo="label+percent",
+                hovertemplate=(
+                    "<b>%{label}</b><br>Acquired points: %{value:,.0f}"
+                    "<br>%{percent} of all acquired<extra>Vessel</extra>"
+                ),
+                showlegend=False,
+            ))
+
+            outer_labels = []
+            outer_values = []
+            outer_colors = []
+            outer_customdata = []
+            for _, r in grp_vessel.iterrows():
+                v = r["vessel_name"]
+                for m, column in (
+                    ("Production", "qualifying_production"),
+                    ("Non-Production", "non_production"),
+                    ("Kill", "kill"),
+                    ("Test / Other", "test_other"),
+                ):
+                    val = float(r[column])
+                    if drop_zeros and val <= 0:
+                        continue
+                    outer_labels.append(m)
+                    outer_values.append(val)
+                    outer_colors.append(metric_colors[m])
+                    outer_customdata.append(v)
+
+            fig.add_trace(go.Pie(
+                labels=outer_labels,
+                values=outer_values,
+                customdata=outer_customdata,
+                name="Point Types",
+                domain=dict(x=[0.0, 1.0], y=[0.0, 1.0]),
+                hole=0.70,
+                sort=False,
+                direction="clockwise",
+                marker=dict(colors=outer_colors,
+                            line=dict(color=line_color, width=1)),
+                textinfo="label",
+                hovertemplate=(
+                    "<b>%{customdata}</b><br>%{label}: %{value:,.0f}"
+                    "<br>%{percent} of all acquired<extra></extra>"
+                ),
+                showlegend=False,
+            ))
             fig.update_layout(
                 title=title,
                 margin=dict(t=55, l=10, r=10, b=10),
-                showlegend=False,
+                showlegend=legend_bottom,
                 paper_bgcolor=bg_color,
                 plot_bgcolor=bg_color,
                 font=dict(color=font_color),
-
-                xaxis=dict(visible=False),
-                yaxis=dict(visible=False),
+                annotations=[dict(
+                    text=(
+                        f"<b>{completion_pct:.2f}%</b><br>"
+                        f"{produced_total:,.0f} / {preplot_total:,.0f}"
+                    ),
+                    x=0.5, y=0.5,
+                    xref="paper", yref="paper",
+                    showarrow=False,
+                    align="center",
+                    font=dict(size=14, color=font_color),
+                )],
             )
 
             # -----------------------------
@@ -1204,28 +1240,14 @@ class SourceMapGraphics:
                         )
                     )
 
-                # Purpose legend
-                for p, c in sorted(purpose_color_map.items(), key=lambda x: str(x[0])):
-                    fig.add_trace(
-                        go.Scatter(
-                            x=[None], y=[None],
-                            mode="markers",
-                            marker=dict(size=10, color=c),
-                            name=f"Purpose: {p}",
-                            legendgroup=f"purpose|{p}",
-                            showlegend=True,
-                            hoverinfo="skip",
-                        )
-                    )
-
-                # Metric legend
+                # Point type legend
                 for m, c in metric_colors.items():
                     fig.add_trace(
                         go.Scatter(
                             x=[None], y=[None],
                             mode="markers",
                             marker=dict(size=10, color=c),
-                            name=f"Type: {m}",
+                            name=f"Point type: {m}",
                             legendgroup=f"metric|{m}",
                             showlegend=True,
                             hoverinfo="skip",
@@ -1248,18 +1270,9 @@ class SourceMapGraphics:
             fig.update_layout(
                 title=title,
                 margin=dict(t=55, l=10, r=10, b=10),
-                showlegend=False,
-
-                xaxis=dict(
-                    visible=False,
-                    showgrid=False,
-                    zeroline=False
-                ),
-                yaxis=dict(
-                    visible=False,
-                    showgrid=False,
-                    zeroline=False
-                )
+                showlegend=legend_bottom,
+                xaxis=dict(visible=False, showgrid=False, zeroline=False),
+                yaxis=dict(visible=False, showgrid=False, zeroline=False),
             )
 
             if is_show:

@@ -285,6 +285,84 @@ class ProjectRepository:
             rows = connection.execute(sql, params).fetchall()
         return self._rows_to_layer(f"DSR {mode.replace('_', ' ').title()}", rows)
 
+    def load_daily_dsr_production(
+        self, selected_date: str, mode: str
+    ) -> list[PointLayerData]:
+        """Load one DSR point layer per vehicle and receiver line for a day."""
+        mode = str(mode).strip().lower()
+        if mode not in {"deployment", "recovery"}:
+            raise ValueError(f"Unsupported DSR production mode: {mode}")
+
+        with self._connect() as connection:
+            columns = self._table_columns(connection, "DSR")
+            by_lower = {name.lower(): name for name in columns}
+
+            def col(*names: str) -> str | None:
+                return next(
+                    (by_lower[name.lower()] for name in names if name.lower() in by_lower),
+                    None,
+                )
+
+            line_col = col("Line", "RLine", "ReceiverLine")
+            station_col = col("Station", "LinePoint", "Point")
+            node_col = col("Node", "DSRNode", "SMNode", "RemoteUnit")
+            if mode == "deployment":
+                x_col = col("PrimaryEasting")
+                y_col = col("PrimaryNorthing")
+                timestamp_col = col("TimeStamp", "Timestamp", "DeploymentTimeStamp")
+                vehicle_col = col("ROV", "Rov")
+            else:
+                x_col = col("PrimaryEasting1", "RecoveryEasting")
+                y_col = col("PrimaryNorthing1", "RecoveryNorthing")
+                timestamp_col = col("TimeStamp1", "Timestamp1", "RecoveryTimeStamp")
+                vehicle_col = col("ROV1", "Rov1")
+
+            required = {
+                "line": line_col,
+                "easting": x_col,
+                "northing": y_col,
+                "timestamp": timestamp_col,
+                "vehicle": vehicle_col,
+            }
+            missing = [name for name, actual in required.items() if not actual]
+            if missing:
+                raise ProjectRepositoryError(
+                    "DSR daily production requires column(s): " + ", ".join(missing)
+                )
+
+            selected = [
+                "rowid AS source_index",
+                f'CAST("{x_col}" AS REAL) AS x',
+                f'CAST("{y_col}" AS REAL) AS y',
+                f'"{line_col}" AS line',
+                f'"{vehicle_col}" AS vehicle',
+                f'"{timestamp_col}" AS production_timestamp',
+            ]
+            if station_col:
+                selected.append(f'"{station_col}" AS station')
+            if node_col:
+                selected.append(f'"{node_col}" AS node')
+            sql = (
+                f'SELECT {", ".join(selected)} FROM DSR '
+                f'WHERE "{x_col}" IS NOT NULL AND "{y_col}" IS NOT NULL '
+                f'AND (date("{timestamp_col}") = ? '
+                f'OR substr(trim(CAST("{timestamp_col}" AS TEXT)), 1, 10) = ?) '
+                f'ORDER BY "{vehicle_col}", "{line_col}"'
+            )
+            rows = connection.execute(sql, (selected_date, selected_date)).fetchall()
+
+        grouped: dict[tuple[str, str], list[sqlite3.Row]] = {}
+        for row in rows:
+            vehicle = str(row["vehicle"] or "Unknown").strip() or "Unknown"
+            line = str(row["line"] or "Unknown").strip() or "Unknown"
+            grouped.setdefault((vehicle, line), []).append(row)
+
+        phase = "Deployment" if mode == "deployment" else "Recovery"
+        return [
+            self._rows_to_layer(f"{phase} — {vehicle} — Line {line}", group_rows)
+            for (vehicle, line), group_rows in grouped.items()
+        ]
+
     def load_rec_db(self, line: int | None = None) -> PointLayerData:
         """Load first-break positions with Line and Point metadata when available."""
         with self._connect() as connection:

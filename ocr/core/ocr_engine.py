@@ -44,9 +44,9 @@ class OCREngine:
         base = "--oem 1 --psm 7"
 
         if ft == "int":
-            return f"{base} -c tessedit_char_whitelist=0123456789-"
+            return f"{base} -c tessedit_char_whitelist=0123456789"
         if ft == "float":
-            return f"{base} -c tessedit_char_whitelist=0123456789.-"
+            return f"{base} -c tessedit_char_whitelist=0123456789."
         if ft == "date":
             return f"{base} -c tessedit_char_whitelist=0123456789-/."
         if ft == "time":

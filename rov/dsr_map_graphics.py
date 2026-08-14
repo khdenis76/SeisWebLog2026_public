@@ -19,7 +19,7 @@ from bokeh.palettes import Category10, Category20, Turbo256
 
 from bokeh.plotting import figure
 from bokeh.models import ColumnDataSource, Span, Range1d,Label, HoverTool, Button, Spinner, CustomJS, LabelSet, DatetimeTickFormatter, Div, \
-    DatetimeTicker
+    DatetimeTicker, LinearAxis
 from bokeh.models import WMTSTileSource
 import geopandas as gpd
 from bokeh.transform import factor_cmap, cumsum
@@ -1903,6 +1903,9 @@ class DSRMapPlots:
         try:
             with self._connect() as conn:
                 data = pd.read_sql(sql, conn)
+                planned_nodes = int(conn.execute(
+                    "SELECT COALESCE(SUM(Points), 0) FROM RLPreplot"
+                ).fetchone()[0] or 0)
         except Exception as e:
             return self._error_layout(
                 title="Deployment plot failed",
@@ -1964,7 +1967,26 @@ class DSRMapPlots:
                 df[r] = pd.to_numeric(pivot[r], errors="coerce").fillna(0).values if r in pivot.columns else 0
 
             df["Total"] = df[rovs].sum(axis=1)
+            df["Cumulative"] = df["Total"].cumsum()
+            df["ProgressPct"] = (
+                df["Cumulative"] * 100.0 / planned_nodes
+                if planned_nodes > 0 else 0.0
+            )
             max_total = float(df["Total"].max()) if len(df) else 0.0
+
+            completed_nodes = int(df["Cumulative"].iloc[-1])
+            elapsed_days = max(1, len(df))
+            average_speed = completed_nodes / elapsed_days
+            remaining_nodes = max(0, planned_nodes - completed_nodes)
+            if planned_nodes <= 0:
+                eoj_text = "Preplot total unavailable"
+            elif remaining_nodes == 0:
+                eoj_text = df["ProdDate"].iloc[-1].strftime("%d/%m/%Y")
+            elif average_speed > 0:
+                days_left = int(math.ceil(remaining_nodes / average_speed))
+                eoj_text = (df["ProdDate"].iloc[-1] + pd.Timedelta(days=days_left)).strftime("%d/%m/%Y")
+            else:
+                eoj_text = "Not available"
         except Exception as e:
             return self._error_layout(
                 title="Deployment plot failed",
@@ -1988,14 +2010,16 @@ class DSRMapPlots:
             colors = [palette[i % len(palette)] for i in range(len(rovs))]
 
             p = figure(
-                title="Deployment Day by Day",
+                title="Deployment Day by Day — Progress v2",
                 toolbar_location="left",
                 x_axis_type="datetime",
                 x_axis_label="Days",
                 y_axis_label="Total Nodes",
                 width_policy="max",
+                height=360,
                 y_range=(0, max_total * 1.25 if max_total > 0 else 1),
             )
+            p.min_border_right = 70
 
             num_days = int((df["ProdDate"].max() - df["ProdDate"].min()).days) + 1
             p.xaxis[0].ticker.desired_num_ticks = max(2, num_days)
@@ -2012,6 +2036,34 @@ class DSRMapPlots:
                 source=df,
                 legend_label=[f"{r} {int(totals.get(r, 0))} nodes" for r in rovs],
             )
+
+            # Cumulative completion against the complete receiver preplot.
+            p.extra_y_ranges = {"progress": Range1d(start=0, end=100)}
+            p.add_layout(LinearAxis(
+                y_range_name="progress",
+                axis_label="Progress (% of Preplot)",
+                formatter=NumeralTickFormatter(format="0.0"),
+            ), "right")
+            p.line(
+                x="ProdDate", y="ProgressPct", source=df,
+                y_range_name="progress", line_color="#111111", line_width=2,
+            )
+            progress_points = p.scatter(
+                x="ProdDate", y="ProgressPct", source=df,
+                y_range_name="progress", marker="circle", size=7,
+                color="#111111", line_color="white", line_width=1,
+                legend_label="Deployment progress",
+            )
+            p.add_tools(HoverTool(
+                renderers=[progress_points],
+                tooltips=[
+                    ("Date", "@ProdDate{%d/%m/%Y}"),
+                    ("Completed", "@Cumulative{0,0} nodes"),
+                    ("Progress", "@ProgressPct{0.0}%"),
+                ],
+                formatters={"@ProdDate": "datetime"},
+                mode="mouse",
+            ))
 
             # One HoverTool per stack (color-matched)
             for renderer, rov, col in zip(bars, rovs, colors):
@@ -2045,7 +2097,13 @@ class DSRMapPlots:
             )
             p.xaxis.major_label_orientation = 1.5708
             p.xaxis.ticker = DatetimeTicker(desired_num_ticks=15)
-            layout = column([p], sizing_mode="stretch_both")
+            summary = Div(height=32, text=(
+                f"<b>Deployment:</b> {completed_nodes:,} / {planned_nodes:,} nodes "
+                f"({(completed_nodes * 100 / planned_nodes if planned_nodes else 0):.1f}%)"
+                f"&nbsp;&nbsp;|&nbsp;&nbsp;<b>Average speed:</b> {average_speed:,.1f} nodes/calendar day"
+                f"&nbsp;&nbsp;|&nbsp;&nbsp;<b>Predicted EOJ:</b> {eoj_text}"
+            ))
+            layout = column(summary, p, sizing_mode="stretch_both")
 
         except Exception as e:
             return self._error_layout(
@@ -2083,6 +2141,9 @@ class DSRMapPlots:
         try:
             with self._connect() as conn:
                 data = pd.read_sql(sql, conn)
+                planned_nodes = int(conn.execute(
+                    "SELECT COALESCE(SUM(Points), 0) FROM RLPreplot"
+                ).fetchone()[0] or 0)
         except Exception as e:
             return self._error_layout(
                 title="Recovery plot failed",
@@ -2144,7 +2205,26 @@ class DSRMapPlots:
                 df[r] = pd.to_numeric(pivot[r], errors="coerce").fillna(0).values if r in pivot.columns else 0
 
             df["Total"] = df[rovs].sum(axis=1)
+            df["Cumulative"] = df["Total"].cumsum()
+            df["ProgressPct"] = (
+                df["Cumulative"] * 100.0 / planned_nodes
+                if planned_nodes > 0 else 0.0
+            )
             max_total = float(df["Total"].max()) if len(df) else 0.0
+
+            completed_nodes = int(df["Cumulative"].iloc[-1])
+            elapsed_days = max(1, len(df))
+            average_speed = completed_nodes / elapsed_days
+            remaining_nodes = max(0, planned_nodes - completed_nodes)
+            if planned_nodes <= 0:
+                eoj_text = "Preplot total unavailable"
+            elif remaining_nodes == 0:
+                eoj_text = df["ProdDate"].iloc[-1].strftime("%d/%m/%Y")
+            elif average_speed > 0:
+                days_left = int(math.ceil(remaining_nodes / average_speed))
+                eoj_text = (df["ProdDate"].iloc[-1] + pd.Timedelta(days=days_left)).strftime("%d/%m/%Y")
+            else:
+                eoj_text = "Not available"
         except Exception as e:
             return self._error_layout(
                 title="Recovery plot failed",
@@ -2168,14 +2248,16 @@ class DSRMapPlots:
             colors = [palette[i % len(palette)] for i in range(len(rovs))]
 
             p = figure(
-                title="Recovery Day by Day",
+                title="Recovery Day by Day — Progress v2",
                 toolbar_location="left",
                 x_axis_type="datetime",
                 x_axis_label="Days",
                 y_axis_label="Total Nodes",
                 width_policy="max",
+                height=360,
                 y_range=(0, max_total * 1.25 if max_total > 0 else 1),
             )
+            p.min_border_right = 70
 
             num_days = int((df["ProdDate"].max() - df["ProdDate"].min()).days) + 1
             p.xaxis[0].ticker.desired_num_ticks = max(2, num_days)
@@ -2192,6 +2274,34 @@ class DSRMapPlots:
                 source=df,
                 legend_label=[f"{r} {int(totals.get(r, 0))} nodes" for r in rovs],
             )
+
+            # Cumulative completion against the complete receiver preplot.
+            p.extra_y_ranges = {"progress": Range1d(start=0, end=100)}
+            p.add_layout(LinearAxis(
+                y_range_name="progress",
+                axis_label="Progress (% of Preplot)",
+                formatter=NumeralTickFormatter(format="0.0"),
+            ), "right")
+            p.line(
+                x="ProdDate", y="ProgressPct", source=df,
+                y_range_name="progress", line_color="#111111", line_width=2,
+            )
+            progress_points = p.scatter(
+                x="ProdDate", y="ProgressPct", source=df,
+                y_range_name="progress", marker="circle", size=7,
+                color="#111111", line_color="white", line_width=1,
+                legend_label="Recovery progress",
+            )
+            p.add_tools(HoverTool(
+                renderers=[progress_points],
+                tooltips=[
+                    ("Date", "@ProdDate{%d/%m/%Y}"),
+                    ("Completed", "@Cumulative{0,0} nodes"),
+                    ("Progress", "@ProgressPct{0.0}%"),
+                ],
+                formatters={"@ProdDate": "datetime"},
+                mode="mouse",
+            ))
 
             # One HoverTool per stack (color-matched)
             for renderer, rov, col in zip(bars, rovs, colors):
@@ -2226,7 +2336,13 @@ class DSRMapPlots:
             p.xaxis.major_label_orientation = 1.5708
             p.xaxis.ticker = DatetimeTicker(desired_num_ticks=15)
 
-            layout = column([p], sizing_mode="stretch_both")
+            summary = Div(height=32, text=(
+                f"<b>Recovery:</b> {completed_nodes:,} / {planned_nodes:,} nodes "
+                f"({(completed_nodes * 100 / planned_nodes if planned_nodes else 0):.1f}%)"
+                f"&nbsp;&nbsp;|&nbsp;&nbsp;<b>Average speed:</b> {average_speed:,.1f} nodes/calendar day"
+                f"&nbsp;&nbsp;|&nbsp;&nbsp;<b>Predicted EOJ:</b> {eoj_text}"
+            ))
+            layout = column(summary, p, sizing_mode="stretch_both")
 
         except Exception as e:
             return self._error_layout(
@@ -2300,7 +2416,7 @@ class DSRMapPlots:
         except Exception as e:
             return self._error_layout(
                 title="Donut chart failed",
-                message="Database query error while reading DEPLOY_ROV_Summary / RPPreplot.",
+                message="Database query error while reading DSR / DEPLOY_ROV_Summary / RPPreplot.",
                 details=str(e),
                 level="error",
                 is_show=is_show,
@@ -3787,16 +3903,66 @@ class DSRMapPlots:
         if title is None:
             title = default_title
 
-        sql_rov = f"""
-        SELECT
-            TRIM(Rov) AS Rov,
-            COALESCE({m}, 0) AS Val
-        FROM DEPLOY_ROV_Summary
-        WHERE Rov IS NOT NULL
-          AND TRIM(Rov) <> ''
-          AND TRIM(Rov) <> 'Total'
-        ORDER BY Rov
-        """
+        # Recovery must be grouped by DSR.ROV1, not by the deployment ROV.
+        # DEPLOY_ROV_Summary historically used COALESCE(ROV, ROV1) as its key,
+        # which attributes recovered stations to ROV whenever both columns are
+        # populated.  It also required SQLite to parse TimeStamp1 before a row
+        # was counted, so legacy MM/DD/YYYY timestamps produced zero recovery.
+        #
+        # Read recovery metrics directly from DSR.  A non-empty TimeStamp1 is
+        # sufficient to identify a recovered row; only RECDays needs a parsed
+        # date.  This keeps the recovery donut correct for both existing and
+        # newly imported project databases.
+        recovery_metric_exprs = {
+            "RECLines": "COUNT(DISTINCT NULLIF(TRIM(CAST(Line AS TEXT)), ''))",
+            "RECStations": """
+                COUNT(DISTINCT COALESCE(
+                    NULLIF(TRIM(CAST(LinePoint AS TEXT)), ''),
+                    TRIM(CAST(Line AS TEXT)) || ':' || TRIM(CAST(Station AS TEXT))
+                ))
+            """,
+            "RECNodes": "COUNT(*)",
+            "RECDays": """
+                COUNT(DISTINCT COALESCE(
+                    DATE(NULLIF(TRIM(Day1), '')),
+                    DATE(TimeStamp1),
+                    CASE
+                        WHEN TRIM(TimeStamp1) GLOB
+                             '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]*'
+                        THEN DATE(
+                            SUBSTR(TRIM(TimeStamp1), 7, 4) || '-' ||
+                            SUBSTR(TRIM(TimeStamp1), 1, 2) || '-' ||
+                            SUBSTR(TRIM(TimeStamp1), 4, 2)
+                        )
+                    END
+                ))
+            """,
+        }
+
+        if m in recovery_metric_exprs:
+            sql_rov = f"""
+            SELECT
+                TRIM(ROV1) AS Rov,
+                {recovery_metric_exprs[m]} AS Val
+            FROM DSR
+            WHERE ROV1 IS NOT NULL
+              AND TRIM(ROV1) <> ''
+              AND TimeStamp1 IS NOT NULL
+              AND TRIM(TimeStamp1) <> ''
+            GROUP BY TRIM(ROV1)
+            ORDER BY TRIM(ROV1)
+            """
+        else:
+            sql_rov = f"""
+            SELECT
+                TRIM(Rov) AS Rov,
+                COALESCE({m}, 0) AS Val
+            FROM DEPLOY_ROV_Summary
+            WHERE Rov IS NOT NULL
+              AND TRIM(Rov) <> ''
+              AND TRIM(Rov) <> 'Total'
+            ORDER BY Rov
+            """
 
         sql_base = "SELECT COUNT(*) AS Total FROM RPPreplot"
 
@@ -3932,7 +4098,18 @@ class DSRMapPlots:
                         line=dict(color="white", width=1)
                     ),
                     insidetextorientation="radial",
-                    textinfo="label+percent root",
+                    # The root occupies the centre of the Sunburst.  Its native
+                    # label would overlap the custom centre summary below, so
+                    # suppress only the root text and keep labels on all rings.
+                    texttemplate=(
+                        [""]
+                        + ["%{label}<br>%{percentRoot:.0%}"]
+                        * (len(labels_sb) - 1)
+                    ),
+                    # Reserve a real band below the chart for the horizontal
+                    # legend.  Without an explicit domain Plotly enlarges the
+                    # Sunburst into that band and clips the lower outer ring.
+                    domain=dict(x=[0.03, 0.97], y=[0.18, 0.98]),
                     hovertemplate=(
                             "<b>%{label}</b><br>"
                             + f"{lbl['unit']}: %{{value:,.0f}}<br>"
@@ -3999,10 +4176,10 @@ class DSRMapPlots:
                 autosize=True,
 
                 margin=dict(
-                    l=0,
-                    r=0,
+                    l=5,
+                    r=5,
                     t=35,
-                    b=35
+                    b=5
                 ),
 
                 uniformtext=dict(
@@ -4012,18 +4189,20 @@ class DSRMapPlots:
 
                 legend=dict(
                     orientation="h",
-                    yanchor="bottom",
-                    y=0,
+                    yanchor="middle",
+                    y=0.075,
                     xanchor="center",
                     x=0.5,
-                    font=dict(size=11)
+                    font=dict(size=10),
+                    itemsizing="constant"
                 ),
 
                 annotations=[
                     dict(
                         text="<br>".join(annotation_lines),
                         x=0.5,
-                        y=0.5,
+                        # Centre of the explicit Sunburst y-domain above.
+                        y=0.58,
                         showarrow=False,
                         align="center",
                         font=dict(

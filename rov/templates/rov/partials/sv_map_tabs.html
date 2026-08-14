@@ -232,17 +232,17 @@
 
        <div class="tab-pane fade" id="dbd-prod-tab" role="tabpanel">
            {{ d_dep_script|safe }}
-           <div class="w-100 bokeh-light-scope" style="height: 30vh" id="daily-dep-container">
+           <div class="w-100 bokeh-light-scope" style="height: 410px" id="daily-dep-container">
                {{ d_dep_div|safe }}
            </div>
            {{ d_rec_script|safe }}
-           <div class="w-100 bokeh-light-scope" style="height: 30vh" id="daily-rec-container">
+           <div class="w-100 bokeh-light-scope" style="height: 410px" id="daily-rec-container">
                {{ d_rec_div|safe }}
            </div>
 
        </div>
         <div class="tab-pane fade h-100" id="prod-pie-tab" role="tabpanel">
-            <div class="row g-0" style="height:70vh">
+            <div class="row g-0" style="height: 85vh; min-height: 650px;">
                 <div class="col-6 h-100">
                     <div id="dep-pie-container" class="h-100">
                         {{ deployment_pie|safe }}

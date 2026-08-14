@@ -184,6 +184,16 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
         else:
             self.status.setText("No BlackBox files were found in this project.")
 
+    def select_file(self, file_id: int) -> bool:
+        """Select a file in the toolbar without starting a second load."""
+        index = self.file_combo.findData(int(file_id))
+        if index < 0:
+            return False
+        blocker = QtCore.QSignalBlocker(self.file_combo)
+        self.file_combo.setCurrentIndex(index)
+        del blocker
+        return True
+
     def _file_changed(self, index: int) -> None:
         if index < 0:
             return

@@ -1644,7 +1644,14 @@ FROM agg;
 DROP VIEW IF EXISTS Daily_Deployment;
 CREATE VIEW IF NOT EXISTS Daily_Deployment AS
 SELECT
-    DATE(TimeStamp)                 AS ProdDate,
+    COALESCE(
+        DATE(NULLIF(TRIM(Day), '')),
+        DATE(TimeStamp),
+        CASE
+            WHEN TRIM(TimeStamp) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]*'
+            THEN DATE(SUBSTR(TRIM(TimeStamp), 7, 4) || '-' || SUBSTR(TRIM(TimeStamp), 4, 2) || '-' || SUBSTR(TRIM(TimeStamp), 1, 2))
+        END
+    ) AS ProdDate,
     TRIM(Line)                      AS Line,
     TRIM(ROV)                       AS ROV,
     MIN(CAST(NULLIF(Station,'') AS REAL)) AS FRP,
@@ -1656,13 +1663,20 @@ WHERE TimeStamp IS NOT NULL
   AND ROV IS NOT NULL
   AND TRIM(ROV) <> ''
 GROUP BY
-    DATE(TimeStamp),
+    ProdDate,
     TRIM(Line),
     TRIM(ROV);
 DROP VIEW IF EXISTS Daily_Recovery;
 CREATE VIEW IF NOT EXISTS Daily_Recovery AS
 SELECT
-    DATE(TimeStamp1)                AS ProdDate,
+    COALESCE(
+        DATE(NULLIF(TRIM(Day1), '')),
+        DATE(TimeStamp1),
+        CASE
+            WHEN TRIM(TimeStamp1) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]*'
+            THEN DATE(SUBSTR(TRIM(TimeStamp1), 7, 4) || '-' || SUBSTR(TRIM(TimeStamp1), 4, 2) || '-' || SUBSTR(TRIM(TimeStamp1), 1, 2))
+        END
+    ) AS ProdDate,
     TRIM(Line)                      AS Line,
     TRIM(ROV1)                      AS ROV,
     MIN(CAST(NULLIF(Station,'') AS REAL)) AS FRP,
@@ -1674,7 +1688,7 @@ WHERE TimeStamp1 IS NOT NULL
   AND ROV1 IS NOT NULL
   AND TRIM(ROV1) <> ''
 GROUP BY
-    DATE(TimeStamp1),
+    ProdDate,
     TRIM(Line),
     TRIM(ROV1);
 DROP VIEW IF EXISTS V_SHOT_TABLE_SUMMARY;
@@ -1862,5 +1876,4 @@ CREATE TABLE IF NOT EXISTS REC_DB
     "TIER"     INTEGER DEFAULT 1,
     UNIQUE (REC_ID, DEPLOY, RPI)
 );
-
 

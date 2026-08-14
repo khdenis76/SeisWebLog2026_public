@@ -47,7 +47,7 @@ def rov_main_view(request):
 
 
     dsrdb = DSRDB(project.db_path)
-    dsrdb.ensure_bbox_mru_schema()
+    dsrdb.ensure_bbox_config_schema()
 
     pdb=ProjectDB(project.db_path)
 

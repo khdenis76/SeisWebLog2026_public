@@ -111,6 +111,7 @@ class RibbonBar(QtWidgets.QTabWidget):
     point_compare_requested = QtCore.Signal()
     node_selection_requested = QtCore.Signal(str)
     clear_node_selection_requested = QtCore.Signal()
+    daily_dsr_production_requested = QtCore.Signal(str)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -179,6 +180,30 @@ class RibbonBar(QtWidgets.QTabWidget):
         layer_group.commands.itemAt(0).widget().clicked.connect(self.select_all_layers_requested)
         layer_group.commands.itemAt(1).widget().clicked.connect(self.clear_all_layers_requested)
         self._insert_group(layers, layer_group)
+
+        production_group = RibbonGroup("DSR production")
+        self.daily_dsr_button = RibbonButton("Daily production", icon("calendar"))
+        self.daily_dsr_button.setToolTip(
+            "Create DSR production layers for a selected calendar day, split by vehicle and line."
+        )
+        self.daily_dsr_button.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        )
+        production_menu = QtWidgets.QMenu(self.daily_dsr_button)
+        deployment_action = production_menu.addAction("Deployment…")
+        recovery_action = production_menu.addAction("Recovery…")
+        deployment_action.triggered.connect(
+            lambda: self.daily_dsr_production_requested.emit("deployment")
+        )
+        recovery_action.triggered.connect(
+            lambda: self.daily_dsr_production_requested.emit("recovery")
+        )
+        self.daily_dsr_button.setMenu(production_menu)
+        self.daily_dsr_button.clicked.connect(
+            lambda: self.daily_dsr_production_requested.emit("deployment")
+        )
+        production_group.add_button(self.daily_dsr_button)
+        self._insert_group(layers, production_group)
 
         surface_group = RibbonGroup("Surfaces")
         self.surface2d_open_button = RibbonButton("Add surface", icon("map"))

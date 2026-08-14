@@ -200,7 +200,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bbox_data_by_file: dict[int, BlackBoxData] = {}
         self.bbox_track_layer_names: dict[tuple[int, str], str] = {}
         self.bbox_last_track_layer_name: str | None = None
+        self._pending_bbox_point: dict[str, object] | None = None
         self._selected_dsr_timestamp: object | None = None
+        # Last BlackBox phase requested for each receiver line.  Station
+        # navigation uses the same DSR timestamp column as the displayed track.
+        self._dsr_bbox_phase_by_line: dict[int, str] = {}
         self.dsr_qc_window: DsrQcWindow | None = None
         self.bathymetry_3d_window: Surface3DWindow | None = None
         self.dsr_qc_cache: dict[int, object] = {}
@@ -339,6 +343,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ribbon.point_compare_requested.connect(self._create_point_comparison)
         self.ribbon.node_selection_requested.connect(self._start_node_selection)
         self.ribbon.clear_node_selection_requested.connect(self._clear_node_selection)
+        self.ribbon.daily_dsr_production_requested.connect(self._create_daily_dsr_production)
         self.ribbon.view3d_open_requested.connect(self._open_bathymetry_3d_window)
         self.ribbon.set_radial_default(self._radial_circle_style["radius"])
 
@@ -3117,12 +3122,22 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         record = layer.data.record(index)
         try:
             file_id = int(record.get("file_id"))
-            original_index = int(record.get("original_index", index))
         except (TypeError, ValueError):
             return
         data = self.bbox_data_by_file.get(file_id)
         if data is None:
             return
+        original_value = record.get("original_index")
+        if original_value is None:
+            resolved = self._bbox_timestamp_index(data, record.get("timestamp"))
+            if resolved is None:
+                return
+            original_index = resolved
+        else:
+            try:
+                original_index = int(original_value)
+            except (TypeError, ValueError):
+                return
         vessel = self._blackbox_heading_value(data, original_index, "vessel")
         rov1 = self._blackbox_heading_value(data, original_index, "rov1")
         rov2 = self._blackbox_heading_value(data, original_index, "rov2")
@@ -3283,6 +3298,80 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         self.details_dock.raise_()
         if layer_name.startswith("DSR"):
             self._load_ocr_images_for_dsr_record(record)
+        if record.get("file_id") is not None and record.get("timestamp") is not None:
+            self._select_bbox_track_point(record, index)
+
+    @staticmethod
+    def _bbox_timestamp_index(data: BlackBoxData, timestamp: object) -> int | None:
+        """Resolve a map-track timestamp to its row in a loaded BlackBox file."""
+        if timestamp is None or not data.time_labels.size:
+            return None
+        target = str(timestamp).strip()
+        if not target:
+            return None
+        labels = np.asarray([str(value).strip() for value in data.time_labels], dtype=object)
+        matches = np.flatnonzero(labels == target)
+        if matches.size:
+            return int(matches[0])
+
+        target_seconds = BlackBoxWindow._parse_timestamp(target)
+        if target_seconds is None:
+            return None
+        parsed = np.asarray(
+            [BlackBoxWindow._parse_timestamp(value) for value in labels], dtype=object
+        )
+        valid = np.asarray([value is not None for value in parsed], dtype=bool)
+        if not valid.any():
+            return None
+        candidates = np.flatnonzero(valid)
+        seconds = np.asarray([float(parsed[pos]) for pos in candidates], dtype=float)
+        return int(candidates[int(np.argmin(np.abs(seconds - target_seconds)))])
+
+    def _display_bbox_point(self, data: BlackBoxData, record: dict[str, object]) -> None:
+        row = self._bbox_timestamp_index(data, record.get("timestamp"))
+        if row is None:
+            return
+        vessel = self._blackbox_heading_value(data, row, "vessel")
+        rov1 = self._blackbox_heading_value(data, row, "rov1")
+        rov2 = self._blackbox_heading_value(data, row, "rov2")
+        self.heading_panel.set_names(
+            vessel_name=data.file_info.vessel_name,
+            rov1_name=data.file_info.rov1_name,
+            rov2_name=data.file_info.rov2_name,
+        )
+        self.heading_panel.set_headings(vessel=vessel, rov1=rov1, rov2=rov2)
+        self.heading_panel.set_context(
+            f"{data.file_info.name} — {record.get('source', '')}\n"
+            f"Sample: {row + 1:,}   Time: {data.time_labels[row]}"
+        )
+        self.heading_dock.show()
+        self.heading_dock.raise_()
+        window = self._ensure_bbox_window()
+        window.select_file(data.file_info.file_id)
+        window.highlight_timestamp(record.get("timestamp"))
+
+    def _select_bbox_track_point(self, record: dict[str, object], index: int) -> None:
+        """Load/select the clicked track's file and synchronize QC and headings."""
+        try:
+            file_id = int(record.get("file_id"))
+        except (TypeError, ValueError):
+            return
+        if file_id <= 0:
+            return
+        cached = self.bbox_data_by_file.get(file_id)
+        if cached is not None:
+            self._display_bbox_point(cached, record)
+            return
+
+        self._pending_bbox_point = dict(record)
+        window = self._ensure_bbox_window()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        self.statusBar().showMessage(
+            f"Loading BlackBox file for clicked track point (File ID {file_id})…"
+        )
+        self._load_bbox_file(file_id)
 
     def _prepare_radial_circles(self, data: PointLayerData) -> None:
         if self.radial_circle_item is None:
@@ -3444,6 +3533,98 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 raise RuntimeError("No production SPS points were available.")
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "SPS overlay", str(exc))
+
+    def _create_daily_dsr_production(self, mode: str) -> None:
+        mode = str(mode).strip().lower()
+        if mode not in {"deployment", "recovery"}:
+            return
+
+        dialog = QtWidgets.QDialog(self)
+        phase = "Deployment" if mode == "deployment" else "Recovery"
+        dialog.setWindowTitle(f"Daily DSR production — {phase}")
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.addWidget(QtWidgets.QLabel(f"Select the {phase.lower()} production date:"))
+        calendar = QtWidgets.QCalendarWidget(dialog)
+        calendar.setGridVisible(True)
+        calendar.setSelectedDate(QtCore.QDate.currentDate())
+        layout.addWidget(calendar)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        selected_date = calendar.selectedDate().toString("yyyy-MM-dd")
+        self.statusBar().showMessage(
+            f"Loading DSR {mode} production for {selected_date}…"
+        )
+        worker = FunctionWorker(
+            lambda day=selected_date, production_mode=mode:
+                self.repository.load_daily_dsr_production(day, production_mode)
+        )
+        worker.signals.completed.connect(
+            lambda datasets, day=selected_date, production_mode=mode:
+                self._daily_dsr_production_loaded(day, production_mode, datasets)
+        )
+        worker.signals.failed.connect(
+            lambda message: QtWidgets.QMessageBox.warning(
+                self, "Daily DSR production", message
+            )
+        )
+        self._start_worker(worker)
+
+    def _daily_dsr_production_loaded(
+        self,
+        selected_date: str,
+        mode: str,
+        datasets: list[PointLayerData],
+    ) -> None:
+        if not datasets:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Daily DSR production",
+                f"No {mode} production records were found for {selected_date}.",
+            )
+            self.statusBar().showMessage(
+                f"No DSR {mode} production for {selected_date}", 5000
+            )
+            return
+
+        palette = [
+            "#00e5ff", "#ffd740", "#ff6e40", "#69f0ae",
+            "#ea80fc", "#7c4dff", "#40c4ff", "#ff5252",
+        ]
+        registered_names: list[str] = []
+        for index, data in enumerate(datasets):
+            color = palette[index % len(palette)]
+            layer = FastPointLayer(self.plot_item, data.name, color, color, None)
+            layer.update_style(point_size=7.0, symbol="circle")
+            layer.set_data(data)
+            layer.selection_changed.connect(self._show_record)
+            registered_names.append(
+                self._register_layer(
+                    selected_date,
+                    data.name,
+                    data.count,
+                    layer,
+                    f"DSR {mode} production on {selected_date}",
+                )
+            )
+
+        group_item = self._group_item(selected_date)
+        group_item.setExpanded(True)
+        self.label_manager.refresh(self.layers)
+        self._zoom_to_layer(registered_names[0])
+        record_count = sum(data.count for data in datasets)
+        self.statusBar().showMessage(
+            f"Added {len(datasets)} {mode} layer(s) for {selected_date}: "
+            f"{record_count:,} record(s)",
+            6000,
+        )
 
     def _add_slsolution_overlay(self) -> None:
         """Add SLSolution StartX/StartY to EndX/EndY lines, grouped by vessel."""
@@ -3641,14 +3822,88 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             return
         index = int(indices[0])
         record = data.record(index)
-        self._selected_dsr_timestamp = record.get("timestamp")
-        if self.bbox_window is not None:
-            self.bbox_window.highlight_timestamp(self._selected_dsr_timestamp)
+        phase = self._dsr_bbox_phase_by_line.get(line, "deployment")
+        timestamp_key = "timestamp1" if phase == "recovery" else "timestamp"
+        self._selected_dsr_timestamp = record.get(timestamp_key)
+        self._sync_bbox_to_dsr_station(line, phase, self._selected_dsr_timestamp)
         x = float(data.x[index])
         y = float(data.y[index])
         self._set_station_marker(x, y)
         self._show_record("DSR Primary", index)
         self.statusBar().showMessage(f"Selected DSR line {line}, station {station}", 3000)
+
+    def _sync_bbox_to_dsr_station(
+        self,
+        line: int,
+        phase: str,
+        timestamp: object | None,
+    ) -> None:
+        """Select the BBOX file covering a station time and move its QC cursor."""
+        if timestamp is None or self.bbox_window is None:
+            return
+
+        target_seconds = BlackBoxWindow._parse_timestamp(timestamp)
+        phase_title = "Recovery" if phase == "recovery" else "Deployment"
+        best: tuple[float, dict[str, object]] | None = None
+
+        for layer_name in set(self.bbox_track_layer_names.values()):
+            layer = self.layers.get(layer_name)
+            if not isinstance(layer, FastPointLayer) or layer.data is None:
+                continue
+            metadata = layer.data.metadata
+            line_values = metadata.get("line")
+            phase_values = metadata.get("phase")
+            file_values = metadata.get("file_id")
+            time_values = metadata.get("timestamp")
+            if (
+                line_values is None or not line_values.size
+                or phase_values is None or not phase_values.size
+                or file_values is None or not file_values.size
+                or time_values is None or not time_values.size
+            ):
+                continue
+            try:
+                layer_line = int(line_values[0])
+            except (TypeError, ValueError):
+                continue
+            if layer_line != int(line) or str(phase_values[0]) != phase_title:
+                continue
+
+            # Track rows are chronological.  Comparing only the endpoints is
+            # enough to find the file that covers the selected time and keeps
+            # Previous/Next instant even for day-long 1 Hz BBOX files.
+            first_seconds = BlackBoxWindow._parse_timestamp(time_values[0])
+            last_seconds = BlackBoxWindow._parse_timestamp(time_values[-1])
+            if target_seconds is None or first_seconds is None or last_seconds is None:
+                distance = 0.0 if any(
+                    str(value).strip() == str(timestamp).strip()
+                    for value in (time_values[0], time_values[-1])
+                ) else float("inf")
+            elif first_seconds <= target_seconds <= last_seconds:
+                distance = 0.0
+            else:
+                distance = min(
+                    abs(target_seconds - first_seconds),
+                    abs(target_seconds - last_seconds),
+                )
+            if np.isfinite(distance) and (best is None or distance < best[0]):
+                source_values = metadata.get("source")
+                best = (
+                    distance,
+                    {
+                        "file_id": int(file_values[0]),
+                        "timestamp": timestamp,
+                        "source": str(source_values[0]) if source_values is not None and source_values.size else "",
+                    },
+                )
+
+        if best is not None:
+            self._selected_dsr_timestamp = best[1]["timestamp"]
+            self._select_bbox_track_point(best[1], 0)
+        else:
+            # Tracks may not have been added for this line; retain the previous
+            # behavior for a manually selected BlackBox file.
+            self.bbox_window.highlight_timestamp(timestamp)
 
     def _zoom_dsr_station(self, line: int, station: int) -> None:
         data = self._dsr_primary_data()
@@ -3736,6 +3991,11 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 f"No BlackBox XY records were found for line {line} using {timestamp_name}.",
             )
             return
+        # Navigation follows the most recently requested phase.  "Both" keeps
+        # deployment as the primary navigation timeline.
+        self._dsr_bbox_phase_by_line[int(line)] = (
+            "recovery" if requested_phase == "recovery" else "deployment"
+        )
         added = 0
         phase_counts: dict[str, int] = {}
         for data in datasets:
@@ -3833,6 +4093,16 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         window.set_data(data)
         if self._selected_dsr_timestamp is not None:
             window.highlight_timestamp(self._selected_dsr_timestamp)
+        window.select_file(data.file_info.file_id)
+        pending = self._pending_bbox_point
+        if pending is not None:
+            try:
+                pending_file_id = int(pending.get("file_id"))
+            except (TypeError, ValueError):
+                pending_file_id = -1
+            if pending_file_id == data.file_info.file_id:
+                self._pending_bbox_point = None
+                self._display_bbox_point(data, pending)
         if self.ribbon.bbox_track_button.isChecked():
             track = data.track()
             if track:

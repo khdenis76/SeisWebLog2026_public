@@ -31,16 +31,16 @@ def clean_value(text: str, field_type: str) -> str:
     ft = normalize_field_type(field_type)
 
     if ft == "int":
-        sign = "-" if text.lstrip().startswith("-") else ""
-        return sign + re.sub(r"\D", "", text)
+        # Numeric identifier ROIs (line, station and dive) are non-negative.
+        return re.sub(r"\D", "", text)
 
     if ft == "float":
-        sign = "-" if text.lstrip().startswith("-") else ""
+        # Coordinate ROIs (east and north) are configured as positive values.
         body = re.sub(r"[^0-9.]", "", text)
         if body.count(".") > 1:
             first, *rest = body.split(".")
             body = first + "." + "".join(rest)
-        return sign + body
+        return body
 
     if ft == "date":
         text = re.sub(r"[^0-9-]", "", text)
@@ -65,16 +65,14 @@ def format_value(text: str, roi: Any) -> str:
         return ""
 
     if ft == "int":
-        negative = cleaned.startswith("-")
         digits = re.sub(r"\D", "", cleaned)
         if before:
             # Fixed-width integer output; keep the rightmost digits if OCR returned too many.
             digits = digits[-before:].zfill(before)
-        return ("-" if negative else "") + digits
+        return digits
 
     if ft == "float":
-        negative = cleaned.startswith("-")
-        unsigned = cleaned.lstrip("-")
+        unsigned = cleaned
 
         if "." in unsigned:
             integer_part, decimal_part = unsigned.split(".", 1)
@@ -100,7 +98,7 @@ def format_value(text: str, roi: Any) -> str:
         else:
             result = integer_part if not decimal_part else f"{integer_part}.{decimal_part}"
 
-        return ("-" if negative else "") + result
+        return result
 
     if ft == "date":
         digits = re.sub(r"\D", "", cleaned)
