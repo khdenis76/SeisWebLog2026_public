@@ -32,6 +32,102 @@ class SurfaceBuildResult:
     definition: dict
 
 
+def _interpolate_surface(
+    points: SurfacePoints, resolution: int, method: str
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n = max(2, int(resolution))
+    gx = np.linspace(float(np.nanmin(points.x)), float(np.nanmax(points.x)), n)
+    gy = np.linspace(float(np.nanmin(points.y)), float(np.nanmax(points.y)), n)
+    xx, yy = np.meshgrid(gx, gy)
+    method = str(method).strip().lower()
+    if SCIPY_AVAILABLE and method in {"linear", "nearest"}:
+        zz = griddata(np.c_[points.x, points.y], points.z, (xx, yy), method=method)
+    else:
+        zz = np.empty(xx.size, float)
+        queries = np.c_[xx.ravel(), yy.ravel()]
+        source = np.c_[points.x, points.y]
+        for start in range(0, queries.shape[0], 2500):
+            chunk = queries[start:start + 2500]
+            distances = (
+                (chunk[:, None, 0] - source[None, :, 0]) ** 2
+                + (chunk[:, None, 1] - source[None, :, 1]) ** 2
+            )
+            if method == "nearest":
+                indices = np.argmin(distances, axis=1)
+                zz[start:start + len(chunk)] = points.z[indices]
+            else:
+                count = min(12, source.shape[0])
+                indices = np.argpartition(distances, count - 1, axis=1)[:, :count]
+                local = np.take_along_axis(distances, indices, axis=1)
+                values = points.z[indices]
+                weights = 1.0 / np.maximum(local, 1e-12)
+                zz[start:start + len(chunk)] = (
+                    np.sum(weights * values, axis=1) / np.sum(weights, axis=1)
+                )
+        zz = zz.reshape(xx.shape)
+    return gx, gy, zz
+
+
+def build_surface_from_definition(
+    project_path: str | Path, definition: dict
+) -> SurfaceBuildResult:
+    """Rebuild a persisted main-map surface from its project data source."""
+    definition = dict(definition)
+    repo = SurfaceDataRepository(project_path)
+    map_type = str(definition.get("map_type") or "Parameter surface")
+    if map_type == "SPS point density":
+        gx, gy, zz, density_info = repo.load_sps_density_grid(
+            cell_size=float(definition.get("cell_size", 100.0)),
+            density_type=str(definition.get("density_type") or "count").lower(),
+            area_units=str(definition.get("density_units") or "cell"),
+            search_radius=float(definition.get("search_radius") or 0.0) or None,
+            cells_per_radius=3,
+        )
+        value_field = str(density_info["units"])
+    else:
+        source = str(definition.get("source") or "")
+        points = repo.load_points(
+            source,
+            str(definition.get("x") or ""),
+            str(definition.get("y") or ""),
+            str(definition.get("z") or ""),
+            line_filter=definition.get("line"),
+            max_points=150000,
+        )
+        gx, gy, zz = _interpolate_surface(
+            points,
+            int(definition.get("resolution", 350)),
+            str(definition.get("method") or "Linear"),
+        )
+        value_field = str(definition.get("z") or "Value")
+
+    style = ContourStyle(
+        color=str(definition.get("contour_color") or "#ffffff"),
+        width=float(definition.get("contour_width", 1.0)),
+        labels_enabled=bool(definition.get("labels", True)),
+        label_suffix=str(definition.get("label_suffix") or ""),
+        max_labels=int(definition.get("max_labels", 80)),
+    )
+    name = str(
+        definition.get("registered_name")
+        or definition.get("name")
+        or "Saved surface"
+    )
+    return SurfaceBuildResult(
+        name=name,
+        gx=gx,
+        gy=gy,
+        grid_z=zz,
+        display=str(definition.get("display") or "Heatmap + contours"),
+        cmap=str(definition.get("cmap") or "turbo"),
+        opacity=float(definition.get("opacity", 0.75)),
+        contour_levels=int(definition.get("contour_levels", 12)),
+        contour_style=style,
+        value_field=value_field,
+        definition=definition,
+    )
+
+
 class SurfaceCreateDialog(QtWidgets.QDialog):
     def __init__(self, project_path: str | Path, parent=None) -> None:
         super().__init__(parent)
@@ -147,32 +243,9 @@ class SurfaceCreateDialog(QtWidgets.QDialog):
             self.contour_color.setStyleSheet(f"background:{color.name()}")
 
     def _interpolate(self, points: SurfacePoints) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        n = int(self.resolution.value())
-        gx = np.linspace(float(np.nanmin(points.x)), float(np.nanmax(points.x)), n)
-        gy = np.linspace(float(np.nanmin(points.y)), float(np.nanmax(points.y)), n)
-        xx, yy = np.meshgrid(gx, gy)
-        method = self.method.currentText().lower()
-        if SCIPY_AVAILABLE and method in {"linear", "nearest"}:
-            zz = griddata(np.c_[points.x, points.y], points.z, (xx, yy), method=method)
-        else:
-            zz = np.empty(xx.size, float)
-            q = np.c_[xx.ravel(), yy.ravel()]
-            p = np.c_[points.x, points.y]
-            for start in range(0, q.shape[0], 2500):
-                chunk = q[start:start + 2500]
-                d2 = (chunk[:, None, 0] - p[None, :, 0]) ** 2 + (chunk[:, None, 1] - p[None, :, 1]) ** 2
-                if method == "nearest":
-                    idx = np.argmin(d2, axis=1)
-                    zz[start:start + len(chunk)] = points.z[idx]
-                else:
-                    k = min(12, p.shape[0])
-                    idx = np.argpartition(d2, k - 1, axis=1)[:, :k]
-                    local = np.take_along_axis(d2, idx, axis=1)
-                    values = points.z[idx]
-                    weights = 1.0 / np.maximum(local, 1e-12)
-                    zz[start:start + len(chunk)] = np.sum(weights * values, axis=1) / np.sum(weights, axis=1)
-            zz = zz.reshape(xx.shape)
-        return gx, gy, zz
+        return _interpolate_surface(
+            points, int(self.resolution.value()), self.method.currentText()
+        )
 
     def _create(self) -> None:
         try:

@@ -7,6 +7,7 @@ from typing import Iterable
 import numpy as np
 
 from .models import PointLayerData, ProjectShapeDefinition, BlackBoxData, BlackBoxFileInfo, DsrQcData
+from .time_utils import parse_timestamp, timestamp_date
 
 
 class ProjectRepositoryError(RuntimeError):
@@ -186,7 +187,11 @@ class ProjectRepository:
 
     def load_rp_preplot(self) -> PointLayerData:
         with self._connect() as connection:
-            columns = self._table_columns(connection, "RPPreplot")
+            tables = {str(row[0]).lower(): str(row[0]) for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+            table = tables.get("rpreplot") or tables.get("rppreplot") or "RPPreplot"
+            columns = self._table_columns(connection, table)
             x_col = self._first(columns, ("X", "Easting", "PreplotEasting"))
             y_col = self._first(columns, ("Y", "Northing", "PreplotNorthing"))
             if not x_col or not y_col:
@@ -199,11 +204,82 @@ class ProjectRepository:
             if point_col:
                 select.append(f'"{point_col}" AS point')
             order = ", ".join(filter(None, [f'"{line_col}"' if line_col else None, f'"{point_col}"' if point_col else None]))
-            sql = f'SELECT {", ".join(select)} FROM RPPreplot WHERE "{x_col}" IS NOT NULL AND "{y_col}" IS NOT NULL'
+            sql = f'SELECT {", ".join(select)} FROM "{table}" WHERE "{x_col}" IS NOT NULL AND "{y_col}" IS NOT NULL'
             if order:
                 sql += f" ORDER BY {order}"
             rows = connection.execute(sql).fetchall()
         return self._rows_to_layer("RPPreplot", rows)
+
+    def load_source_preplot(self) -> PointLayerData:
+        """Load source preplot coordinates from SPreplot.X/Y."""
+        with self._connect() as connection:
+            tables = {str(row[0]).lower(): str(row[0]) for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+            table = tables.get("spreplot") or tables.get("sppreplot")
+            if not table:
+                return PointLayerData("Source preplot", np.array([], float), np.array([], float), np.array([], np.int64))
+            columns = self._table_columns(connection, table)
+            x_col = self._first(columns, ("X", "Easting", "PreplotEasting"))
+            y_col = self._first(columns, ("Y", "Northing", "PreplotNorthing"))
+            if not x_col or not y_col:
+                return PointLayerData("Source preplot", np.array([], float), np.array([], float), np.array([], np.int64))
+            optional = [name for name in ("Line", "SailLine", "Point", "Station") if name in columns]
+            select = ["rowid AS source_index", f'CAST("{x_col}" AS REAL) AS x', f'CAST("{y_col}" AS REAL) AS y']
+            select += [f'"{name}" AS "{name.lower()}"' for name in optional]
+            rows = connection.execute(
+                f'SELECT {", ".join(select)} FROM "{table}" WHERE "{x_col}" IS NOT NULL AND "{y_col}" IS NOT NULL'
+            ).fetchall()
+        return self._rows_to_layer("Source preplot", rows)
+
+    def load_source_lines(self) -> PointLayerData:
+        """Load SLSolution start/end segments as one disconnected line layer."""
+        with self._connect() as connection:
+            columns = self._table_columns(connection, "SLSolution")
+            required = ("StartX", "StartY", "EndX", "EndY")
+            if not all(name in columns for name in required):
+                return PointLayerData("Source Lines", np.array([], float), np.array([], float), np.array([], np.int64))
+            optional = [name for name in ("Line", "SailLine", "Seq", "Vessel_FK") if name in columns]
+            selected = ["rowid AS source_index"] + [f'"{name}"' for name in required + tuple(optional)]
+            rows = connection.execute(
+                f'SELECT {", ".join(selected)} FROM "SLSolution" WHERE "StartX" IS NOT NULL AND "StartY" IS NOT NULL AND "EndX" IS NOT NULL AND "EndY" IS NOT NULL'
+            ).fetchall()
+        x, y, source, groups, metadata = [], [], [], [], {name.lower(): [] for name in optional}
+        for group_index, row in enumerate(rows):
+            try:
+                values = [float(row[name]) for name in required]
+            except (TypeError, ValueError):
+                continue
+            x.extend((values[0], values[2], np.nan)); y.extend((values[1], values[3], np.nan))
+            source.extend((int(row["source_index"]), int(row["source_index"]), int(row["source_index"])))
+            groups.extend((group_index, group_index, group_index))
+            for name in optional:
+                metadata[name.lower()].extend((row[name], row[name], row[name]))
+        metadata["track_group"] = np.asarray(groups, dtype=np.int64)
+        return PointLayerData("Source Lines", np.asarray(x), np.asarray(y), np.asarray(source, dtype=np.int64),
+                              {key: np.asarray(value, dtype=object) for key, value in metadata.items()})
+
+    def load_source_points_by_sail_line(self) -> list[PointLayerData]:
+        """Load SPSolution Easting/Northing as one layer per SailLine."""
+        with self._connect() as connection:
+            columns = self._table_columns(connection, "SPSolution")
+            if not {"Easting", "Northing"}.issubset(columns):
+                return []
+            sail_col = self._first(columns, ("SailLine", "Line"))
+            if not sail_col:
+                return []
+            optional = [name for name in ("SailLine", "Line", "Point", "Seq", "FireCode", "WaterDepth") if name in columns]
+            select = ["rowid AS source_index", 'CAST("Easting" AS REAL) AS x', 'CAST("Northing" AS REAL) AS y']
+            select += [f'"{name}" AS "{name.lower()}"' for name in optional]
+            rows = connection.execute(
+                f'SELECT {", ".join(select)} FROM "SPSolution" WHERE "Easting" IS NOT NULL AND "Northing" IS NOT NULL ORDER BY "{sail_col}"'
+            ).fetchall()
+        grouped: dict[str, list[sqlite3.Row]] = {}
+        alias = sail_col.lower()
+        for row in rows:
+            value = str(row[alias] if alias in row.keys() else "Unknown").strip() or "Unknown"
+            grouped.setdefault(value, []).append(row)
+        return [self._rows_to_layer(f"SailLine {value}", values) for value, values in grouped.items()]
 
     def load_ocr_image_counts(self) -> PointLayerData:
         """Return one label anchor per RPPreplot position having OCR images."""
@@ -294,6 +370,7 @@ class ProjectRepository:
             raise ValueError(f"Unsupported DSR production mode: {mode}")
 
         with self._connect() as connection:
+            connection.create_function("dv_timestamp_date", 1, timestamp_date)
             columns = self._table_columns(connection, "DSR")
             by_lower = {name.lower(): name for name in columns}
 
@@ -338,6 +415,14 @@ class ProjectRepository:
                 f'"{vehicle_col}" AS vehicle',
                 f'"{timestamp_col}" AS production_timestamp',
             ]
+            if mode == "deployment":
+                selected.extend(
+                    [f'"{vehicle_col}" AS rov', f'"{timestamp_col}" AS timestamp']
+                )
+            else:
+                selected.extend(
+                    [f'"{vehicle_col}" AS rov1', f'"{timestamp_col}" AS timestamp1']
+                )
             if station_col:
                 selected.append(f'"{station_col}" AS station')
             if node_col:
@@ -345,11 +430,10 @@ class ProjectRepository:
             sql = (
                 f'SELECT {", ".join(selected)} FROM DSR '
                 f'WHERE "{x_col}" IS NOT NULL AND "{y_col}" IS NOT NULL '
-                f'AND (date("{timestamp_col}") = ? '
-                f'OR substr(trim(CAST("{timestamp_col}" AS TEXT)), 1, 10) = ?) '
+                f'AND dv_timestamp_date("{timestamp_col}") = ? '
                 f'ORDER BY "{vehicle_col}", "{line_col}"'
             )
-            rows = connection.execute(sql, (selected_date, selected_date)).fetchall()
+            rows = connection.execute(sql, (selected_date,)).fetchall()
 
         grouped: dict[tuple[str, str], list[sqlite3.Row]] = {}
         for row in rows:
@@ -727,9 +811,16 @@ class ProjectRepository:
             if fk and file_id:
                 sql += f' WHERE "{fk}" = ?'
                 params.append(file_id)
-            if time_col:
-                sql += f' ORDER BY "{time_col}"'
             rows = connection.execute(sql, params).fetchall()
+
+        if time_col:
+            rows = sorted(
+                rows,
+                key=lambda row: (
+                    parse_timestamp(row[time_col]) is None,
+                    parse_timestamp(row[time_col]) or 0.0,
+                ),
+            )
 
         info = next((item for item in self.list_blackbox_files() if item.file_id == file_id), None)
         if info is None:
@@ -741,19 +832,13 @@ class ProjectRepository:
         labels = np.asarray([str(row[time_col]) if time_col and row[time_col] is not None else str(i) for i, row in enumerate(rows)], dtype=object)
         seconds = np.arange(count, dtype=np.float64)
         if time_col:
-            import datetime as _dt
             parsed: list[float] = []
             first = None
             for label in labels:
-                value = None
-                text = str(label).strip().replace("Z", "+00:00")
-                for parser in (_dt.datetime.fromisoformat,):
-                    try:
-                        value = parser(text).timestamp(); break
-                    except Exception:
-                        pass
+                value = parse_timestamp(label)
                 if value is None:
                     try:
+                        text = str(label).strip()
                         parts = text.split(":")
                         value = float(parts[-1]) + 60 * float(parts[-2]) + (3600 * float(parts[-3]) if len(parts) >= 3 else 0)
                     except Exception:
@@ -980,20 +1065,20 @@ class ProjectRepository:
                 f'"{line_col}" = ? AND "{time_col}" IS NOT NULL '
                 f'AND TRIM(CAST("{time_col}" AS TEXT)) <> ""'
             )
-            first = connection.execute(
-                f'SELECT "{time_col}" FROM DSR WHERE {where} '
-                f'ORDER BY "{time_col}" ASC LIMIT 1',
+            rows = connection.execute(
+                f'SELECT "{time_col}" FROM DSR WHERE {where}',
                 (int(line),),
-            ).fetchone()
-            last = connection.execute(
-                f'SELECT "{time_col}" FROM DSR WHERE {where} '
-                f'ORDER BY "{time_col}" DESC LIMIT 1',
-                (int(line),),
-            ).fetchone()
+            ).fetchall()
 
-        if not first or not last:
+        parsed = [
+            (seconds, str(row[0]))
+            for row in rows
+            if (seconds := parse_timestamp(row[0])) is not None
+        ]
+        if not parsed:
             return None
-        return str(first[0]), str(last[0])
+        parsed.sort(key=lambda item: item[0])
+        return parsed[0][1], parsed[-1][1]
 
     def load_blackbox_tracks_for_dsr_line(
         self,
@@ -1012,8 +1097,15 @@ class ProjectRepository:
                 f"No {phase} timestamps ({timestamp_name}) were found for DSR line {line}."
             )
         start_time, end_time = time_range
+        start_seconds = parse_timestamp(start_time)
+        end_seconds = parse_timestamp(end_time)
+        if start_seconds is None or end_seconds is None:
+            raise ProjectRepositoryError(
+                f"Could not parse the DSR {phase} time window for line {line}."
+            )
 
         with self._connect() as connection:
+            connection.create_function("dv_timestamp_epoch", 1, parse_timestamp)
             files_table, data_table = self._find_blackbox_tables(connection)
             if data_table is None:
                 return []
@@ -1056,8 +1148,10 @@ class ProjectRepository:
                 select_columns.append(f'CAST("{y_by_prefix[prefix]}" AS REAL) AS "{prefix}_y"')
             rows = connection.execute(
                 f'SELECT {", ".join(select_columns)} FROM "{data_table}" '
-                f'WHERE "{time_col}" >= ? AND "{time_col}" <= ? ORDER BY "{time_col}"',
-                (start_time, end_time),
+                f'WHERE dv_timestamp_epoch("{time_col}") >= ? '
+                f'AND dv_timestamp_epoch("{time_col}") <= ? '
+                f'ORDER BY dv_timestamp_epoch("{time_col}")',
+                (start_seconds, end_seconds),
             ).fetchall()
 
         if not rows:

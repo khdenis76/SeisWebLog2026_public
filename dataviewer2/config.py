@@ -51,6 +51,7 @@ class ProjectViewerConfig:
         self.group_visibility: dict[str, bool] = {}
         self.removed_layers: list[str] = []
         self.labels_enabled: bool = False
+        self.drawings: list[dict[str, Any]] = []
         self.load()
 
     def load(self) -> None:
@@ -78,6 +79,7 @@ class ProjectViewerConfig:
         }
         self.removed_layers = [str(name) for name in payload.get("removed_layers") or []]
         self.labels_enabled = bool(payload.get("labels_enabled", False))
+        self.drawings = [dict(item) for item in payload.get("drawings") or [] if isinstance(item, dict)]
         self.layer_order = {
             str(group): [str(value) for value in values]
             for group, values in dict(payload.get("layer_order") or {}).items()
@@ -104,8 +106,13 @@ class ProjectViewerConfig:
             "group_visibility": self.group_visibility,
             "removed_layers": self.removed_layers,
             "labels_enabled": self.labels_enabled,
+            "drawings": self.drawings,
         }
         self.path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def set_drawings(self, drawings: list[dict[str, Any]]) -> None:
+        self.drawings = [dict(item) for item in drawings]
+        self.save()
 
     def set_shape_style(self, layer_name: str, style: dict[str, Any]) -> None:
         self.shape_styles[layer_name] = dict(style)

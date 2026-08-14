@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog, QFormLayout, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
     QSizePolicy, QSplitter, QStyle, QTableView, QTextEdit, QToolBar, QVBoxLayout, QWidget, QSpinBox,
-    QDoubleSpinBox, QDialogButtonBox, QHeaderView, QInputDialog, QMenu
+    QDoubleSpinBox, QDialogButtonBox, QHeaderView, QInputDialog, QMenu, QScrollArea
 )
 
 from ..core.batch_processor import BatchSettings, BatchWorker
@@ -22,10 +22,10 @@ from ..core.exporters import RESULT_COLUMNS, SUMMARY_COLUMNS, export_csv, export
 from ..core.image_scanner import scan_images
 from ..core.icon_manager import LucideIcons
 from ..core.models import OCRConfig
-from ..core.ocr_db import fetch_results, set_checked, ensure_schema, delete_results_by_paths, delete_results_by_station_keys, delete_results_by_rov, reset_checked_for_paths, distinct_ocr_values, fetch_unchecked_existing_image_paths
+from ..core.ocr_db import fetch_results, set_checked, ensure_schema, delete_results_by_paths, delete_results_by_station_keys, delete_results_by_rov, reset_checked_for_paths, distinct_ocr_values, fetch_unchecked_existing_image_paths, EDITABLE_RESULT_COLUMNS, update_result_field, update_result_fields
 from ..core.project_loader import load_projects
 from ..core.dsr_loader import load_distinct_rov_values
-from .results_model import DictTableModel
+from .results_model import COLUMN_TITLES, DictTableModel
 from .roi_editor import RoiEditorDialog
 
 INPUT_PATTERN_HELP = (
@@ -266,7 +266,10 @@ class OCRMainWindow(QMainWindow):
         self.image_rows: list[dict] = []
         self.station_rows: list[dict] = []
         self.station_model = DictTableModel(STATION_COLUMNS)
-        self.image_model = DictTableModel(RESULT_TABLE_COLUMNS)
+        self.image_model = DictTableModel(
+            RESULT_TABLE_COLUMNS, editable_columns=EDITABLE_RESULT_COLUMNS
+        )
+        self.image_model.valueEdited.connect(self._save_edited_image_cell)
         self.icons = LucideIcons()
         self.quick_filtered_station_rows: list[dict] = []
         self._build_ui()
@@ -296,10 +299,11 @@ class OCRMainWindow(QMainWindow):
         self.station_table.selectionModel().selectionChanged.connect(self._on_station_selected)
         self.station_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.station_table.customContextMenuRequested.connect(self._station_context_menu)
-        self.image_table = QTableView(); self.image_table.setModel(self.image_model); self.image_table.setSortingEnabled(True); self.image_table.setSelectionBehavior(QAbstractItemView.SelectRows); self.image_table.setSelectionMode(QAbstractItemView.ExtendedSelection); self.image_table.doubleClicked.connect(self.open_image_from_row)
+        self.image_table = QTableView(); self.image_table.setModel(self.image_model); self.image_table.setSortingEnabled(True); self.image_table.setSelectionBehavior(QAbstractItemView.SelectRows); self.image_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.image_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.image_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.image_table.customContextMenuRequested.connect(self._image_context_menu)
+        self.image_table.doubleClicked.connect(self.open_image_from_row)
         splitter.addWidget(self.station_table); splitter.addWidget(self.image_table); splitter.setStretchFactor(0, 3); splitter.setStretchFactor(1, 2)
         lay.addWidget(splitter, 1)
         bottom = QWidget(); bottom_l = QVBoxLayout(bottom)
@@ -665,11 +669,94 @@ class OCRMainWindow(QMainWindow):
         if not index.isValid(): return
         row = self.image_model.rows[index.row()]
         image_path = row.get("image_path", "")
-        if not image_path or not os.path.exists(image_path): return
+        if not image_path or not os.path.exists(image_path):
+            QMessageBox.warning(self, "Open OCR image", f"Image file was not found:\n{image_path or '(empty path)'}")
+            return
         try:
             if os.name == "nt": os.startfile(image_path)
             else: subprocess.Popen(["xdg-open", image_path])
-        except Exception as exc: self._log(f"Cannot open image: {exc}")
+        except Exception as exc:
+            self._log(f"Cannot open image: {exc}")
+            QMessageBox.warning(self, "Open OCR image", f"Could not open the image:\n{exc}")
+
+    def edit_image_fields_from_row(self, index) -> None:
+        if not index.isValid() or not (0 <= index.row() < len(self.image_model.rows)):
+            return
+        row = self.image_model.rows[index.row()]
+        image_path = str(row.get("image_path") or "")
+        if not image_path:
+            QMessageBox.warning(self, "Edit OCR result", "This row has no image-path database key.")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Edit OCR fields — {row.get('image_name') or Path(image_path).name}")
+        dialog.resize(620, 720)
+        root = QVBoxLayout(dialog)
+        note = QLabel(f"Image: {image_path}")
+        note.setWordWrap(True)
+        root.addWidget(note)
+        form_widget = QWidget()
+        form = QFormLayout(form_widget)
+        editors: dict[str, QLineEdit] = {}
+        ordered_columns = [column for column in RESULT_COLUMNS if column in EDITABLE_RESULT_COLUMNS]
+        for column in ordered_columns:
+            editor = QLineEdit("" if row.get(column) is None else str(row.get(column)))
+            editor.setObjectName(f"ocrField_{column}")
+            editor.setClearButtonEnabled(True)
+            editors[column] = editor
+            form.addRow(COLUMN_TITLES.get(column, column), editor)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(form_widget)
+        root.addWidget(scroll, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        root.addWidget(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        changed = {
+            column: editor.text()
+            for column, editor in editors.items()
+            if editor.text().strip() != str(row.get(column) if row.get(column) is not None else "").strip()
+        }
+        if not changed:
+            return
+        db_path = self.project_db_edit.text().strip()
+        try:
+            stored = update_result_fields(db_path, image_path, changed)
+        except Exception as exc:
+            QMessageBox.warning(self, "Edit OCR result", f"Could not save the fields:\n{exc}")
+            return
+        row.update(stored)
+        self._log(f"Saved {len(stored)} field(s) for {row.get('image_name') or Path(image_path).name}")
+        self.refresh_results()
+
+    def _save_edited_image_cell(
+        self, row: dict, column: str, old_value, new_value
+    ) -> None:
+        db_path = self.project_db_edit.text().strip()
+        image_path = str(row.get("image_path") or "")
+        try:
+            if not db_path or not os.path.isfile(db_path):
+                raise ValueError("Project database is not available.")
+            stored = update_result_field(
+                db_path, image_path, column, new_value
+            )
+        except Exception as exc:
+            row[column] = old_value
+            self.image_model.layoutChanged.emit()
+            QMessageBox.warning(
+                self,
+                "Edit OCR result",
+                f"Could not save {column}:\n{exc}",
+            )
+            return
+
+        row[column] = stored
+        self._log(
+            f"Saved {column} for {row.get('image_name') or Path(image_path).name}"
+        )
+        self.refresh_results()
 
     def _log(self, text: str):
         self.log_edit.append(text)
@@ -1058,6 +1145,20 @@ class OCRMainWindow(QMainWindow):
 
     def _image_context_menu(self, pos):
         menu = QMenu(self)
+        clicked_index = self.image_table.indexAt(pos)
+        self._menu_action(
+            menu,
+            'Open image',
+            lambda _checked=False, idx=clicked_index: self.open_image_from_row(idx),
+            'image', 'external-link',
+        )
+        self._menu_action(
+            menu,
+            'Edit image fields…',
+            lambda _checked=False, idx=clicked_index: self.edit_image_fields_from_row(idx),
+            'square-pen', 'pencil',
+        )
+        menu.addSeparator()
         self._menu_action(menu, 'Tick selected images', lambda: self._set_image_selected(True), 'mouse-pointer-check', 'image-check')
         self._menu_action(menu, 'Untick selected images', lambda: self._set_image_selected(False), 'mouse-pointer-2', 'image-x')
         menu.addSeparator()

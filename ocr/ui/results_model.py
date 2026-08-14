@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor, QBrush
 
 
@@ -90,10 +90,14 @@ def _natural_key(value: Any):
 
 
 class DictTableModel(QAbstractTableModel):
-    def __init__(self, columns: list[str], rows: list[dict[str, Any]] | None = None, parent=None):
+    valueEdited = Signal(object, str, object, object)
+
+    def __init__(self, columns: list[str], rows: list[dict[str, Any]] | None = None,
+                 parent=None, editable_columns: set[str] | frozenset[str] | None = None):
         super().__init__(parent)
         self.columns = columns
         self.rows = rows or []
+        self.editable_columns = set(editable_columns or ())
 
     def set_rows(self, rows):
         self.beginResetModel()
@@ -119,6 +123,8 @@ class DictTableModel(QAbstractTableModel):
         flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable
         if self.columns[index.column()] == "selected":
             flags |= Qt.ItemIsUserCheckable
+        if self.columns[index.column()] in self.editable_columns:
+            flags |= Qt.ItemIsEditable
         return flags
 
     def data(self, index, role=Qt.DisplayRole):
@@ -153,6 +159,16 @@ class DictTableModel(QAbstractTableModel):
         if col == "selected" and role == Qt.CheckStateRole:
             self.rows[index.row()][col] = 1 if value == Qt.Checked else 0
             self.dataChanged.emit(index, index, [Qt.CheckStateRole])
+            return True
+        if col in self.editable_columns and role == Qt.EditRole:
+            row = self.rows[index.row()]
+            old_value = row.get(col, "")
+            new_value = "" if value is None else str(value).strip()
+            if str(old_value if old_value is not None else "") == new_value:
+                return False
+            row[col] = new_value
+            self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.EditRole])
+            self.valueEdited.emit(row, col, old_value, new_value)
             return True
         return False
 

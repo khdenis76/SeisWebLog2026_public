@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-import datetime as _dt
 
 import numpy as np
 import pyqtgraph as pg
@@ -10,6 +9,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from .icons_manager import icon
 
 from .models import BlackBoxData, BlackBoxFileInfo
+from .time_utils import parse_timestamp
 from .qc_widgets import (
     ElapsedAxis,
     PLOT_BG,
@@ -219,32 +219,7 @@ class BlackBoxWindow(QtWidgets.QMainWindow):
 
     @staticmethod
     def _parse_timestamp(value: object) -> float | None:
-        if value is None:
-            return None
-        text = str(value).strip()
-        if not text or text.lower() in {"none", "nan", "nat"}:
-            return None
-        normalized = text.replace("Z", "+00:00")
-        try:
-            parsed = _dt.datetime.fromisoformat(normalized)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=_dt.timezone.utc)
-            return float(parsed.timestamp())
-        except Exception:
-            pass
-        for fmt in (
-            "%Y-%m-%d %H:%M:%S.%f",
-            "%Y-%m-%d %H:%M:%S",
-            "%Y/%m/%d %H:%M:%S.%f",
-            "%Y/%m/%d %H:%M:%S",
-            "%d/%m/%Y %H:%M:%S",
-        ):
-            try:
-                parsed = _dt.datetime.strptime(text, fmt).replace(tzinfo=_dt.timezone.utc)
-                return float(parsed.timestamp())
-            except Exception:
-                continue
-        return None
+        return parse_timestamp(value)
 
     def _update_highlight_elapsed(self) -> None:
         self._highlight_elapsed = None

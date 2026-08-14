@@ -465,7 +465,9 @@ class RibbonBar(QtWidgets.QTabWidget):
         _, measurement = self._new_tab("Measurement")
         mode_group = RibbonGroup("Measurement mode")
         self.measure_button_group = QtWidgets.QButtonGroup(self)
-        self.measure_button_group.setExclusive(True)
+        # Exclusivity is managed in _select_measurement_mode so the active
+        # button can be clicked a second time to turn measurement off.
+        self.measure_button_group.setExclusive(False)
         self.measure_buttons: dict[str, RibbonButton] = {}
         for mode, title, icon_key in (
             ("distance", "Distance", "measure_distance"),
@@ -474,7 +476,7 @@ class RibbonBar(QtWidgets.QTabWidget):
             ("angle", "Angle", "measure_angle"),
         ):
             button = RibbonButton(title, icon(icon_key), checkable=True)
-            button.clicked.connect(lambda checked=False, value=mode: self._select_measurement_mode(value))
+            button.clicked.connect(lambda checked=False, value=mode: self._select_measurement_mode(value, checked))
             self.measure_button_group.addButton(button)
             self.measure_buttons[mode] = button
             mode_group.add_button(button)
@@ -580,12 +582,18 @@ class RibbonBar(QtWidgets.QTabWidget):
         self.polygon_select_button.setChecked(False)
         self.node_select_button_group.setExclusive(True)
 
-    def _select_measurement_mode(self, mode: str) -> None:
+    def _select_measurement_mode(self, mode: str, checked: bool = True) -> None:
         button = self.measure_buttons.get(mode)
-        if button is not None and not button.isChecked():
-            button.setChecked(True)
-        self.measurement_mode_requested.emit(mode)
-        self.measurement_toggled.emit(True)
+        if not checked:
+            self.measurement_toggled.emit(False)
+            return
+        for key, candidate in self.measure_buttons.items():
+            blocker = QtCore.QSignalBlocker(candidate)
+            candidate.setChecked(key == mode)
+            del blocker
+        if button is not None:
+            self.measurement_mode_requested.emit(mode)
+            self.measurement_toggled.emit(True)
 
     def set_radial_default(self, radius: float) -> None:
         self.radial_radius_spin.setValue(max(0.01, float(radius)))
@@ -677,6 +685,7 @@ class RibbonBar(QtWidgets.QTabWidget):
             "feature": getattr(self, "feature_panel_button", None),
             "measurement": getattr(self, "measurement_panel_button", None),
             "ocr": getattr(self, "ocr_panel_button", None),
+            "heading": getattr(self, "heading_panel_button", None),
             "status": getattr(self, "status_bar_button", None),
         }.get(panel)
         if button is None:

@@ -84,6 +84,104 @@ _COLUMNS = [
     "status", "station_image_count", "expected_images", "station_status", "message", "checked",
 ]
 
+EDITABLE_RESULT_COLUMNS = frozenset(
+    column for column in _COLUMNS if column not in {"image_path", "checked"}
+)
+
+
+def update_result_field(
+    db_path: str, image_path: str, column: str, value: Any
+) -> Any:
+    """Update one allowlisted OCR result field and return its stored value."""
+    if column not in EDITABLE_RESULT_COLUMNS:
+        raise ValueError(f"OCR result field is not editable: {column}")
+    if not image_path:
+        raise ValueError("The image row has no database key (image_path).")
+
+    text = "" if value is None else str(value).strip()
+    positive_integer_fields = {
+        "file_line", "file_station", "file_index", "line", "station",
+        "dsr_line", "dsr_station", "dive", "station_image_count",
+        "expected_images",
+    }
+    positive_decimal_fields = {"east", "north"}
+    if column in positive_integer_fields:
+        text = text.lstrip("-")
+    elif column in positive_decimal_fields and text:
+        try:
+            text = str(abs(float(text)))
+        except ValueError as exc:
+            raise ValueError(f"{column} must be a positive number.") from exc
+
+    stored: Any = text
+    if column in {"dive", "station_image_count"}:
+        stored = _safe_int(text)
+    elif column == "delta_m":
+        stored = _safe_float(text)
+
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    try:
+        cursor = conn.execute(
+            f"UPDATE {TABLE_NAME} SET {column}=?, processed_at=CURRENT_TIMESTAMP "
+            "WHERE image_path=?",
+            (stored, image_path),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError("The OCR image row no longer exists in the database.")
+        conn.commit()
+        return "" if stored is None else stored
+    finally:
+        conn.close()
+
+
+def update_result_fields(
+    db_path: str, image_path: str, values: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Atomically validate and update several editable OCR result fields."""
+    if not image_path:
+        raise ValueError("The image row has no database key (image_path).")
+    unknown = set(values) - EDITABLE_RESULT_COLUMNS
+    if unknown:
+        raise ValueError("OCR result field is not editable: " + ", ".join(sorted(unknown)))
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    stored_values: Dict[str, Any] = {}
+    try:
+        conn.execute("BEGIN")
+        for column, value in values.items():
+            # Reuse the same normalization rules as update_result_field without
+            # committing each field independently.
+            text = "" if value is None else str(value).strip()
+            if column in {"file_line", "file_station", "file_index", "line", "station", "dsr_line", "dsr_station", "dive", "station_image_count", "expected_images"}:
+                text = text.lstrip("-")
+            elif column in {"east", "north"} and text:
+                try:
+                    text = str(abs(float(text)))
+                except ValueError as exc:
+                    raise ValueError(f"{column} must be a positive number.") from exc
+            stored: Any = text
+            if column in {"dive", "station_image_count"}:
+                stored = _safe_int(text)
+            elif column == "delta_m":
+                stored = _safe_float(text)
+            stored_values[column] = "" if stored is None else stored
+        if stored_values:
+            assignments = ", ".join(f'"{column}"=?' for column in stored_values)
+            cursor = conn.execute(
+                f"UPDATE {TABLE_NAME} SET {assignments}, processed_at=CURRENT_TIMESTAMP WHERE image_path=?",
+                [*stored_values.values(), image_path],
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("The OCR image row no longer exists in the database.")
+        conn.commit()
+        return stored_values
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 
 def upsert_result(db_path: str, row: Dict[str, Any]) -> None:
     ensure_schema(db_path)

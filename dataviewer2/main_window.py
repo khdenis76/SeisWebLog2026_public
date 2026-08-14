@@ -17,6 +17,40 @@ from .repository import ProjectRepository, ProjectRepositoryError
 from .ribbon import RibbonBar
 from .shapes import load_vector_layer
 from .workers import FunctionWorker
+
+
+class DrawingLayer:
+    """Small persistent map layer backed by one or more pyqtgraph items."""
+
+    def __init__(self, plot_item, name: str, kind: str, points, items, style=None, text="") -> None:
+        self.plot_item, self.name, self.kind = plot_item, name, kind
+        self.points = [(float(x), float(y)) for x, y in points]
+        self.items = list(items)
+        self.style = dict(style or {})
+        self.text = str(text)
+        self.visible = True
+        self.loaded = True
+        self.count = len(self.points)
+
+    @property
+    def bounds(self):
+        if not self.points:
+            return None
+        xs, ys = zip(*self.points)
+        return min(xs), max(xs), min(ys), max(ys)
+
+    def set_visible(self, visible: bool) -> None:
+        self.visible = bool(visible)
+        for item in self.items:
+            item.setVisible(self.visible)
+
+    def remove(self) -> None:
+        for item in self.items:
+            self.plot_item.removeItem(item)
+
+    def set_z_value(self, z: float) -> None:
+        for offset, item in enumerate(self.items):
+            item.setZValue(float(z) + offset * 0.001)
 from .bbox import BlackBoxWindow
 from .dsr_qc import DsrQcWindow
 from .config import ProjectViewerConfig, CustomDsrLayerDefinition
@@ -25,7 +59,7 @@ from .icons_manager import icon
 from .labels import MapLabelManager
 from .radial_circles import RadialCircleItem
 from .projects import ProjectsDatabase, ProjectsDatabaseError
-from .surface_dialog import SurfaceCreateDialog
+from .surface_dialog import SurfaceCreateDialog, build_surface_from_definition
 from .ocr_images import OcrImagesPanel
 from .surface_layer import SurfaceMapLayer
 from .surface3d import Surface3DWindow
@@ -181,6 +215,12 @@ class LayerTreeWidget(QtWidgets.QTreeWidget):
 class MainWindow(QtWidgets.QMainWindow):
     """Main DataViewer 2.0 shell with ribbon, docks and fast map canvas."""
 
+    MAIN_GROUP_ORDER = [
+        "Receiver Preplots", "Source Preplots", "DSR", "Survey Manager", "Receiver Database",
+        "Source Lines", "Source Points", "OCR Images", "Drawings",
+        "Project shapes", "Geopackage", "BlackBox",
+    ]
+
     def __init__(self, project_path: str | Path) -> None:
         super().__init__()
         self.project_path = Path(project_path)
@@ -223,6 +263,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._radial_circle_style = {"radius": self.repository.max_radial_offset(), "color": "#ff5252", "width": 1.5, "line_style": "solid"}
         self._node_selection_mode: str | None = None
         self._selection_polygon_points: list[tuple[float, float]] = []
+        self._draw_mode: str | None = None
+        self._draw_points: list[tuple[float, float]] = []
+        self._draw_items: list[object] = []
+        self._draw_preview: pg.PlotDataItem | None = None
+        self._draw_radius_label: pg.TextItem | None = None
+        self._draw_free_active = False
         self._build_ui()
         self._restore_state()
         self._start_loading()
@@ -238,7 +284,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         self.ribbon = RibbonBar(self)
-        self.setMenuWidget(self.ribbon)
+        self._build_main_menu_and_tools()
 
         self.plot_widget = pg.PlotWidget()
         self.plot_item = self.plot_widget.getPlotItem()
@@ -266,6 +312,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.measurement = MeasurementTool(self.plot_item)
         self.measurement.changed.connect(self.measure_text.setPlainText)
+        self._load_persistent_drawings()
 
         self.viewport_timer = QtCore.QTimer(self)
         self.viewport_timer.setSingleShot(True)
@@ -305,6 +352,9 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.ocr_images_dock.visibilityChanged.connect(
             lambda visible: self.ribbon.set_panel_button_checked("ocr", visible)
+        )
+        self.heading_dock.visibilityChanged.connect(
+            lambda visible: self.ribbon.set_panel_button_checked("heading", visible)
         )
         self.ribbon.bbox_open_requested.connect(self._open_bbox_window)
         self.ribbon.bbox_reload_requested.connect(self._load_bbox_files)
@@ -352,6 +402,426 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().addPermanentWidget(self.coord_label)
         self.statusBar().showMessage(f"Project: {self.project_path} | EPSG: {epsg}")
 
+    def _build_main_menu_and_tools(self) -> None:
+        """Build the menu/quick tools area which stays visible above the ribbon."""
+        top = QtWidgets.QWidget(self)
+        top.setObjectName("MainCommandArea")
+        layout = QtWidgets.QVBoxLayout(top)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.main_menu_bar = QtWidgets.QMenuBar(top)
+
+        project_menu = self.project_menu = self.main_menu_bar.addMenu("&Project")
+        self._add_menu_command(project_menu, "Change project…", "change_project", self.ribbon.project_change_requested)
+        self._add_menu_command(project_menu, "Reload project", "reload", self.ribbon.refresh_requested)
+        self._add_menu_command(project_menu, "Open project folder", "project_folder", self.ribbon.project_folder_requested)
+        project_menu.addSeparator()
+        self._add_menu_command(project_menu, "Exit", "exit", self.ribbon.exit_requested)
+
+        view_menu = self.view_menu = self.main_menu_bar.addMenu("&View")
+        panels_menu = self.view_panels_menu = view_menu.addMenu("Panels")
+        for title, button in (
+            ("Layers panel", self.ribbon.layers_panel_button),
+            ("Feature panel", self.ribbon.feature_panel_button),
+            ("Measurement panel", self.ribbon.measurement_panel_button),
+            ("OCR Images panel", self.ribbon.ocr_panel_button),
+            ("Heading panel", self.ribbon.heading_panel_button),
+            ("Status bar", self.ribbon.status_bar_button),
+        ):
+            self._add_mirrored_toggle(panels_menu, title, button)
+        view_menu.addSeparator()
+        self._add_mirrored_toggle(view_menu, "Grid", self.ribbon.grid_button)
+        self._add_mirrored_toggle(view_menu, "Line / point labels", self.ribbon.labels_button)
+        self._add_mirrored_toggle(view_menu, "Night mode", self.ribbon.night_mode_button)
+        tool_groups_menu = self.tool_groups_menu = view_menu.addMenu("Tool groups")
+        view_menu.addSeparator()
+        self._add_menu_command(view_menu, "Reset layout", "reload", self.ribbon.reset_layout_requested)
+
+        tools_menu = self.tools_menu = self.main_menu_bar.addMenu("&Tools")
+        self._add_menu_command(tools_menu, "Zoom all", "zoom_all", self.ribbon.zoom_all_requested)
+        self._add_menu_command(tools_menu, "Refresh layers", "reload", self.ribbon.refresh_requested)
+
+        measurement_menu = self.measurement_menu = self.main_menu_bar.addMenu("&Measure")
+
+        self.measurement_actions: dict[str, QtGui.QAction] = {}
+        details = (
+            ("distance", "Distance", "measure_distance", "Measure distances between map points"),
+            ("area", "Area", "measure_area", "Measure a polygon area and perimeter"),
+            ("bearing", "Bearing", "measure_bearing", "Measure bearing between two points"),
+            ("angle", "Angle", "measure_angle", "Measure an angle using three points"),
+        )
+        for mode, title, icon_key, tip in details:
+            action = QtGui.QAction(icon(icon_key), title, self)
+            action.setCheckable(True)
+            action.setToolTip(tip + "; click again to turn measurement off")
+            action.toggled.connect(
+                lambda checked, value=mode: self._measurement_action_toggled(value, checked)
+            )
+            self.measurement_actions[mode] = action
+            measurement_menu.addAction(action)
+
+        measurement_menu.addSeparator()
+        self.measurement_undo_action = QtGui.QAction(icon("undo"), "Undo point", self)
+        self.measurement_clear_action = QtGui.QAction(icon("clear"), "Clear measurements", self)
+        self.measurement_undo_action.triggered.connect(
+            lambda _checked=False: self.ribbon.remove_last_measurement_requested.emit()
+        )
+        self.measurement_clear_action.triggered.connect(
+            lambda _checked=False: self.ribbon.clear_measurement_requested.emit()
+        )
+        measurement_menu.addAction(self.measurement_undo_action)
+        measurement_menu.addAction(self.measurement_clear_action)
+
+        help_menu = self.help_menu = self.main_menu_bar.addMenu("&Help")
+        about_action = help_menu.addAction(icon("app"), "About DataViewer")
+        about_action.triggered.connect(self._show_dataviewer_about)
+
+        self.measurement_tools_panel = QtWidgets.QGroupBox("Measure", top)
+        self.measurement_tools_panel.setObjectName("MeasurementToolsPanel")
+        panel_layout = QtWidgets.QHBoxLayout(self.measurement_tools_panel)
+        panel_layout.setContentsMargins(4, 2, 4, 2)
+        panel_layout.setSpacing(0)
+        self.measurement_toolbar = QtWidgets.QToolBar("Measurement tools", self.measurement_tools_panel)
+        self.measurement_toolbar.setObjectName("MeasurementToolsBar")
+        self.measurement_toolbar.setMovable(False)
+        self.measurement_toolbar.setFloatable(False)
+        self.measurement_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.measurement_toolbar.setIconSize(QtCore.QSize(22, 22))
+        for mode, *_ in details:
+            self.measurement_toolbar.addAction(self.measurement_actions[mode])
+        self.measurement_toolbar.addSeparator()
+        self.measurement_toolbar.addAction(self.measurement_undo_action)
+        self.measurement_toolbar.addAction(self.measurement_clear_action)
+        panel_layout.addWidget(self.measurement_toolbar)
+
+        self.draw_tools_panel = QtWidgets.QGroupBox("Draw", top)
+        draw_layout = QtWidgets.QHBoxLayout(self.draw_tools_panel)
+        draw_layout.setContentsMargins(4, 2, 4, 2)
+        self.draw_toolbar = QtWidgets.QToolBar("Drawing tools", self.draw_tools_panel)
+        self.draw_toolbar.setObjectName("DrawToolsBar")
+        self.draw_toolbar.setMovable(False)
+        self.draw_toolbar.setFloatable(False)
+        self.draw_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.draw_toolbar.setIconSize(QtCore.QSize(22, 22))
+        self.draw_actions: dict[str, QtGui.QAction] = {}
+        for mode, title, icon_key, tip in (
+            ("radius_circle", "Radius circle", "draw_radius_circle", "Draw a circle with its radius line: click center, then edge"),
+            ("line", "Line", "draw_line", "Draw a line: click its start and end"),
+            ("polygon", "Polygon", "draw_polygon", "Draw a polygon: click vertices, then right-click or double-click"),
+            ("circle", "Circle", "draw_circle", "Draw a circle: click center, then edge"),
+            ("free", "Free paint", "draw_free", "Paint freehand by holding the left mouse button"),
+            ("text", "Text", "draw_text", "Place persistent text on the map"),
+        ):
+            action = QtGui.QAction(icon(icon_key), title, self)
+            action.setCheckable(True)
+            action.setToolTip(tip + "; click the active tool again to stop")
+            action.toggled.connect(lambda checked, value=mode: self._draw_action_toggled(value, checked))
+            self.draw_actions[mode] = action
+            self.draw_toolbar.addAction(action)
+        self.draw_toolbar.addSeparator()
+        clear_drawings = QtGui.QAction(icon("clear"), "Clear drawings", self)
+        clear_drawings.setToolTip("Remove all drawings from the map")
+        clear_drawings.triggered.connect(self._clear_drawings)
+        self.draw_toolbar.addAction(clear_drawings)
+        draw_layout.addWidget(self.draw_toolbar)
+
+        self.measurement_tools_panel.setObjectName("MeasurementToolsPanel")
+        self.measurement_tools_panel.setToolTip("Measurement tools")
+        measure_group_action = self.measure_group_visibility_action = tool_groups_menu.addAction("Measurement group")
+        measure_group_action.setCheckable(True)
+        measure_group_action.setChecked(True)
+        measure_group_action.toggled.connect(self.measurement_tools_panel.setVisible)
+        draw_group_action = self.draw_group_visibility_action = tool_groups_menu.addAction("Draw group")
+        draw_group_action.setCheckable(True)
+        draw_group_action.setChecked(True)
+        draw_group_action.toggled.connect(self.draw_tools_panel.setVisible)
+
+        self.selection_tools_panel = QtWidgets.QGroupBox("Select", top)
+        selection_layout = QtWidgets.QHBoxLayout(self.selection_tools_panel)
+        selection_layout.setContentsMargins(4, 2, 4, 2)
+        self.selection_toolbar = QtWidgets.QToolBar("Selection tools", self.selection_tools_panel)
+        self.selection_toolbar.setObjectName("SelectionToolsBar")
+        self.selection_toolbar.setMovable(False)
+        self.selection_toolbar.setFloatable(False)
+        self.selection_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.selection_toolbar.setIconSize(QtCore.QSize(22, 22))
+        self.selection_actions: dict[str, QtGui.QAction] = {}
+        for mode, title, icon_key, tip in (
+            ("radius", "Select by radius", "select_radius", "Select nodes using the configured radius"),
+            ("polygon", "Draw selection polygon", "select_polygon", "Select nodes inside or outside a drawn polygon"),
+            ("shape", "Select by shape polygon", "select_shape", "Select nodes using a polygon drawing or shape layer"),
+        ):
+            action = QtGui.QAction(icon(icon_key), title, self)
+            action.setCheckable(mode != "shape")
+            action.setToolTip(tip)
+            if mode == "shape":
+                action.triggered.connect(lambda _checked=False: self._selection_tool_requested("shape", True))
+            else:
+                action.toggled.connect(lambda checked, value=mode: self._selection_tool_requested(value, checked))
+            self.selection_actions[mode] = action
+            self.selection_toolbar.addAction(action)
+        self.selection_toolbar.addSeparator()
+        self.selection_toolbar.addAction(icon("clear"), "Clear selection", self._clear_node_selection)
+        selection_layout.addWidget(self.selection_toolbar)
+        selection_layout.addWidget(QtWidgets.QLabel("Nodes:"))
+        self.selection_location_combo = QtWidgets.QComboBox()
+        self.selection_location_combo.addItems(["Inside", "Outside"])
+        self.selection_location_combo.setCurrentText(self.ribbon.selection_location_combo.currentText())
+        self.selection_location_combo.currentTextChanged.connect(self.ribbon.selection_location_combo.setCurrentText)
+        self.ribbon.selection_location_combo.currentTextChanged.connect(self.selection_location_combo.setCurrentText)
+        selection_layout.addWidget(self.selection_location_combo)
+        selection_layout.addWidget(QtWidgets.QLabel("Radius:"))
+        self.selection_radius_spin = QtWidgets.QDoubleSpinBox()
+        self.selection_radius_spin.setRange(0.01, 1000000.0)
+        self.selection_radius_spin.setDecimals(2)
+        self.selection_radius_spin.setSuffix(" m")
+        self.selection_radius_spin.setValue(self.ribbon.selection_radius())
+        self.selection_radius_spin.valueChanged.connect(self.ribbon.selection_radius_spin.setValue)
+        self.ribbon.selection_radius_spin.valueChanged.connect(self.selection_radius_spin.setValue)
+        selection_layout.addWidget(self.selection_radius_spin)
+        self.ribbon.radius_select_button.toggled.connect(lambda checked: self._sync_selection_action("radius", checked))
+        self.ribbon.polygon_select_button.toggled.connect(lambda checked: self._sync_selection_action("polygon", checked))
+        selection_group_action = self.selection_group_visibility_action = tool_groups_menu.addAction("Selection group")
+        selection_group_action.setCheckable(True)
+        selection_group_action.setChecked(True)
+        selection_group_action.toggled.connect(self.selection_tools_panel.setVisible)
+
+        tools_row = QtWidgets.QWidget(top)
+        tools_layout = QtWidgets.QHBoxLayout(tools_row)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        tools_layout.setSpacing(3)
+        tools_layout.addWidget(self.measurement_tools_panel)
+        tools_layout.addWidget(self.draw_tools_panel)
+        tools_layout.addWidget(self.selection_tools_panel)
+        tools_layout.addStretch(1)
+
+        layout.addWidget(self.main_menu_bar)
+        layout.addWidget(tools_row)
+        layout.addWidget(self.ribbon)
+        self.setMenuWidget(top)
+
+    def _add_menu_command(self, menu, title: str, icon_key: str, signal) -> QtGui.QAction:
+        action = menu.addAction(icon(icon_key), title)
+        action.triggered.connect(lambda _checked=False, target=signal: target.emit())
+        return action
+
+    def _add_mirrored_toggle(
+        self, menu: QtWidgets.QMenu, title: str, button: QtWidgets.QAbstractButton
+    ) -> QtGui.QAction:
+        """Create a checkable menu item whose state mirrors a ribbon button."""
+        action = menu.addAction(button.icon(), title)
+        action.setCheckable(True)
+        action.setChecked(button.isChecked())
+        action.toggled.connect(button.setChecked)
+
+        def sync_from_button(checked: bool) -> None:
+            blocker = QtCore.QSignalBlocker(action)
+            action.setChecked(checked)
+            del blocker
+
+        button.toggled.connect(sync_from_button)
+        return action
+
+    def _show_dataviewer_about(self) -> None:
+        QtWidgets.QMessageBox.about(
+            self,
+            "About DataViewer",
+            "SeisWebLog DataViewer 3.0\n\nInteractive project mapping and QC tools.",
+        )
+
+    def _measurement_action_toggled(self, mode: str, checked: bool) -> None:
+        if checked:
+            for key, action in self.measurement_actions.items():
+                if key != mode:
+                    blocker = QtCore.QSignalBlocker(action)
+                    action.setChecked(False)
+                    del blocker
+            self._set_measurement_mode(mode)
+        else:
+            self._toggle_measurement(False)
+
+    def _sync_measurement_actions(self, enabled: bool, mode: str | None = None) -> None:
+        target = mode or "distance"
+        for key, action in self.measurement_actions.items():
+            blocker = QtCore.QSignalBlocker(action)
+            action.setChecked(bool(enabled and key == target))
+            del blocker
+
+    def _draw_action_toggled(self, mode: str, checked: bool) -> None:
+        if not checked:
+            if self._draw_mode == mode:
+                self._stop_drawing_mode()
+            return
+        for key, action in self.draw_actions.items():
+            if key != mode:
+                blocker = QtCore.QSignalBlocker(action)
+                action.setChecked(False)
+                del blocker
+        self._toggle_measurement(False)
+        self._node_selection_mode = None
+        self.ribbon.clear_node_selection_mode()
+        self._discard_draw_preview()
+        self._draw_mode = mode
+        self._draw_points.clear()
+        self._draw_free_active = False
+        messages = {
+            "radius_circle": "Draw radius circle: click the center and then the edge.",
+            "line": "Draw line: click its start and end.",
+            "polygon": "Draw polygon: click vertices; right-click or double-click to finish.",
+            "circle": "Draw circle: click the center and then the edge.",
+            "free": "Free paint: hold the left mouse button and drag on the map.",
+            "text": "Text: click the map position, then enter the text.",
+        }
+        self.statusBar().showMessage(messages[mode])
+
+    def _selection_tool_requested(self, mode: str, checked: bool) -> None:
+        if not checked:
+            if self._node_selection_mode == mode:
+                self._node_selection_mode = None
+                self._selection_polygon_points.clear()
+                self.selection_guide.setData([], [])
+                self.ribbon.clear_node_selection_mode()
+            return
+        for key in ("radius", "polygon"):
+            self._sync_selection_action(key, key == mode)
+        self._stop_drawing_mode() if self._draw_mode is not None else None
+        self._toggle_measurement(False)
+        self._start_node_selection(mode)
+
+    def _sync_selection_action(self, mode: str, checked: bool) -> None:
+        action = getattr(self, "selection_actions", {}).get(mode)
+        if action is None:
+            return
+        blocker = QtCore.QSignalBlocker(action)
+        action.setChecked(bool(checked))
+        del blocker
+
+    def _stop_drawing_mode(self) -> None:
+        self._discard_draw_preview()
+        self._draw_mode = None
+        self._draw_points.clear()
+        self._draw_free_active = False
+        for action in getattr(self, "draw_actions", {}).values():
+            blocker = QtCore.QSignalBlocker(action)
+            action.setChecked(False)
+            del blocker
+        self.statusBar().showMessage("Drawing off", 2000)
+
+    def _discard_draw_preview(self) -> None:
+        if self._draw_preview is not None:
+            self.plot_item.removeItem(self._draw_preview)
+            self._draw_preview = None
+        if self._draw_radius_label is not None:
+            self.plot_item.removeItem(self._draw_radius_label)
+            self._draw_radius_label = None
+
+    def _new_draw_item(self, x, y, *, closed: bool = False, track: bool = True) -> pg.PlotDataItem:
+        xs, ys = list(x), list(y)
+        if closed and xs:
+            xs.append(xs[0]); ys.append(ys[0])
+        item = pg.PlotDataItem(xs, ys, pen=pg.mkPen("#ff4081", width=2.2))
+        item.setZValue(900000)
+        self.plot_item.addItem(item)
+        if track:
+            self._draw_items.append(item)
+        return item
+
+    def _unique_drawing_name(self, base: str) -> str:
+        name, suffix = base, 2
+        while name in self.layers:
+            name = f"{base} ({suffix})"; suffix += 1
+        return name
+
+    def _drawing_items(self, kind: str, points, style, text="") -> list:
+        color = str(style.get("line_color", "#ff4081"))
+        width = float(style.get("line_width", 2.2))
+        fill_color = QtGui.QColor(str(style.get("fill_color", "#ff4081")))
+        fill_color.setAlphaF(max(0.0, min(1.0, float(style.get("fill_opacity", 0.15)))))
+        pen, brush = pg.mkPen(color, width=width), pg.mkBrush(fill_color)
+        items = []
+        if kind == "text":
+            item = pg.TextItem(str(text), color=color, anchor=(0.5, 0.5))
+            font = QtGui.QFont(); font.setPointSizeF(float(style.get("text_size", 12.0))); item.setFont(font)
+            item.setPos(*points[0]); item.setZValue(900000); self.plot_item.addItem(item); items.append(item)
+            return items
+        if kind in {"line", "free"}:
+            item = pg.PlotDataItem([p[0] for p in points], [p[1] for p in points], pen=pen)
+        elif kind == "polygon":
+            coords = list(points) + [points[0]]
+            item = pg.PlotDataItem([p[0] for p in coords], [p[1] for p in coords], pen=pen, fillLevel=None)
+            polygon = QtWidgets.QGraphicsPolygonItem(QtGui.QPolygonF([QtCore.QPointF(*p) for p in points]))
+            polygon.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen)); polygon.setBrush(QtGui.QBrush(fill_color)); polygon.setZValue(899999)
+            self.plot_item.addItem(polygon); items.append(polygon)
+        else:
+            (x0, y0), (x1, y1) = points
+            radius = float(np.hypot(x1-x0, y1-y0)); angles = np.linspace(0, 2*np.pi, 181)
+            xs, ys = x0+radius*np.cos(angles), y0+radius*np.sin(angles)
+            circle_polygon = QtWidgets.QGraphicsPolygonItem(
+                QtGui.QPolygonF([QtCore.QPointF(float(x), float(y)) for x, y in zip(xs, ys)])
+            )
+            circle_polygon.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+            circle_polygon.setBrush(QtGui.QBrush(fill_color)); circle_polygon.setZValue(899999)
+            self.plot_item.addItem(circle_polygon); items.append(circle_polygon)
+            item = pg.PlotDataItem(xs, ys, pen=pen)
+            if kind == "radius_circle":
+                radius_item = pg.PlotDataItem([x0, x1], [y0, y1], pen=pen); radius_item.setZValue(900000)
+                self.plot_item.addItem(radius_item); items.append(radius_item)
+                label = pg.TextItem(f"{radius:,.2f} m", color=color, anchor=(0.5, 1.2))
+                font = QtGui.QFont(); font.setPointSizeF(float(style.get("text_size", 10.0))); label.setFont(font)
+                label.setPos((x0+x1)/2, (y0+y1)/2); label.setZValue(900001); self.plot_item.addItem(label); items.append(label)
+        item.setZValue(900000); self.plot_item.addItem(item); items.append(item)
+        return items
+
+    def _add_drawing_layer(self, kind: str, points, *, name: str | None = None, style=None, text="", save: bool = True) -> str:
+        points = [(float(x), float(y)) for x, y in points]
+        base = {"circle": "Circle", "radius_circle": "RadiusCircle", "line": "Line", "polygon": "Poly", "free": "FreePaint", "text": "Text"}[kind]
+        name = self._unique_drawing_name(name or base)
+        style = dict(style or {"line_color":"#ff4081", "line_width":2.2, "fill_color":"#ff4081", "fill_opacity":0.15, "text_size":12.0})
+        items = self._drawing_items(kind, points, style, text)
+        layer = DrawingLayer(self.plot_item, name, kind, points, items, style, text)
+        registered = self._register_layer("Drawings", name, len(points), layer, f"Persistent {base} drawing")
+        if save:
+            self._save_persistent_drawings()
+        return registered
+
+    def _save_persistent_drawings(self) -> None:
+        payload = [{"name": name, "kind": layer.kind, "points": layer.points, "style":layer.style, "text":layer.text}
+                   for name, layer in self.layers.items() if isinstance(layer, DrawingLayer)]
+        self.viewer_config.set_drawings(payload)
+
+    def _load_persistent_drawings(self) -> None:
+        for drawing in self.viewer_config.drawings:
+            kind, points = str(drawing.get("kind", "")), drawing.get("points") or []
+            minimum = 1 if kind == "text" else 2
+            if kind in {"circle", "radius_circle", "line", "polygon", "free", "text"} and len(points) >= minimum:
+                self._add_drawing_layer(kind, points, name=str(drawing.get("name") or "Drawing"), style=drawing.get("style"), text=str(drawing.get("text") or ""), save=False)
+
+    def _finish_polygon_drawing(self) -> None:
+        if len(self._draw_points) >= 3:
+            self._discard_draw_preview()
+            self._add_drawing_layer("polygon", self._draw_points)
+        self._draw_points.clear()
+
+    def _finish_two_point_drawing(self) -> None:
+        if len(self._draw_points) != 2:
+            return
+        (x0, y0), (x1, y1) = self._draw_points
+        self._discard_draw_preview()
+        self._add_drawing_layer(str(self._draw_mode), [(x0, y0), (x1, y1)])
+        self._draw_points.clear()
+
+    def _clear_drawings(self, _checked: bool = False) -> None:
+        self._discard_draw_preview()
+        for item in self._draw_items:
+            self.plot_item.removeItem(item)
+        self._draw_items.clear()
+        for name in [name for name, layer in self.layers.items() if isinstance(layer, DrawingLayer)]:
+            self._remove_layer_without_prompt(name)
+        self._save_persistent_drawings()
+        self._draw_points.clear()
+        self.statusBar().showMessage("Drawings cleared", 2000)
+
     def _build_layers_dock(self) -> None:
         self.layers_dock = QtWidgets.QDockWidget("Layers", self)
         self.layers_dock.setObjectName("LayersDock")
@@ -397,8 +867,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.layers_dock.setWidget(container)
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, self.layers_dock)
         # Recreate saved groups immediately, including currently empty custom groups.
+        obsolete_groups = {"Preplot", "Preplots", "Receiver QC", "GeoPackage"}
         for saved_group in list(getattr(self.viewer_config, "group_order", []) or []):
-            self._group_item(str(saved_group))
+            if str(saved_group) not in obsolete_groups:
+                self._group_item(str(saved_group))
 
     def _theme_toggled_from_ribbon(self, night_enabled: bool) -> None:
         self._apply_theme("night" if night_enabled else "day")
@@ -499,6 +971,65 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ocr_images_panel.set_records(line, station, records)
         self.ocr_images_dock.show()
         self.resizeDocks([self.ocr_images_dock], [220], QtCore.Qt.Orientation.Vertical)
+
+    def _is_dsr_layer(self, layer_name: str) -> bool:
+        """Return whether a displayed point layer originates from the DSR table."""
+        layer = self.layers.get(layer_name)
+        if getattr(layer, "source_table", "") == "DSR":
+            return True
+        # Per-line navigation overlays are not registered in self.layers.
+        base_name = str(layer_name).split(" / Line ", 1)[0]
+        base_layer = self.layers.get(base_name)
+        return getattr(base_layer, "source_table", "") == "DSR"
+
+    @staticmethod
+    def _record_integer(record: dict, *keys: str) -> int | None:
+        lower = {str(key).lower(): value for key, value in record.items()}
+        for key in keys:
+            value = lower.get(key.lower())
+            if value is None or str(value).strip() == "":
+                continue
+            try:
+                return int(round(float(value)))
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _sync_dsr_ribbon_to_record(self, record: dict) -> None:
+        """Show the clicked DSR identity without emitting navigation signals."""
+        line = self._record_integer(record, "line", "dsr_line")
+        station = self._record_integer(
+            record, "station", "linepoint", "point", "dsr_station"
+        )
+        if line is None:
+            return
+
+        primary = self._dsr_primary_data()
+        line_list: list[int] = [line]
+        station_list: list[int] = [station] if station is not None else []
+        if primary is not None:
+            lines = self._numeric_values(primary.metadata.get("line"))
+            stations = self._numeric_values(primary.metadata.get("station"))
+            finite_lines = np.isfinite(lines)
+            line_list = sorted(
+                {int(round(value)) for value in lines[finite_lines]}
+            )
+            if line not in line_list:
+                line_list.append(line)
+                line_list.sort()
+            rounded = np.zeros(lines.size, dtype=np.int64)
+            rounded[finite_lines] = np.rint(lines[finite_lines]).astype(np.int64)
+            mask = finite_lines & np.isfinite(stations) & (rounded == line)
+            station_list = sorted(
+                {int(round(value)) for value in stations[mask]}
+            )
+            if station is not None and station not in station_list:
+                station_list.append(station)
+                station_list.sort()
+
+        self._dsr_station_values = station_list
+        self.ribbon.set_dsr_lines(line_list, line)
+        self.ribbon.set_dsr_stations(station_list, station)
 
 
 
@@ -673,7 +1204,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
 
     def _generate_dsr_line_report(self) -> None:
         line = self.ribbon.current_dsr_line()
-        layer = self.layers.get("DSR Primary")
+        layer = self.layers.get("DSR Primary Deployment")
         if line is None or not isinstance(layer, FastPointLayer) or layer.data is None:
             QtWidgets.QMessageBox.information(self, "Receiver-line report", "DSR Primary and a receiver line are required.")
             return
@@ -754,16 +1285,21 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             QtWidgets.QMessageBox.critical(self, "Attach GeoPackage", str(exc))
 
     def _start_loading(self) -> None:
+        # Establish a deterministic project layer tree before asynchronous jobs
+        # complete in an arbitrary order.
+        for group_name in self.MAIN_GROUP_ORDER:
+            self._group_item(group_name)
+        self._enforce_main_group_order()
         jobs = [
-            ("Preplot", "RPPreplot", self.repository.load_rp_preplot, "#27c2ff", "#27c2ff", "line"),
             ("OCR Images", "OCR Image Counts", self.repository.load_ocr_image_counts, "#00000000", None, None),
-            ("Receiver QC", "DSR Preplot", lambda: self.repository.load_dsr_layer("preplot"), "#a7a7a7", None, None),
-            ("Receiver QC", "DSR Primary", lambda: self.repository.load_dsr_layer("primary"), "#41d26f", None, None),
-            ("Receiver QC", "DSR Secondary", lambda: self.repository.load_dsr_layer("secondary"), "#44a7ff", None, None),
-            ("Receiver QC", "DSR Recovery Primary", lambda: self.repository.load_dsr_layer("recovery_primary"), "#ff9d3d", None, None),
-            ("Receiver QC", "REC_DB", self.repository.load_rec_db, "#f05cff", None, None),
+            ("DSR", "DSR Primary Deployment", lambda: self.repository.load_dsr_layer("primary"), "#41d26f", "#41d26f", "line"),
+            ("DSR", "DSR Secondary Deployment", lambda: self.repository.load_dsr_layer("secondary"), "#44a7ff", "#44a7ff", "line"),
+            ("DSR", "DSR Primary Recover", lambda: self.repository.load_dsr_layer("recovery_primary"), "#ff9d3d", "#ff9d3d", "line"),
+            ("DSR", "DSR Secondary Recover", lambda: self.repository.load_dsr_layer("recovery_secondary"), "#ab47bc", "#ab47bc", "line"),
             ("Survey Manager", "SM Deployment", lambda: self.repository.load_survey_manager_layer("deployment"), "#00e676", None, None),
             ("Survey Manager", "SM Recovery", lambda: self.repository.load_survey_manager_layer("recovery"), "#ffab40", None, None),
+            ("Receiver Database", "Receiver database coordinates", self.repository.load_rec_db, "#f05cff", None, None),
+            ("Source Lines", "Source Lines", self.repository.load_source_lines, "#ffca28", "#ffca28", "track_group"),
         ]
         try:
             shape_definitions = self.repository.load_shape_definitions() + self.repository.load_geopackage_definitions()
@@ -791,13 +1327,30 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 QtWidgets.QApplication.processEvents()
 
         custom_definitions = list(self.viewer_config.custom_dsr_layers)
-        self._pending = len(jobs) + len(custom_definitions)
+        surface_definitions = self._load_surface_definitions()
+        self._pending = len(jobs) + 3 + len(custom_definitions) + len(surface_definitions)
         self.statusBar().showMessage(f"Loading {self._pending} database layer(s)…")
         for group, name, function, point_color, line_color, connect_by in jobs:
             worker = FunctionWorker(function)
             worker.signals.completed.connect(
                 lambda data, g=group, n=name, pc=point_color, lc=line_color, cb=connect_by:
                 self._point_layer_loaded(g, n, data, pc, lc, cb)
+            )
+            worker.signals.failed.connect(self._load_failed)
+            self._start_worker(worker)
+
+        source_points_worker = FunctionWorker(self.repository.load_source_points_by_sail_line)
+        source_points_worker.signals.completed.connect(self._source_points_loaded)
+        source_points_worker.signals.failed.connect(self._load_failed)
+        self._start_worker(source_points_worker)
+
+        for group, prefix, loader, color in (
+            ("Receiver Preplots", "Receiver preplot", self.repository.load_rp_preplot, "#27c2ff"),
+            ("Source Preplots", "Source preplot", self.repository.load_source_preplot, "#66bb6a"),
+        ):
+            worker = FunctionWorker(loader)
+            worker.signals.completed.connect(
+                lambda data, g=group, p=prefix, c=color: self._preplot_lines_loaded(g, p, data, c)
             )
             worker.signals.failed.connect(self._load_failed)
             self._start_worker(worker)
@@ -811,11 +1364,36 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             worker.signals.failed.connect(self._load_failed)
             self._start_worker(worker)
 
+        for definition in surface_definitions:
+            worker = FunctionWorker(
+                lambda d=definition: build_surface_from_definition(
+                    self.viewer_config.project_path, d
+                )
+            )
+            worker.signals.completed.connect(
+                lambda result, d=definition: self._saved_surface_loaded(d, result)
+            )
+            worker.signals.failed.connect(self._load_failed)
+            self._start_worker(worker)
+
         if self._pending == 0:
             self._loading_initial_layers = False
             self._save_layer_tree_order()
             self._zoom_all()
             self.statusBar().showMessage(f"Ready — {len(self.layers)} layer(s)")
+
+    def _enforce_main_group_order(self) -> None:
+        """Place standard project groups first in their documented order."""
+        standard = []
+        custom = []
+        while self.layer_tree.topLevelItemCount():
+            item = self.layer_tree.takeTopLevelItem(0)
+            (standard if item.text(0) in self.MAIN_GROUP_ORDER else custom).append(item)
+        by_name = {item.text(0): item for item in standard}
+        for item in [by_name[name] for name in self.MAIN_GROUP_ORDER if name in by_name] + custom:
+            self.layer_tree.addTopLevelItem(item)
+            if self.layer_tree.itemWidget(item, 2) is None:
+                self._add_group_visibility_buttons(item, item.text(0))
 
     def _group_item(self, name: str) -> QtWidgets.QTreeWidgetItem:
         for index in range(self.layer_tree.topLevelItemCount()):
@@ -831,7 +1409,8 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
 
         # Restore a project-specific group order when one has been saved. New
         # groups that are not yet in the saved order are appended normally.
-        desired = list(getattr(self.viewer_config, "group_order", []) or [])
+        saved = list(getattr(self.viewer_config, "group_order", []) or [])
+        desired = self.MAIN_GROUP_ORDER + [value for value in saved if value not in self.MAIN_GROUP_ORDER]
         if name in desired:
             target = 0
             wanted_index = desired.index(name)
@@ -1060,15 +1639,17 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
     def _layer_reload_function(self, layer_name: str):
         """Return a callable that reloads one layer's source data."""
         builtins = {
-            "RPPreplot": self.repository.load_rp_preplot,
+            "Receiver preplot": self.repository.load_rp_preplot,
+            "Source preplot": self.repository.load_source_preplot,
             "OCR Image Counts": self.repository.load_ocr_image_counts,
-            "DSR Preplot": lambda: self.repository.load_dsr_layer("preplot"),
-            "DSR Primary": lambda: self.repository.load_dsr_layer("primary"),
-            "DSR Secondary": lambda: self.repository.load_dsr_layer("secondary"),
-            "DSR Recovery Primary": lambda: self.repository.load_dsr_layer("recovery_primary"),
-            "REC_DB": self.repository.load_rec_db,
+            "DSR Primary Deployment": lambda: self.repository.load_dsr_layer("primary"),
+            "DSR Secondary Deployment": lambda: self.repository.load_dsr_layer("secondary"),
+            "DSR Primary Recover": lambda: self.repository.load_dsr_layer("recovery_primary"),
+            "DSR Secondary Recover": lambda: self.repository.load_dsr_layer("recovery_secondary"),
+            "Receiver database coordinates": self.repository.load_rec_db,
             "SM Deployment": lambda: self.repository.load_survey_manager_layer("deployment"),
             "SM Recovery": lambda: self.repository.load_survey_manager_layer("recovery"),
+            "Source Lines": self.repository.load_source_lines,
         }
         if layer_name in builtins:
             return builtins[layer_name]
@@ -1166,15 +1747,15 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                     if key[0] == layer_name:
                         overlay.remove()
                         self._dsr_line_overlays.pop(key, None)
-                if layer_name.startswith("DSR ") or (
+                if layer_name.startswith("DSR ") or layer_name in {"SM Deployment", "SM Recovery", "Receiver database coordinates"} or (
                     self._custom_definition_by_layer.get(layer_name) is not None
                     and self._custom_definition_by_layer[layer_name].split_by_line
                 ):
                     self._attach_dsr_hierarchy(layer_name)
-                if layer_name == "DSR Primary":
+                if layer_name == "DSR Primary Deployment":
                     self._populate_dsr_ribbon(data)
                     self.dsr_qc_cache.clear()
-                if layer_name == "RPPreplot":
+                if layer_name == "Receiver preplot":
                     self._prepare_radial_circles(data)
             elif isinstance(layer, FastShapeLayer) and isinstance(data, ShapeLayerData):
                 visible = layer.visible
@@ -1245,6 +1826,15 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         lower_name = unique.lower()
         if group == "Project shapes":
             icon_key = "shape"
+        elif group == "Drawings" and isinstance(layer, DrawingLayer):
+            icon_key = {
+                "circle": "draw_circle",
+                "radius_circle": "draw_radius_circle",
+                "line": "draw_line",
+                "polygon": "draw_polygon",
+                "free": "draw_free",
+                "text": "draw_text",
+            }.get(layer.kind, "shape")
         elif group == "Surfaces":
             icon_key = "map"
         elif group == "BlackBox":
@@ -1303,10 +1893,14 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             self._finish_load()
             return
         layer = FastPointLayer(self.plot_item, name, point_color, line_color, connect_by)
+        if group in {"DSR", "Survey Manager"}:
+            layer.source_table = "DSR"
+        elif group == "Receiver Database":
+            layer.source_table = "REC_DB"
         layer.set_data(data)
-        if name == "DSR Primary":
+        if name == "DSR Primary Deployment":
             layer.update_style(symbol="circle", marker_text="D", point_size=8.0)
-        elif name == "DSR Recovery Primary":
+        elif name == "DSR Primary Recover":
             layer.update_style(symbol="square", marker_text="R", point_size=8.0)
         elif name == "OCR Image Counts":
             layer.update_style(
@@ -1317,11 +1911,67 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             )
         layer.selection_changed.connect(self._show_record)
         registered_name = self._register_layer(group, name, data.count, layer)
-        if name.startswith("DSR "):
+        if group in {"DSR", "Survey Manager", "Receiver Database"}:
             self._attach_dsr_hierarchy(registered_name)
-        if name == "DSR Primary":
+        if name == "DSR Primary Deployment":
             self._populate_dsr_ribbon(data)
-        if name == "RPPreplot":
+        if name == "Receiver preplot":
+            self._prepare_radial_circles(data)
+        if group == "Source Lines" and name not in self.viewer_config.layer_visibility:
+            item = self.layer_items.get(registered_name)
+            if item is not None:
+                item.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
+        self._finish_load()
+
+    def _source_points_loaded(self, datasets: list[PointLayerData]) -> None:
+        for index, data in enumerate(datasets):
+            name = str(data.name)
+            layer = FastPointLayer(self.plot_item, name, self._category_color(name), None, None)
+            layer.source_table = "SPSolution"
+            layer.set_data(data)
+            layer.selection_changed.connect(self._show_record)
+            registered = self._register_layer("Source Points", name, data.count, layer)
+            if registered not in self.viewer_config.layer_visibility:
+                item = self.layer_items.get(registered)
+                if item is not None:
+                    item.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
+        self._finish_load()
+
+    @staticmethod
+    def _line_sort_key(value: object) -> tuple[int, float | str]:
+        try:
+            return 0, float(str(value).strip())
+        except (TypeError, ValueError):
+            return 1, str(value)
+
+    def _preplot_lines_loaded(
+        self, group: str, prefix: str, data: PointLayerData, color: str
+    ) -> None:
+        """Register a receiver/source preplot as one clickable layer per line."""
+        values = data.metadata.get("line", data.metadata.get("sailline"))
+        if values is None or values.size != data.count:
+            datasets = [("Unknown", np.arange(data.count, dtype=np.int64))]
+        else:
+            line_keys = np.asarray([str(value).strip() or "Unknown" for value in values], dtype=object)
+            datasets = [
+                (line, np.flatnonzero(line_keys == line))
+                for line in sorted(set(line_keys.tolist()), key=self._line_sort_key)
+            ]
+        for line, indices in datasets:
+            if indices.size == 0:
+                continue
+            line_data = PointLayerData(
+                f"{prefix} — Line {line}",
+                data.x[indices], data.y[indices], data.source_index[indices],
+                {key: value[indices] for key, value in data.metadata.items()},
+            )
+            name = line_data.name
+            layer = FastPointLayer(self.plot_item, name, color, color, "line")
+            layer.source_table = "RPreplot" if group == "Receiver Preplots" else "SPreplot"
+            layer.set_data(line_data)
+            layer.selection_changed.connect(self._show_record)
+            self._register_layer(group, name, line_data.count, layer)
+        if group == "Receiver Preplots":
             self._prepare_radial_circles(data)
         self._finish_load()
 
@@ -1333,7 +1983,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             return
         group = "Project shapes"
         if data.definition.source_type == "gpkg":
-            group = f"GeoPackage — {data.definition.container_name or data.definition.full_name.stem}"
+            group = "Geopackage"
         tooltip = (f"{data.definition.full_name}\n"
                    f"Layer: {data.definition.source_layer or data.definition.full_name.name}\n"
                    f"Source CRS: {data.source_crs}\nProject CRS: {data.target_crs}\nStatus: {data.crs_status}")
@@ -1368,7 +2018,9 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         if not isinstance(layer, FastPointLayer) or layer.data is None or item is None:
             return
         line_values = self._numeric_values(layer.data.metadata.get("line"))
-        station_values = self._numeric_values(layer.data.metadata.get("station"))
+        station_values = self._numeric_values(
+            layer.data.metadata.get("station", layer.data.metadata.get("point"))
+        )
         if line_values.size == 0 or station_values.size == 0:
             return
         finite = np.isfinite(line_values) & np.isfinite(station_values)
@@ -1441,7 +2093,9 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             return
         item.takeChildren()
         line_values = self._numeric_values(layer.data.metadata.get("line"))
-        station_values = self._numeric_values(layer.data.metadata.get("station"))
+        station_values = self._numeric_values(
+            layer.data.metadata.get("station", layer.data.metadata.get("point"))
+        )
         valid = np.isfinite(line_values) & np.isfinite(station_values)
         indices = np.flatnonzero(valid & (np.rint(line_values).astype(np.int64) == line))
         # Keep one navigation item per station, even when the DSR table contains
@@ -1533,6 +2187,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                     continue
                 color = definition.categories.get(category, {}).get("color", self._category_color(category))
                 layer = FastPointLayer(self.plot_item, category_data.name, color, color, "line" if "line" in category_data.metadata else None)
+                layer.source_table = "DSR"
                 layer.update_style(point_color=color, line_color=color, point_size=definition.point_size, line_width=1.5)
                 layer.set_data(category_data)
                 layer.set_visible(definition.visible)
@@ -1549,6 +2204,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 return
             color = definition.color
             layer = FastPointLayer(self.plot_item, definition.name, color, color, "line" if "line" in data.metadata else None)
+            layer.source_table = "DSR"
             layer.update_style(point_color=color, line_color=color, point_size=definition.point_size, line_width=1.5)
             layer.set_data(data)
             layer.set_visible(definition.visible)
@@ -1676,13 +2332,19 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
     def _layer_double_clicked(self, item: QtWidgets.QTreeWidgetItem, _column: int) -> None:
         kind = item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1)
         if kind == "dsr_line":
-            self._zoom_dsr_line(int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3)))
+            layer_name = str(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 2) or "")
+            line = int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3))
+            layer = self.layers.get(layer_name)
+            if isinstance(layer, FastPointLayer) and layer.data is not None:
+                values = self._numeric_values(layer.data.metadata.get("line"))
+                valid = np.isfinite(values)
+                indices = np.flatnonzero(valid & (np.rint(values).astype(np.int64) == line))
+                if indices.size:
+                    x, y = layer.data.x[indices], layer.data.y[indices]
+                    self._set_view_extent((float(np.nanmin(x)), float(np.nanmax(x)), float(np.nanmin(y)), float(np.nanmax(y))))
             return
         if kind == "dsr_station":
-            self._zoom_dsr_station(
-                int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 3)),
-                int(item.data(0, QtCore.Qt.ItemDataRole.UserRole + 4)),
-            )
+            self._tree_item_clicked(item, _column)
             return
         name = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         if name in self.layers:
@@ -1753,6 +2415,9 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         menu.addSeparator()
         style_action = menu.addAction(icon("style", size=18), "Style…")
         style_action.triggered.connect(lambda: self._edit_layer_style(name))
+        if isinstance(layer, DrawingLayer):
+            rename_action = menu.addAction(icon("properties", size=18), "Rename drawing…")
+            rename_action.triggered.connect(lambda: self._rename_drawing_layer(name))
         properties_action = menu.addAction(icon("properties", size=18), "Properties")
         properties_action.triggered.connect(lambda: self._show_layer_properties(name))
         reload_action = menu.addAction(icon("reload", size=18), "Reload all layers")
@@ -1767,6 +2432,31 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             folder_action = menu.addAction(icon("open_folder", size=18), "Open source folder")
             folder_action.triggered.connect(lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(layer.data.definition.full_name.parent))))
         menu.exec(self.layer_tree.viewport().mapToGlobal(position))
+
+    def _rename_drawing_layer(self, old_name: str) -> None:
+        layer = self.layers.get(old_name)
+        if not isinstance(layer, DrawingLayer):
+            return
+        new_name, accepted = QtWidgets.QInputDialog.getText(
+            self, "Rename drawing", "Drawing layer name:", text=old_name
+        )
+        new_name = str(new_name).strip()
+        if not accepted or not new_name or new_name == old_name:
+            return
+        if new_name in self.layers:
+            QtWidgets.QMessageBox.warning(self, "Rename drawing", "A layer with that name already exists.")
+            return
+        reordered = OrderedDict()
+        for name, value in self.layers.items():
+            reordered[new_name if name == old_name else name] = value
+        self.layers = reordered
+        layer.name = new_name
+        item = self.layer_items.pop(old_name)
+        item.setText(0, new_name)
+        item.setData(0, QtCore.Qt.ItemDataRole.UserRole, new_name)
+        self.layer_items[new_name] = item
+        self._save_persistent_drawings()
+        self._save_layer_tree_order()
 
     def _show_multi_layer_context_menu(
         self, names: list[str], position: QtCore.QPoint
@@ -2061,6 +2751,8 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         layer = self.layers.get(name)
         if layer is None:
             return
+        if isinstance(layer, SurfaceMapLayer):
+            self._remove_surface_definition(name)
         try:
             layer.remove()
         except Exception:
@@ -2086,6 +2778,8 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 if self.bbox_track_layer_names else None
             )
         self.viewer_config.mark_layer_removed(name)
+        if isinstance(layer, DrawingLayer):
+            self._save_persistent_drawings()
         self._save_layer_tree_order()
 
     def _delete_selected_layers(self, names: list[str]) -> None:
@@ -2559,10 +3253,26 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             if names and set(names) == set(self.layers):
                 self.layers = OrderedDict((name, self.layers[name]) for name in names)
         total = len(self.layers)
-        for index, layer in enumerate(self.layers.values()):
+        group_by_layer: dict[str, str] = {}
+        if hasattr(self, "layer_tree"):
+            # Build this mapping from the live tree.  layer_items may briefly
+            # contain an invalid Shiboken wrapper after a Qt row/group rebuild.
+            for group_index in range(self.layer_tree.topLevelItemCount()):
+                group_item = self.layer_tree.topLevelItem(group_index)
+                group_name = str(group_item.text(0))
+                for child_index in range(group_item.childCount()):
+                    child = group_item.child(child_index)
+                    child_name = child.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                    if child_name is not None:
+                        group_by_layer[str(child_name)] = group_name
+        for index, (name, layer) in enumerate(self.layers.items()):
             setter = getattr(layer, "set_z_value", None)
             if callable(setter):
-                setter(float(total - index))
+                group = group_by_layer.get(name, "")
+                # OCR anchors and user drawings are intentional background
+                # reference layers, regardless of their visible tree position.
+                z_value = -2000.0 + index if group in {"OCR Images", "Drawings"} else float(total - index)
+                setter(z_value)
 
     def _copy_layer_extent(self, name: str) -> None:
         layer = self.layers.get(name)
@@ -2574,9 +3284,55 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
 
     def _edit_layer_style(self, name: str) -> None:
         layer = self.layers.get(name)
+        if isinstance(layer, DrawingLayer):
+            self._edit_drawing_style(name, layer)
+            return
         if isinstance(layer, FastShapeLayer):
             self._edit_shape_style(name, layer)
             return
+        self._edit_point_layer_style(name, layer)
+
+    def _edit_drawing_style(self, name: str, layer: DrawingLayer) -> None:
+        dialog = QtWidgets.QDialog(self); dialog.setWindowTitle(f"Drawing properties — {name}")
+        form = QtWidgets.QFormLayout(dialog)
+        selected = {
+            "line": QtGui.QColor(str(layer.style.get("line_color", "#ff4081"))),
+            "fill": QtGui.QColor(str(layer.style.get("fill_color", "#ff4081"))),
+        }
+        line_color = QtWidgets.QPushButton(selected["line"].name())
+        fill_color = QtWidgets.QPushButton(selected["fill"].name())
+        def choose(which, button):
+            value = QtWidgets.QColorDialog.getColor(selected[which], dialog)
+            if value.isValid(): selected[which] = value; button.setText(value.name())
+        line_color.clicked.connect(lambda: choose("line", line_color)); fill_color.clicked.connect(lambda: choose("fill", fill_color))
+        width = QtWidgets.QDoubleSpinBox(); width.setRange(0.2, 20); width.setDecimals(1); width.setValue(float(layer.style.get("line_width", 2.2)))
+        text_size = QtWidgets.QDoubleSpinBox(); text_size.setRange(4, 72); text_size.setValue(float(layer.style.get("text_size", 12)))
+        opacity = QtWidgets.QDoubleSpinBox(); opacity.setRange(0, 100); opacity.setSuffix(" %"); opacity.setValue((1.0-float(layer.style.get("fill_opacity", .15)))*100)
+        form.addRow("Line/text color:", line_color); form.addRow("Line thickness:", width); form.addRow("Text size:", text_size)
+        if layer.kind in {"circle", "radius_circle", "polygon"}:
+            form.addRow("Fill color:", fill_color); form.addRow("Fill transparency:", opacity)
+        radius = None
+        if layer.kind in {"circle", "radius_circle"}:
+            radius = QtWidgets.QDoubleSpinBox(); radius.setRange(.001, 1e9); radius.setDecimals(3); radius.setSuffix(" m")
+            radius.setValue(float(np.hypot(layer.points[1][0]-layer.points[0][0], layer.points[1][1]-layer.points[0][1])))
+            form.addRow("Radius:", radius)
+        text_edit = None
+        if layer.kind == "text":
+            text_edit = QtWidgets.QLineEdit(layer.text); form.addRow("Text:", text_edit)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); form.addRow(buttons)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted: return
+        layer.style.update(line_color=selected["line"].name(), line_width=width.value(), text_size=text_size.value(),
+                           fill_color=selected["fill"].name(), fill_opacity=1.0-opacity.value()/100.0)
+        if radius is not None:
+            (x0,y0),(x1,y1)=layer.points; old=max(float(np.hypot(x1-x0,y1-y0)),1e-12); scale=radius.value()/old
+            layer.points=[(x0,y0),(x0+(x1-x0)*scale,y0+(y1-y0)*scale)]
+        if text_edit is not None: layer.text=text_edit.text()
+        for item in layer.items: self.plot_item.removeItem(item)
+        layer.items=self._drawing_items(layer.kind, layer.points, layer.style, layer.text)
+        layer.set_visible(layer.visible); self._save_persistent_drawings()
+
+    def _edit_point_layer_style(self, name: str, layer: object) -> None:
         if not isinstance(layer, FastPointLayer):
             QtWidgets.QMessageBox.information(
                 self,
@@ -2920,8 +3676,11 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         self.plot_item.showGrid(x=visible, y=visible, alpha=0.2)
 
     def _set_measurement_mode(self, mode: str) -> None:
+        if self._draw_mode is not None:
+            self._stop_drawing_mode()
         self.measurement.set_mode(mode)
         self.ribbon.set_measurement_checked(True, mode)
+        self._sync_measurement_actions(True, mode)
         self.measure_dock.setVisible(True)
         self.measure_dock.raise_()
         instructions = {
@@ -2938,6 +3697,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         else:
             self.measurement.disable()
             self.ribbon.set_measurement_checked(False)
+            self._sync_measurement_actions(False)
 
     def _selection_point_layer(self, show_message: bool = True) -> tuple[str, FastPointLayer] | None:
         name = self._selected_layer_name()
@@ -3161,8 +3921,83 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         point = self.plot_item.vb.mapSceneToView(scene_pos)
         self.coord_label.setText(f"X: {point.x():,.3f}   Y: {point.y():,.3f}")
         self._update_heading_from_cursor(float(point.x()), float(point.y()))
+        if self._draw_mode == "free":
+            if QtWidgets.QApplication.mouseButtons() & QtCore.Qt.MouseButton.LeftButton:
+                if not self._draw_free_active:
+                    self._draw_points = []
+                    self._draw_preview = pg.PlotDataItem(
+                        pen=pg.mkPen("#ff4081", width=2.2)
+                    )
+                    self._draw_preview.setZValue(900000)
+                    self.plot_item.addItem(self._draw_preview)
+                    self._draw_free_active = True
+                self._draw_points.append((float(point.x()), float(point.y())))
+                if self._draw_preview is not None:
+                    points = np.asarray(self._draw_points, dtype=float)
+                    self._draw_preview.setData(points[:, 0], points[:, 1])
+            elif self._draw_free_active:
+                points = list(self._draw_points)
+                self._discard_draw_preview()
+                if len(points) >= 2:
+                    self._add_drawing_layer("free", points)
+                self._draw_points.clear()
+                self._draw_free_active = False
+        elif self._draw_mode in {"circle", "radius_circle"} and len(self._draw_points) == 1:
+            x0, y0 = self._draw_points[0]
+            x1, y1 = float(point.x()), float(point.y())
+            radius = float(np.hypot(x1 - x0, y1 - y0))
+            angles = np.linspace(0.0, 2.0 * np.pi, 181)
+            xs, ys = x0 + radius*np.cos(angles), y0 + radius*np.sin(angles)
+            if self._draw_preview is None:
+                self._draw_preview = pg.PlotDataItem(pen=pg.mkPen("#ff4081", width=2.2, style=QtCore.Qt.PenStyle.DashLine))
+                self._draw_preview.setZValue(900000); self.plot_item.addItem(self._draw_preview)
+            if self._draw_mode == "radius_circle":
+                self._draw_preview.setData(np.r_[xs, np.nan, x0, x1], np.r_[ys, np.nan, y0, y1])
+            else:
+                self._draw_preview.setData(xs, ys)
+            if self._draw_radius_label is None:
+                self._draw_radius_label = pg.TextItem(color="#ff4081", anchor=(0.5, 1.2))
+                self._draw_radius_label.setZValue(900001); self.plot_item.addItem(self._draw_radius_label)
+            self._draw_radius_label.setText(f"{radius:,.2f} m")
+            self._draw_radius_label.setPos((x0+x1)/2.0, (y0+y1)/2.0)
 
     def _map_clicked(self, event: object) -> None:
+        if self._draw_mode is not None:
+            button = event.button()
+            if self._draw_mode == "polygon" and button == QtCore.Qt.MouseButton.RightButton:
+                self._finish_polygon_drawing()
+                return
+            if button != QtCore.Qt.MouseButton.LeftButton:
+                return
+            scene_pos = event.scenePos()
+            if not self.plot_item.sceneBoundingRect().contains(scene_pos):
+                return
+            point = self.plot_item.vb.mapSceneToView(scene_pos)
+            x, y = float(point.x()), float(point.y())
+            if self._draw_mode == "text":
+                value, accepted = QtWidgets.QInputDialog.getText(self, "Draw text", "Text:")
+                if accepted and str(value):
+                    self._add_drawing_layer("text", [(x, y)], text=str(value))
+                return
+            if self._draw_mode == "free":
+                return
+            self._draw_points.append((x, y))
+            if self._draw_mode == "polygon":
+                points = np.asarray(self._draw_points, dtype=float)
+                if self._draw_preview is None:
+                    self._draw_preview = pg.PlotDataItem(
+                        pen=pg.mkPen("#ff4081", width=2.2, style=QtCore.Qt.PenStyle.DashLine)
+                    )
+                    self._draw_preview.setZValue(900000)
+                    self.plot_item.addItem(self._draw_preview)
+                self._draw_preview.setData(points[:, 0], points[:, 1])
+                is_double = getattr(event, "double", None)
+                if callable(is_double) and is_double():
+                    self._finish_polygon_drawing()
+                return
+            if len(self._draw_points) == 2:
+                self._finish_two_point_drawing()
+            return
         if self._node_selection_mode is not None:
             button = event.button()
             if self._node_selection_mode == "polygon" and button == QtCore.Qt.MouseButton.RightButton:
@@ -3247,13 +4082,13 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 if name.lower() in lower:
                     return self._clean_feature_value(lower[name.lower()])
             return "—"
-        if layer_name.startswith("DSR"):
+        if self._is_dsr_layer(layer_name):
             fields = [
                 ("Node", value("node")),
                 ("Line", value("line")),
                 ("Station", value("station", "linepoint")),
-                ("Primary Easting", value("primaryeasting")),
-                ("Primary Northing", value("primarynorthing")),
+                ("Primary Easting", value("primaryeasting", "x")),
+                ("Primary Northing", value("primarynorthing", "y")),
                 ("Primary Elevation", value("primaryelevation")),
                 ("Secondary Easting", value("secondaryeasting")),
                 ("Secondary Northing", value("secondarynorthing")),
@@ -3265,7 +4100,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 ("Comments", value("comments")),
             ]
             return layer_name + "\n\n" + "\n".join(f"{label}: {val}" for label, val in fields)
-        if layer_name == "REC_DB":
+        if layer_name == "Receiver database coordinates":
             fields = [
                 ("Line", value("line")),
                 ("Point", value("point", "station", "linepoint")),
@@ -3283,9 +4118,11 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         if index < 0 or index >= data.count:
             return
         record = data.record(index)
+        if self._is_dsr_layer(title):
+            self._sync_dsr_ribbon_to_record(record)
         self.details.setPlainText(self._format_feature_record(title, record))
         self.details_dock.show(); self.details_dock.raise_()
-        if title.startswith("DSR"):
+        if self._is_dsr_layer(title):
             self._load_ocr_images_for_dsr_record(record)
 
     def _show_record(self, layer_name: str, index: int) -> None:
@@ -3293,10 +4130,12 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         if not isinstance(layer, FastPointLayer) or layer.data is None:
             return
         record = layer.data.record(index)
+        if self._is_dsr_layer(layer_name):
+            self._sync_dsr_ribbon_to_record(record)
         self.details.setPlainText(self._format_feature_record(layer_name, record))
         self.details_dock.show()
         self.details_dock.raise_()
-        if layer_name.startswith("DSR"):
+        if self._is_dsr_layer(layer_name):
             self._load_ocr_images_for_dsr_record(record)
         if record.get("file_id") is not None and record.get("timestamp") is not None:
             self._select_bbox_track_point(record, index)
@@ -3414,7 +4253,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         return result
 
     def _dsr_primary_data(self) -> PointLayerData | None:
-        layer = self.layers.get("DSR Primary")
+        layer = self.layers.get("DSR Primary Deployment")
         if isinstance(layer, FastPointLayer):
             return layer.data
         return None
@@ -3602,6 +4441,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         for index, data in enumerate(datasets):
             color = palette[index % len(palette)]
             layer = FastPointLayer(self.plot_item, data.name, color, color, None)
+            layer.source_table = "DSR"
             layer.update_style(point_size=7.0, symbol="circle")
             layer.set_data(data)
             layer.selection_changed.connect(self._show_record)
@@ -3672,7 +4512,71 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             QtWidgets.QMessageBox.warning(self, "SLSolution overlay", str(exc))
 
     def _surface_config_path(self) -> Path:
-        return self.project_path / "config" / "dataviewer2_surfaces_mainmap.json"
+        return self.viewer_config.project_path / "config" / "dataviewer2_surfaces_mainmap.json"
+
+    def _load_surface_definitions(self) -> list[dict]:
+        import json
+
+        path = self._surface_config_path()
+        if not path.is_file():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            surfaces = payload.get("surfaces", []) if isinstance(payload, dict) else []
+            return [dict(item) for item in surfaces if isinstance(item, dict)]
+        except Exception as exc:
+            self.details.appendPlainText(f"Saved surface configuration error: {exc}\n")
+            return []
+
+    def _remove_surface_definition(self, registered_name: str) -> None:
+        import json
+
+        path = self._surface_config_path()
+        if not path.is_file():
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            surfaces = payload.get("surfaces", []) if isinstance(payload, dict) else []
+            remaining = [
+                item for item in surfaces
+                if not isinstance(item, dict)
+                or str(item.get("registered_name") or item.get("name")) != registered_name
+            ]
+            payload["surfaces"] = remaining
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as exc:
+            self.details.appendPlainText(f"Could not remove saved surface: {exc}\n")
+
+    def _saved_surface_loaded(self, definition: dict, result) -> None:
+        name = str(definition.get("registered_name") or result.name)
+        if self.viewer_config.is_layer_removed(name):
+            self._remove_surface_definition(name)
+            self._finish_load()
+            return
+        try:
+            layer = SurfaceMapLayer(
+                self.plot_item,
+                name,
+                result.gx,
+                result.gy,
+                result.grid_z,
+                display=result.display,
+                cmap=result.cmap,
+                opacity=result.opacity,
+                contour_levels=result.contour_levels,
+                contour_style=result.contour_style,
+                value_field=result.value_field,
+            )
+            self._register_layer(
+                "Surfaces",
+                name,
+                layer.count,
+                layer,
+                tooltip=f"Saved main-map surface: {result.value_field}",
+            )
+        except Exception as exc:
+            self.details.appendPlainText(f"Could not restore surface {name}: {exc}\n")
+        self._finish_load()
 
     def _save_surface_definition(self, registered_name: str, definition: dict) -> None:
         import json
@@ -3829,7 +4733,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         x = float(data.x[index])
         y = float(data.y[index])
         self._set_station_marker(x, y)
-        self._show_record("DSR Primary", index)
+        self._show_record("DSR Primary Deployment", index)
         self.statusBar().showMessage(f"Selected DSR line {line}, station {station}", 3000)
 
     def _sync_bbox_to_dsr_station(
@@ -4271,7 +5175,10 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             self.measurement.remove_last()
             return
         if event.key() == QtCore.Qt.Key.Key_Escape:
-            self.measurement.clear()
+            if self._draw_mode is not None:
+                self._stop_drawing_mode()
+            else:
+                self.measurement.clear()
             return
         super().keyPressEvent(event)
 
