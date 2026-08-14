@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+import importlib.util
 from pathlib import Path
 import numpy as np
 
@@ -9,6 +10,11 @@ from .models import ProjectShapeDefinition, ShapeLayerData
 
 class ShapeLoadError(RuntimeError):
     pass
+
+
+def _pyarrow_available() -> bool:
+    """Return whether pyogrio's optional Arrow acceleration can be used."""
+    return importlib.util.find_spec("pyarrow") is not None
 
 
 def _read_native_shp(path: Path) -> tuple[str, list[np.ndarray], np.ndarray]:
@@ -145,9 +151,13 @@ def load_vector_layer(definition: ProjectShapeDefinition, project_epsg: str) -> 
         try:
             import pyogrio
         except ImportError as exc:
-            raise ShapeLoadError("GeoPackage support requires pyogrio. Run: python -m pip install pyogrio pyarrow") from exc
+            raise ShapeLoadError("GeoPackage support requires pyogrio. Run: python -m pip install pyogrio") from exc
         try:
-            frame = pyogrio.read_dataframe(path, layer=definition.source_layer, use_arrow=True)
+            frame = pyogrio.read_dataframe(
+                path,
+                layer=definition.source_layer,
+                use_arrow=_pyarrow_available(),
+            )
         except Exception as exc:
             raise ShapeLoadError(f"Cannot read GeoPackage layer '{definition.source_layer}': {exc}") from exc
         if frame.crs is None and definition.source_epsg:

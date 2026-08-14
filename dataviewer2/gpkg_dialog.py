@@ -73,7 +73,7 @@ class GeoPackageAttachDialog(QtWidgets.QDialog):
         except ImportError:
             QtWidgets.QMessageBox.critical(
                 self, "GeoPackage support",
-                "GeoPackage support requires pyogrio and pyarrow.\n\nRun:\npython -m pip install pyogrio pyarrow"
+                "GeoPackage support requires pyogrio.\n\nRun:\npython -m pip install pyogrio"
             )
             return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
