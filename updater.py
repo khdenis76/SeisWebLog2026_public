@@ -31,6 +31,30 @@ SKIP_FILE_EXTENSIONS_UPDATE = {".sqlite3",".log"}
 SKIP_FILE_NAMES_UPDATE = {".env","db.sqlite3"}
 SKIP_FILE_NAMES_BACKUP = {"db.sqlite3"}
 
+
+def status(message: str) -> None:
+    print(message, flush=True)
+
+
+def format_size(byte_count: int) -> str:
+    size = float(byte_count)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def show_download_progress(downloaded: int, total: int) -> None:
+    if total > 0:
+        percent = min(100.0, downloaded * 100.0 / total)
+        filled = min(30, int(percent * 30 / 100))
+        bar = "#" * filled + "-" * (30 - filled)
+        text = f"\rDownloading update.zip [{bar}] {percent:6.2f}%  {format_size(downloaded)} / {format_size(total)}"
+    else:
+        text = f"\rDownloading update.zip  {format_size(downloaded)}"
+    print(text, end="", flush=True)
+
 def read_local_version() -> str:
     version_file = PROJECT_ROOT / "version.txt"
     if version_file.exists():
@@ -114,10 +138,16 @@ def download_zip(zip_path: Path) -> None:
         headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
     ) as response:
         response.raise_for_status()
+        total = int(response.headers.get("Content-Length", 0) or 0)
+        downloaded = 0
+        show_download_progress(downloaded, total)
         with open(zip_path, "wb") as fh:
             for chunk in response.iter_content(chunk_size=1024 * 256):
                 if chunk:
                     fh.write(chunk)
+                    downloaded += len(chunk)
+                    show_download_progress(downloaded, total)
+        print(flush=True)
 
 def extract_zip(zip_path: Path, extract_to: Path) -> Path:
     if extract_to.exists():
@@ -126,7 +156,11 @@ def extract_zip(zip_path: Path, extract_to: Path) -> Path:
     extract_to.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(extract_to)
+        members = zf.infolist()
+        total = len(members)
+        for index, member in enumerate(members, 1):
+            status(f"Extracting [{index}/{total}]: {member.filename}")
+            zf.extract(member, extract_to)
 
     candidates = [p for p in extract_to.iterdir() if p.is_dir()]
     if not candidates:
@@ -147,6 +181,8 @@ def copy_update_files(src_root: Path, dst_root: Path) -> None:
             if should_skip_update_file(file_name):
                 continue
 
+            relative_file = rel_root / file_name
+            status(f"Installing: {relative_file.as_posix()}")
             shutil.copy2(root_path / file_name, target_dir / file_name)
 
 def cleanup_tmp() -> None:
@@ -155,24 +191,32 @@ def cleanup_tmp() -> None:
 
 def main() -> int:
     try:
+        status("Checking for updates...")
         local_version = read_local_version()
         remote_version = get_remote_version()
+        status(f"Installed version: {local_version}")
+        status(f"Available version: {remote_version}")
 
         if not is_remote_newer(local_version, remote_version):
-            print("You already have the latest version.")
+            status("You already have the latest version.")
             return 0
 
+        status("Creating backup...")
         backup_path = create_backup_zip()
+        status(f"Backup created: {backup_path}")
 
         ensure_dir(TMP_DIR)
         zip_path = TMP_DIR / "update.zip"
 
         download_zip(zip_path)
+        status("Download complete. Extracting files...")
         extracted_root = extract_zip(zip_path, TMP_DIR / "unzipped")
+        status("Installing update files...")
         copy_update_files(extracted_root, PROJECT_ROOT)
+        status("Cleaning temporary files...")
         cleanup_tmp()
 
-        print(f"Update completed. Backup: {backup_path}")
+        status(f"Update completed. Backup: {backup_path}")
         return 0
 
     except Exception as exc:

@@ -18,7 +18,7 @@ if exist "%WORKDIR%myenv\Scripts\python.exe" (
 echo Using Python: %PYTHON_EXE%
 echo.
 
-"%PYTHON_EXE%" "%WORKDIR%updater.py"
+"%PYTHON_EXE%" -u "%WORKDIR%updater.py"
 if errorlevel 1 (
     echo.
     echo Update failed.

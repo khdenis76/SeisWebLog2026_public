@@ -56,7 +56,8 @@ function showUpdateToast(data) {
                     </div>
 
                     <div class="small mt-2">
-                        Close SWL and run <code>update_project.bat</code>.
+                        Close the program and launch <code>update_project.bat</code>
+                        from the program folder to update.
                     </div>
 
                     <div class="small mt-1">

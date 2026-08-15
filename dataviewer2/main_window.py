@@ -1034,17 +1034,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
     def _root_projects_database(self) -> Path | None:
-        from .startup_settings import remembered_projects_database
-
-        candidates = [
-            remembered_projects_database(),
-            Path.cwd() / "db.sqlite3",
-            Path(__file__).resolve().parents[1] / "db.sqlite3",
-        ]
-        for candidate in candidates:
-            if candidate is not None and candidate.is_file():
-                return candidate.resolve()
-        return None
+        root_db = Path(__file__).resolve().parents[1] / "db.sqlite3"
+        return root_db if root_db.is_file() else None
 
     def _change_project(self) -> None:
         root_db = self._root_projects_database()

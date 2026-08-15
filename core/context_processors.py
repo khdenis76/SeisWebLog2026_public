@@ -23,5 +23,4 @@ def version_info(request):
         "NEW_VERSION_AVAILABLE": info["new_available"],
         "LOCAL_VERSION": info["local"],
         "REMOTE_VERSION": info["remote"],
-        "VERSION_DOWNLOAD_URL": info["download_url"],
     }

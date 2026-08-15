@@ -33,11 +33,10 @@
           <div class="alert alert-warning text-center m-0 py-1 rounded-0">
                    🚀 New version available: <b>{{ REMOTE_VERSION }}</b>
                   <span class="ms-2 text-muted">(you have {{ LOCAL_VERSION }})</span>
-                     <a class="btn btn-sm btn-dark ms-3"
-                              href="{{ VERSION_DOWNLOAD_URL }}"
-                              target="_blank" rel="noopener">
-                              Download ZIP
-                     </a>
+                  <span class="ms-3">
+                    Close the program and launch <code>update_project.bat</code>
+                    from the program folder to update.
+                  </span>
           </div>
       {% endif %}
       <button

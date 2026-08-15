@@ -21,7 +21,6 @@ from .startup_settings import (
     remember_project,
     remember_projects_database,
     remembered_project,
-    remembered_projects_database,
 )
 
 
@@ -41,15 +40,8 @@ def choose_project(root_db: Path) -> Path | None:
 
 
 def find_projects_database() -> Path:
-    candidates = [
-        remembered_projects_database(),
-        Path.cwd() / "db.sqlite3",
-        Path(__file__).resolve().parents[1] / "db.sqlite3",
-    ]
-    for candidate in candidates:
-        if candidate is not None and is_projects_database(candidate):
-            return candidate.resolve()
-    return Path.cwd() / "db.sqlite3"
+    """Return the SeisWebLog database located beside the dataviewer2 package."""
+    return Path(__file__).resolve().parents[1] / "db.sqlite3"
 
 
 def resolve_start_path(argument: str | None) -> tuple[Path | None, bool]:

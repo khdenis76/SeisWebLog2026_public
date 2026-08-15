@@ -16,8 +16,20 @@ echo.
 
 where py >nul 2>nul
 if %errorlevel%==0 (
-    set "PYLAUNCHER=py -3"
+    py -3.11 -c "import struct; raise SystemExit(0 if struct.calcsize('P') * 8 == 64 else 1)" >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: Python 3.11 64-bit is not installed.
+        echo Download it from: https://www.python.org/downloads/release/python-3119/
+        goto FAIL
+    )
+    set "PYLAUNCHER=py -3.11"
 ) else (
+    python -c "import sys, struct; raise SystemExit(0 if sys.version_info[:2] == (3, 11) and struct.calcsize('P') * 8 == 64 else 1)" >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: Python 3.11 64-bit is not installed or is not in PATH.
+        echo Download it from: https://www.python.org/downloads/release/python-3119/
+        goto FAIL
+    )
     set "PYLAUNCHER=python"
 )
 
@@ -45,8 +57,12 @@ python -c "from osgeo import gdal; print('GDAL OK:', gdal.VersionInfo())" >nul 2
 if %errorlevel%==0 (
     echo GDAL already works.
 ) else (
-    echo Installing GDAL from Windows geospatial wheels...
-    python -m pip install --upgrade --prefer-binary --find-links https://github.com/cgohlke/geospatial-wheels/releases/download/v2025.10.25/ GDAL==3.11.4
+    echo Installing NumPy dependency...
+    python -m pip install --upgrade numpy
+    if errorlevel 1 goto FAIL
+
+    echo Installing the precompiled GDAL 3.11.4 Windows wheel...
+    python -m pip install --index-url https://gisidx.github.io/gwi --only-binary=:all: --no-deps GDAL==3.11.4
     if errorlevel 1 goto FAIL
 )
 
