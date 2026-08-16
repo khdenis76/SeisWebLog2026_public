@@ -176,6 +176,11 @@ export function initSequenceAssignments() {
   async function saveModal() {
     clearErr();
 
+    if (seqFirst.value.trim() === "" || seqLast.value.trim() === "") {
+      showErr("Seq First and Seq Last are required.");
+      return;
+    }
+
     const payload = {
       id: rowId.value ? Number(rowId.value) : undefined,
       seq_first: Number(seqFirst.value),

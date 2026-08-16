@@ -431,6 +431,9 @@ class DSRDB:
             rov2_name: str = "",
             gnss1_name: str = "",
             gnss2_name: str = "",
+            mru1_name: str = "",
+            mru2_name: str = "",
+            mru3_name: str = "",
             depth1_name: str = "",
             depth2_name: str = "",
 
@@ -461,14 +464,24 @@ class DSRDB:
             # 1) Upsert config header
             conn.execute(
                 """
-                INSERT INTO BBox_Configs_List (Name, Vessel_name,IsDefault, rov1_name, rov2_name, gnss1_name, gnss2_name,depth1_name, depth2_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO BBox_Configs_List (
+                    Name, Vessel_name, IsDefault, rov1_name, rov2_name,
+                    gnss1_name, gnss2_name, mru1_name, mru2_name, mru3_name,
+                    Depth1_name, Depth2_name
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(Name) DO UPDATE SET
+                    Vessel_name = excluded.Vessel_name,
                     IsDefault = excluded.IsDefault,
                     rov1_name = excluded.rov1_name,
                     rov2_name = excluded.rov2_name,
                     gnss1_name = excluded.gnss1_name,
-                    gnss2_name = excluded.gnss2_name
+                    gnss2_name = excluded.gnss2_name,
+                    mru1_name = excluded.mru1_name,
+                    mru2_name = excluded.mru2_name,
+                    mru3_name = excluded.mru3_name,
+                    Depth1_name = excluded.Depth1_name,
+                    Depth2_name = excluded.Depth2_name
                 """,
                 (
                     name,vessel_name,
@@ -477,6 +490,9 @@ class DSRDB:
                     rov2_name,
                     gnss1_name,
                     gnss2_name,
+                    mru1_name,
+                    mru2_name,
+                    mru3_name,
                     depth1_name,
                     depth2_name
                 ),
@@ -576,6 +592,9 @@ class DSRDB:
             rov2_name TEXT,
             gnss1_name TEXT,
             gnss2_name TEXT,
+            mru1_name TEXT,
+            mru2_name TEXT,
+            mru3_name TEXT,
             Vessel_name TEXT,
             Depth1_name TEXT,
             Depth2_name TEXT,
@@ -628,6 +647,12 @@ class DSRDB:
                 conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN Depth1_name TEXT')
             if "Depth2_name" not in cols:
                 conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN Depth2_name TEXT')
+            if "mru1_name" not in cols:
+                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN mru1_name TEXT')
+            if "mru2_name" not in cols:
+                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN mru2_name TEXT')
+            if "mru3_name" not in cols:
+                conn.execute('ALTER TABLE BBox_Configs_List ADD COLUMN mru3_name TEXT')
 
             conn.commit()
 
@@ -649,6 +674,9 @@ class DSRDB:
                     rov2_name,
                     gnss1_name,
                     gnss2_name,
+                    mru1_name,
+                    mru2_name,
+                    mru3_name,
                     Depth1_name,
                     Depth2_name 
                 FROM BBox_Configs_List
@@ -666,6 +694,9 @@ class DSRDB:
                 "rov2_name": r["rov2_name"],
                 "gnss1_name": r["gnss1_name"],
                 "gnss2_name": r["gnss2_name"],
+                "mru1_name": r["mru1_name"],
+                "mru2_name": r["mru2_name"],
+                "mru3_name": r["mru3_name"],
                 "Depth1_name": r["Depth1_name"],
                 "Depth2_name": r["Depth2_name"],
             }
@@ -5105,7 +5136,6 @@ WHERE Area IS NOT NULL
             rows = conn.execute(query).fetchall()
 
         return [row[0] for row in rows]
-
 
 
 

@@ -110,8 +110,11 @@ class VesselSeqRelations:
         except Exception:
             return False, "Sequence first/last must be integers"
 
-        if a <= 0 or b <= 0:
-            return False, "Sequence numbers must be > 0"
+        if a < 0:
+            return False, "seq_first must be >= 0"
+
+        if b <= 0:
+            return False, "seq_last must be > 0"
 
         if a > b:
             return False, "seq_first must be <= seq_last"

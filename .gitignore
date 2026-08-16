@@ -51,3 +51,4 @@ rov/*_test.py
 /install_tesseract.bat
 /staticfiles/
 /dataviewer_fast/
+/manual/

@@ -28,7 +28,10 @@ SKIP_DIRS_UPDATE = {
 }
 
 SKIP_FILE_EXTENSIONS_UPDATE = {".sqlite3",".log"}
-SKIP_FILE_NAMES_UPDATE = {".env","db.sqlite3"}
+# Never overwrite the batch file that is currently driving this Python process.
+# cmd.exe reads batch files incrementally, so replacing it mid-run can make it
+# resume at the same byte offset in different content and execute a broken line.
+SKIP_FILE_NAMES_UPDATE = {".env", "db.sqlite3", "update_project.bat"}
 SKIP_FILE_NAMES_BACKUP = {"db.sqlite3"}
 
 
