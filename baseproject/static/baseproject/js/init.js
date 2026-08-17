@@ -20,6 +20,7 @@ import {initProjectTemplateLoader} from "./initProjectTemplateLoader.js";
 import {initVisualOffsetTable} from "./initVisualOffsetTable.js";
 import {initBaseProjectSolutions} from "./initBaseProjectSolutions.js";
 import {initSolutionsTab} from "./initSolutionsTab.js";
+import {initProjectTemplateDelete} from "./initProjectTemplateDelete.js";
 
 
 
@@ -48,6 +49,7 @@ export function initAllJSForBaseproject() {
   initVisualOffsetTable();
   initBaseProjectSolutions();
   initSolutionsTab();
+  initProjectTemplateDelete();
 
 
   initDeletePreplot([

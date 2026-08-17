@@ -1047,7 +1047,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
         try:
-            projects = ProjectsDatabase(root_db).read_projects()
+            projects = ProjectsDatabase(root_db).read_available_projects()
         except ProjectsDatabaseError as exc:
             QtWidgets.QMessageBox.critical(self, "Change project", str(exc))
             return
@@ -1067,10 +1067,9 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Change project", str(exc))
             return
-        from .startup_settings import remember_project, remember_projects_database
+        from .startup_settings import remember_project
 
-        remember_projects_database(root_db)
-        remember_project(entry.project_dir)
+        remember_project(root_db.parent, entry.project_dir)
         self._replacement_window = replacement
         app = QtWidgets.QApplication.instance()
         if app is not None:

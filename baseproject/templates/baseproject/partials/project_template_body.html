@@ -1,6 +1,6 @@
 {% for r in rows %}
     <tr>
-        <td><input type="checkbox" class="project-template-checkbox" val="{{ r.ID }}"></td>
+        <td><input type="checkbox" class="project-template-checkbox" value="{{ r.ID }}" aria-label="Select project template {{ r.ID }}"></td>
         <td>{{ r.FirstSL }}</td>
         <td>{{ r.LastSL }}</td>
         <td>{{ r.LNum }}</td>

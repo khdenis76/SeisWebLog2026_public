@@ -2,36 +2,40 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6 import QtCore
+import json
 
 
-LAST_PROJECT_KEY = "startup/last_project"
-PROJECTS_DATABASE_KEY = "startup/projects_database"
+STATE_FILE_NAME = "dataviewer2_state.json"
 
 
-def remembered_project() -> Path | None:
-    value = QtCore.QSettings().value(LAST_PROJECT_KEY, "", type=str).strip()
+def _state_path(root_path: str | Path) -> Path:
+    root = Path(root_path).expanduser().resolve()
+    if root.is_file():
+        root = root.parent
+    return root / STATE_FILE_NAME
+
+
+def remembered_project(root_path: str | Path) -> Path | None:
+    state_path = _state_path(root_path)
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        value = str(payload.get("last_project", "")).strip()
+    except (OSError, ValueError, TypeError):
+        return None
     return Path(value).expanduser() if value else None
 
 
-def remember_project(path: str | Path) -> None:
-    settings = QtCore.QSettings()
-    settings.setValue(LAST_PROJECT_KEY, str(Path(path).expanduser().resolve()))
-    settings.sync()
+def remember_project(root_path: str | Path, project_path: str | Path) -> None:
+    state_path = _state_path(root_path)
+    payload = {
+        "last_project": str(Path(project_path).expanduser().resolve()),
+    }
+    state_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def forget_project() -> None:
-    settings = QtCore.QSettings()
-    settings.remove(LAST_PROJECT_KEY)
-    settings.sync()
-
-
-def remembered_projects_database() -> Path | None:
-    value = QtCore.QSettings().value(PROJECTS_DATABASE_KEY, "", type=str).strip()
-    return Path(value).expanduser() if value else None
-
-
-def remember_projects_database(path: str | Path) -> None:
-    settings = QtCore.QSettings()
-    settings.setValue(PROJECTS_DATABASE_KEY, str(Path(path).expanduser().resolve()))
-    settings.sync()
+def forget_project(root_path: str | Path) -> None:
+    state_path = _state_path(root_path)
+    try:
+        state_path.unlink()
+    except FileNotFoundError:
+        pass

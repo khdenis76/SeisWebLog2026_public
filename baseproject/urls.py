@@ -52,6 +52,7 @@ urlpatterns = [
     path("project-template/excel-sheets/",views_project_templates.project_template_excel_sheets,name="project_template_excel_sheets",),
     path("project-template/excel-columns/",views_project_templates.project_template_excel_columns,name="project_template_excel_columns",),
     path("project-template/excel-save/",views_project_templates.project_template_excel_save,name="project_template_excel_save",),
+    path("project-template/delete/", views_project_templates.project_template_delete, name="project_template_delete"),
     path("solutions-tab/", solutions_tab, name="solutions_tab"),
     path("solutions/add/", solution_add, name="solution_add"),
     path("solutions/delete/", solution_delete, name="solution_delete"),

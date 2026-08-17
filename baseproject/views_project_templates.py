@@ -1,8 +1,11 @@
+import json
 from pathlib import Path
 
 import openpyxl
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse
+from django.views.decorators.http import require_POST
 from django.template.loader import render_to_string
 
 from core.models import UserSettings
@@ -269,3 +272,45 @@ def project_template_excel_save(request):
 
     except Exception as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+
+@login_required
+@require_POST
+@log_action("project_template_delete", object_type="BASEPROJECT")
+def project_template_delete(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_edit(request.user):
+        raise PermissionDenied
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JsonResponse({"ok": False, "error": "Invalid JSON payload"}, status=400)
+
+    raw_ids = payload.get("ids") if isinstance(payload, dict) else None
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return JsonResponse({"ok": False, "error": "No template rows selected"}, status=400)
+
+    try:
+        ids = sorted({int(value) for value in raw_ids})
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "Invalid template row IDs"}, status=400)
+
+    if any(value <= 0 for value in ids):
+        return JsonResponse({"ok": False, "error": "Invalid template row IDs"}, status=400)
+
+    ptdb = ProjectTemplateDB(project.db_path)
+    deleted = ptdb.delete_by_ids(ids)
+    table_body = ptdb.render_table_body()
+
+    request.log_extra = {"requested_ids": ids, "deleted": deleted}
+
+    return JsonResponse({
+        "ok": True,
+        "deleted": deleted,
+        "table_body": table_body,
+    })

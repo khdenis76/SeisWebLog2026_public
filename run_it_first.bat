@@ -100,8 +100,30 @@ if %errorlevel%==0 (
     tesseract --version
 ) else (
     echo Tesseract is not in PATH.
-    echo If OCR is required, install Tesseract manually or with winget:
-    echo winget install --id UB-Mannheim.TesseractOCR
+    where winget >nul 2>nul
+    if !errorlevel!==0 (
+        echo Installing Tesseract OCR with winget...
+        winget install --id UB-Mannheim.TesseractOCR --exact --silent --accept-source-agreements --accept-package-agreements
+        if errorlevel 1 (
+            echo WARNING: Automatic Tesseract installation failed.
+            echo OCR features will not be available until Tesseract is installed.
+        ) else (
+            REM Make a standard Tesseract installation visible immediately.
+            if exist "%ProgramFiles%\Tesseract-OCR\tesseract.exe" set "PATH=%PATH%;%ProgramFiles%\Tesseract-OCR"
+            where tesseract >nul 2>nul
+            if !errorlevel!==0 (
+                echo Tesseract installed successfully.
+                tesseract --version
+            ) else (
+                echo Tesseract was installed, but it is not yet in this terminal PATH.
+                echo Restart Windows Terminal before using OCR features.
+            )
+        )
+    ) else (
+        echo WARNING: winget is not available.
+        echo Install or update App Installer from Microsoft Store, then run:
+        echo winget install --id UB-Mannheim.TesseractOCR --exact
+    )
 )
 
 echo.
@@ -113,8 +135,31 @@ if %errorlevel%==0 (
     pdflatex --version
 ) else (
     echo MiKTeX/pdflatex is not in PATH.
-    echo If PDF reports are required, install MiKTeX manually or with winget:
-    echo winget install --id MiKTeX.MiKTeX
+    where winget >nul 2>nul
+    if !errorlevel!==0 (
+        echo Installing MiKTeX with winget...
+        winget install --id MiKTeX.MiKTeX --exact --silent --accept-source-agreements --accept-package-agreements
+        if errorlevel 1 (
+            echo WARNING: Automatic MiKTeX installation failed.
+            echo LaTeX PDF reports will not be available until MiKTeX is installed.
+        ) else (
+            REM Check the common per-user and all-users MiKTeX locations.
+            if exist "%LOCALAPPDATA%\Programs\MiKTeX\miktex\bin\x64\pdflatex.exe" set "PATH=%PATH%;%LOCALAPPDATA%\Programs\MiKTeX\miktex\bin\x64"
+            if exist "%ProgramFiles%\MiKTeX\miktex\bin\x64\pdflatex.exe" set "PATH=%PATH%;%ProgramFiles%\MiKTeX\miktex\bin\x64"
+            where pdflatex >nul 2>nul
+            if !errorlevel!==0 (
+                echo MiKTeX installed successfully.
+                pdflatex --version
+            ) else (
+                echo MiKTeX was installed, but pdflatex is not yet in this terminal PATH.
+                echo Restart Windows Terminal before generating LaTeX PDF reports.
+            )
+        )
+    ) else (
+        echo WARNING: winget is not available.
+        echo Install or update App Installer from Microsoft Store, then run:
+        echo winget install --id MiKTeX.MiKTeX --exact
+    )
 )
 
 echo.

@@ -1,8 +1,18 @@
 <!-- table header for project templates -->
+<div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+    <span class="small text-muted" id="project_template_selection_count">0 selected</span>
+    <button type="button"
+            class="btn btn-sm btn-outline-danger"
+            id="btnDeleteProjectTemplates"
+            data-delete-url="{% url 'project_template_delete' %}"
+            disabled>
+        <i class="fas fa-trash-alt me-1"></i> Delete selected
+    </button>
+</div>
 <div class="table-scroll border rounded" id="template_table_div">
        <table class="table table-hover table-sm table-striped mb-0" id="template_table">
            <thead>
-              <th><input type="checkbox" id="common_template_checkbox"></th>
+              <th><input type="checkbox" id="common_template_checkbox" aria-label="Select all project templates"></th>
               <th title="First Source Line in the template"> From SL</th>
               <th title="Last Source Line in the template"> To SL</th>
               <th title="Total number of source lines per template"> Num of SL</th>

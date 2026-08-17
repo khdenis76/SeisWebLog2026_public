@@ -19,21 +19,25 @@ from .projects import ProjectsDatabase, ProjectsDatabaseError, is_projects_datab
 from .startup_settings import (
     forget_project,
     remember_project,
-    remember_projects_database,
     remembered_project,
 )
 
 
 def choose_project(root_db: Path) -> Path | None:
     try:
-        projects = ProjectsDatabase(root_db).read_projects()
+        projects = ProjectsDatabase(root_db).read_available_projects()
     except ProjectsDatabaseError as exc:
         QtWidgets.QMessageBox.critical(None, "DataViewer 2.0", str(exc))
         return None
-    remember_projects_database(root_db)
     labels = [f"{p.name} — {p.project_dir}" for p in projects]
     if not labels:
-        QtWidgets.QMessageBox.warning(None, "DataViewer 2.0", "No projects found.")
+        QtWidgets.QMessageBox.warning(
+            None,
+            "DataViewer 2.0",
+            "No available projects were found in this installation.\n\n"
+            "A project must be registered in the root db.sqlite3 and contain "
+            "data/project.sqlite3.",
+        )
         return None
     selected, ok = QtWidgets.QInputDialog.getItem(None, "DataViewer 2.0", "Project:", labels, 0, False)
     return projects[labels.index(selected)].project_dir if ok else None
@@ -46,12 +50,26 @@ def find_projects_database() -> Path:
 
 def resolve_start_path(argument: str | None) -> tuple[Path | None, bool]:
     if not argument:
-        previous = remembered_project()
-        if previous is not None and previous.exists():
-            return previous.resolve(), True
-        if previous is not None:
-            forget_project()
-        return choose_project(find_projects_database()), False
+        root_db = find_projects_database()
+        try:
+            projects_db = ProjectsDatabase(root_db)
+            active = projects_db.read_active_project()
+            if active is not None and projects_db.is_project_available(active):
+                return active.project_dir.expanduser().resolve(), False
+
+            # The remembered value belongs only to this SeisWebLog root and is
+            # accepted only while that project remains registered and valid.
+            previous = remembered_project(root_db.parent)
+            if previous is not None:
+                previous = previous.resolve()
+                available = projects_db.read_available_projects()
+                if any(p.project_dir.expanduser().resolve() == previous for p in available):
+                    return previous, True
+                forget_project(root_db.parent)
+        except ProjectsDatabaseError as exc:
+            QtWidgets.QMessageBox.critical(None, "DataViewer 2.0", str(exc))
+            return None, False
+        return choose_project(root_db), False
     supplied = Path(argument).expanduser().resolve()
     if is_projects_database(supplied):
         return choose_project(supplied), False
@@ -118,7 +136,8 @@ def main() -> int:
         if not is_remembered:
             show_startup_error(project_path, text)
             return 1
-        forget_project()
+        root_db = find_projects_database()
+        forget_project(root_db.parent)
         QtWidgets.QMessageBox.warning(
             None,
             "DataViewer 2.0",
@@ -132,7 +151,7 @@ def main() -> int:
         except Exception:
             show_startup_error(project_path, traceback.format_exc())
             return 1
-    remember_project(project_path)
+    remember_project(find_projects_database().parent, project_path)
     window.showMaximized()
     return app.exec()
 
