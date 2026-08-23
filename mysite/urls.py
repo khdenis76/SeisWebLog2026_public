@@ -44,5 +44,6 @@ urlpatterns = [
     path("svp/", include("svp.urls")),
     path('', include('core.urls')),
     path('production-monitor/',include('production_monitor.urls')),
+    path("statistics-report/",include("statistics_report.urls"),),
 
 ]

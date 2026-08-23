@@ -484,6 +484,39 @@ class DSRMapPlots:
                 df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
         return df
 
+    def read_recdb_with_dsr(
+        self,
+        lines: Optional[Iterable[int]] = None,
+    ) -> pd.DataFrame:
+        """Read REC_DB rows together with matched DSR recovery coordinates and ROV."""
+        lines_list = self._ensure_list(lines)
+        sql = """
+            SELECT
+                r.*,
+                d.PrimaryEasting1 AS DSR_PrimaryEasting1,
+                d.PrimaryNorthing1 AS DSR_PrimaryNorthing1,
+                d.ROV AS DSR_ROV
+            FROM REC_DB r
+            LEFT JOIN DSR d
+              ON CAST(d.Line AS INTEGER) = CAST(r.Line AS INTEGER)
+             AND CAST(d.Station AS INTEGER) = CAST(r.Point AS INTEGER)
+             AND COALESCE(d.Solution_FK, 1) = 1
+            WHERE 1=1
+        """
+        params: dict = {}
+        if lines_list is not None:
+            in_clause, p = self._sql_in_clause(lines_list, "ln")
+            sql += f" AND CAST(r.Line AS INTEGER) IN {in_clause}"
+            params.update(p)
+
+        with self._connect() as con:
+            df = pd.read_sql_query(sql, con, params=params)
+
+        for c in ("Line", "Point"):
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
+        return df
+
     def read_line_summary(self, parse_dates: bool = True):
         """
         Read all rows from V_DSR_LineSummary view
@@ -5251,7 +5284,8 @@ class DSRMapPlots:
             line=None,
             solution_fk=1,
             rov=None,
-            title="DSR Deployment Speed / Heading Map",
+            title=None,
+            phase="deployment",
             show_preplot=True,
             show_shapes=True,
             show_layers=True,
@@ -5266,7 +5300,7 @@ class DSRMapPlots:
             jason_item=False,
     ):
         """
-        Interactive DSR deployment map.
+        Interactive DSR deployment or recovery map.
 
         Features:
           - whole database if line=None
@@ -5283,6 +5317,12 @@ class DSRMapPlots:
         lines = [line] if line is not None else None
         dsr = self.read_dsr(lines=lines, solution_fk=solution_fk)
 
+        phase = str(phase or "deployment").strip().lower()
+        if phase not in ("deployment", "recovery"):
+            raise ValueError("phase must be 'deployment' or 'recovery'")
+        if title is None:
+            title = "DSR Recovery Speed / Heading Map" if phase == "recovery" else "DSR Deployment Speed / Heading Map"
+
         if dsr is None or dsr.empty:
             return self._error_layout(
                 title="No DSR data",
@@ -5292,7 +5332,22 @@ class DSRMapPlots:
                 json_return=jason_item,
             )
 
-        required = ["Line", "Station", "ROV", "TimeStamp", "PrimaryEasting", "PrimaryNorthing"]
+        if phase == "recovery":
+            source_columns = {
+                "ROV1": "ROV",
+                "TimeStamp1": "TimeStamp",
+                "PrimaryEasting1": "PrimaryEasting",
+                "PrimaryNorthing1": "PrimaryNorthing",
+            }
+        else:
+            source_columns = {
+                "ROV": "ROV",
+                "TimeStamp": "TimeStamp",
+                "PrimaryEasting": "PrimaryEasting",
+                "PrimaryNorthing": "PrimaryNorthing",
+            }
+
+        required = ["Line", "Station", *source_columns.keys()]
         missing = [c for c in required if c not in dsr.columns]
         if missing:
             return self._error_layout(
@@ -5304,6 +5359,9 @@ class DSRMapPlots:
             )
 
         df = dsr.copy()
+        if phase == "recovery":
+            for source_col, canonical_col in source_columns.items():
+                df[canonical_col] = df[source_col]
 
         if rov:
             df = df[df["ROV"].astype(str).str.strip().eq(str(rov).strip())]
@@ -5321,7 +5379,7 @@ class DSRMapPlots:
 
         if df.empty:
             return self._error_layout(
-                title="No valid DSR deployment data",
+                title=f"No valid DSR {phase} data",
                 message="No valid rows after cleaning.",
                 level="warning",
                 is_show=is_show,
@@ -5632,11 +5690,12 @@ class DSRMapPlots:
                     btn=play_btn,
                     time_slider=time_slider,
                     date_filter=date_filter,
+                    timer_key=f"_dsr_{phase}_play_timer",
                 ),
                 code="""
-                    if (window._dsr_deploy_play_timer) {
-                        clearInterval(window._dsr_deploy_play_timer);
-                        window._dsr_deploy_play_timer = null;
+                    if (window[timer_key]) {
+                        clearInterval(window[timer_key]);
+                        window[timer_key] = null;
                         btn.label = "▶ Play";
                         btn.button_type = "success";
                         return;
@@ -5647,7 +5706,7 @@ class DSRMapPlots:
 
                     const step = time_slider.step || 60000;
 
-                    window._dsr_deploy_play_timer = setInterval(function() {
+                    window[timer_key] = setInterval(function() {
                         let v = time_slider.value + step * 10;
 
                         const start = date_filter.value[0];
@@ -6515,6 +6574,8 @@ class DSRMapPlots:
             template="plotly_dark",
             is_show=False,
             json_return=False,
+            percent=False,
+            show_dominant_sector=False,
     ):
         """
         Plotly polar histogram / rose plot.
@@ -6673,8 +6734,14 @@ class DSRMapPlots:
                     .reset_index(name="Count")
                 )
 
+                value_col = "Count"
+                if percent:
+                    total = float(hist["Count"].sum())
+                    hist["Percent"] = (hist["Count"] / total * 100.0) if total else 0.0
+                    value_col = "Percent"
+
                 fig.add_trace(go.Barpolar(
-                    r=hist["Count"],
+                    r=hist[value_col],
                     theta=hist["BearingBin"],
                     width=[bin_width] * len(hist),
                     name=str(group),
@@ -6682,9 +6749,19 @@ class DSRMapPlots:
                     hovertemplate=(
                         "<b>%{fullData.name}</b><br>"
                         "Bearing: %{theta:.1f}°<br>"
-                        "Count: %{r}<extra></extra>"
+                        + ("Percent: %{r:.2f}%<extra></extra>" if percent else "Count: %{r}<extra></extra>")
                     ),
                 ))
+
+            dominant_text = None
+            if show_dominant_sector:
+                all_hist = data.groupby("BearingBin").size().reindex(theta_bins, fill_value=0)
+                if int(all_hist.sum()) > 0:
+                    dominant_bin = float(all_hist.idxmax())
+                    compass = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+                    sector = compass[int(((dominant_bin + 22.5) % 360) // 45)]
+                    share = float(all_hist.max()) / float(all_hist.sum()) * 100.0
+                    dominant_text = f"Dominant offset sector: {sector} ({dominant_bin:.1f}°), {share:.1f}%"
 
             # ---------------------------------------------------------
             # Better dynamic title
@@ -6714,8 +6791,9 @@ class DSRMapPlots:
                         ticktext=["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
                     ),
                     radialaxis=dict(
-                        title="Node Count",
+                        title="Offset Count (%)" if percent else "Node Count",
                         ticks="",
+                        ticksuffix="%" if percent else "",
                     ),
                 ),
                 legend=dict(
@@ -6725,6 +6803,11 @@ class DSRMapPlots:
                     xanchor="center",
                     x=0.5,
                 ),
+                annotations=([dict(
+                    text=dominant_text,
+                    x=0.5, y=1.07, xref="paper", yref="paper",
+                    showarrow=False, font=dict(size=12),
+                )] if dominant_text else []),
             )
 
             if is_show:

@@ -47,6 +47,13 @@ This v3 package is a working structured implementation and a solid base for deep
 
 This package preserves the v3 interface and workflow, including menus, toolbar/icons, project DB autoload, ROI editor, config dialog, filters, exports, visit/check workflow, and station map. v5 adds quick filters, better table sorting, summary cards, multi-select station/image rows, database delete/reset tools, and map image-count labels next to DSR points. Run with `python ocr/run_ocr_v5.py` or keep using `python ocr/run_ocr_v3.py`.
 
+### ROI Editor navigation
+
+- Use **Zoom In**, **Zoom Out**, **100%**, or **Fit Image** above the image.
+- The mouse wheel zooms around the pointer position; double-clicking the image fits it to the panel.
+- Drag the vertical splitter between the image and ROI panels to resize them. The splitter position is remembered for the next session.
+- Zooming changes only the display. ROI coordinates always remain in the original image coordinate system.
+
 ## Shared Lucide icons
 
 The OCR interface uses SVG icons directly from `dataviewer2/icons`; icon files are not duplicated.

@@ -44,10 +44,15 @@ urlpatterns = [
     path("recdb/primary/histograms/",load_recdb_primary_histograms,name="load_recdb_primary_histograms",),
     path("api/map/dsr-rov/<str:mode>/", rov_dsr_rov_map_json, name="rov_dsr_rov_map_json"),
     path("api/dsr-speed-heading-map/",rov_dsr_speed_heading_map_json,name="rov_dsr_speed_heading_map_json",),
+    path("api/dsr-recovery-speed-heading-map/",rov_dsr_recovery_speed_heading_map_json,name="rov_dsr_recovery_speed_heading_map_json",),
    path("project-template/matrix-html/",rov_project_template_matrix_html,name="rov_project_template_matrix_html",),
    path("qc/recdb/bullseye/<str:mode>/",recdb_bullseye_qc_json,name="recdb_bullseye_qc_json",),
+    path("qc/recdb/line-offsets/",recdb_line_offsets_json,name="recdb_line_offsets_json"),
+    path("qc/recdb/matrix/<str:mode>/",recdb_offset_matrix_json,name="recdb_offset_matrix_json"),
+    path("qc/recdb/rov-histograms/",recdb_rov_histograms_json,name="recdb_rov_histograms_json"),
     path("reports/node-position-comparison/selected/pdf/",export_selected_node_position_comparison_pdfs,name="export_selected_node_position_comparison_pdfs",),
     path("dsr/polar-histograms/",load_dsr_polar_histograms,name="load_dsr_polar_histograms",),
     path("recdb/polar-histograms/",load_recdb_polar_histograms,name="load_recdb_polar_histograms",),
+    path("recdb/polar-histograms/by-rov/",load_recdb_polar_histograms_by_rov,name="load_recdb_polar_histograms_by_rov",),
 
 ]

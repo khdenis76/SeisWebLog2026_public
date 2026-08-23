@@ -98,6 +98,7 @@ class NodePositionComparisonReport:
                 d.Station,
                 d.Node,
                 d.ROV,
+                d.ROV1,
 
                 d.PreplotEasting AS pp_x,
                 d.PreplotNorthing AS pp_y,
@@ -105,6 +106,10 @@ class NodePositionComparisonReport:
                 d.PrimaryEasting AS dep_x,
                 d.PrimaryNorthing AS dep_y,
                 d.PrimaryElevation AS dep_z,
+
+                d.PrimaryEasting1 AS rcv_x,
+                d.PrimaryNorthing1 AS rcv_y,
+                d.PrimaryElevation1 AS rcv_z,
 
                 rec.REC_X AS fb_x,
                 rec.REC_Y AS fb_y,
@@ -240,7 +245,10 @@ class NodePositionComparisonReport:
         Plot pages also get clear measurement-direction columns:
         - dep_pp_*  = Deployment - Preplot
         - rec_pp_*  = REC_DB / First Break - Preplot
-        - dep_rec_* = Deployment - REC_DB / First Break
+        - rcv_pp_* = Recovery - Preplot
+        - dep_rcv_* = Deployment - Recovery
+        - fb_rcv_* = REC_DB / First Break - Recovery
+        - dep_rec_* = Deployment - REC_DB / First Break (legacy plot name)
         """
         df = df.copy()
 
@@ -271,12 +279,24 @@ class NodePositionComparisonReport:
         df["rec_pp_dy"] = df["fb_y"] - df["pp_y"]
         df["rec_pp_dr"] = (df["rec_pp_dx"] ** 2 + df["rec_pp_dy"] ** 2) ** 0.5
 
+        df["rcv_pp_dx"] = df["rcv_x"] - df["pp_x"]
+        df["rcv_pp_dy"] = df["rcv_y"] - df["pp_y"]
+        df["rcv_pp_dr"] = (df["rcv_pp_dx"] ** 2 + df["rcv_pp_dy"] ** 2) ** 0.5
+
+        df["dep_rcv_dx"] = df["dep_x"] - df["rcv_x"]
+        df["dep_rcv_dy"] = df["dep_y"] - df["rcv_y"]
+        df["dep_rcv_dr"] = (df["dep_rcv_dx"] ** 2 + df["dep_rcv_dy"] ** 2) ** 0.5
+
+        df["fb_rcv_dx"] = df["fb_x"] - df["rcv_x"]
+        df["fb_rcv_dy"] = df["fb_y"] - df["rcv_y"]
+        df["fb_rcv_dr"] = (df["fb_rcv_dx"] ** 2 + df["fb_rcv_dy"] ** 2) ** 0.5
+
         df["dep_rec_dx"] = df["dep_x"] - df["fb_x"]
         df["dep_rec_dy"] = df["dep_y"] - df["fb_y"]
         df["dep_rec_dr"] = (df["dep_rec_dx"] ** 2 + df["dep_rec_dy"] ** 2) ** 0.5
 
         # Azimuth from North, clockwise. Positive dX = East, positive dY = North.
-        for prefix in ("dep_pp", "rec_pp", "dep_rec"):
+        for prefix in ("dep_pp", "rcv_pp", "rec_pp", "dep_rcv", "dep_rec", "fb_dep", "fb_rcv"):
             df[f"{prefix}_az"] = (
                 np.degrees(np.arctan2(df[f"{prefix}_dx"], df[f"{prefix}_dy"])) + 360.0
             ) % 360.0
@@ -295,6 +315,11 @@ class NodePositionComparisonReport:
 
         df["fb_pp_il"] = df["rec_pp_dx"] * ux + df["rec_pp_dy"] * uy
         df["fb_pp_xl"] = -df["rec_pp_dx"] * uy + df["rec_pp_dy"] * ux
+
+        # In-line / X-line components for every coordinate comparison.
+        for prefix in ("dep_pp", "rcv_pp", "rec_pp", "dep_rcv", "dep_rec", "fb_dep", "fb_rcv"):
+            df[f"{prefix}_il"] = df[f"{prefix}_dx"] * ux + df[f"{prefix}_dy"] * uy
+            df[f"{prefix}_xl"] = -df[f"{prefix}_dx"] * uy + df[f"{prefix}_dy"] * ux
 
         return df
 
@@ -393,27 +418,28 @@ class NodePositionComparisonReport:
         generated_on = datetime.now().strftime("%Y-%m-%d %H:%M")
         tgs_logo_file = self._tex_path(logo_file)
 
-        chart_xy_analysis_file = self._tex_path(
-            charts_dir / "node_position_xy_analysis_page.png"
-        )
+        chart_xy_preplot_file = self._tex_path(charts_dir / "node_position_xy_preplot_page.png")
+        chart_xy_cross_file = self._tex_path(charts_dir / "node_position_xy_cross_page.png")
         chart_offsets_file = self._tex_path(
             charts_dir / "node_position_offsets_page.png"
         )
         chart_il_xl_file = self._tex_path(
             charts_dir / "node_position_il_xl_radial_page.png"
         )
-        chart_polar_file = self._tex_path(
-            charts_dir / "node_position_polar_offsets_page.png"
-        )
-        chart_cdf_boxplots_file = self._tex_path(
-            charts_dir / "node_position_cdf_boxplots_page.png"
-        )
+        polar_group_2_file = self._tex_path(charts_dir / "node_position_polar_group_2_page.png")
+        polar_group_3_file = self._tex_path(charts_dir / "node_position_polar_group_3_page.png")
+        polar_stats_file = self._tex_path(charts_dir / "node_position_polar_statistics_page.png")
+        cdf_files = {
+            key: self._tex_path(charts_dir / f"node_position_cdf_boxplots_{key}_page.png")
+            for key in ("dep_pp", "rcv_pp", "rec_pp", "fb_dep", "fb_rcv")
+        }
         chart_heatmap_profile_file = self._tex_path(
             charts_dir / "node_position_heatmap_depth_profile_page.png"
         )
-        chart_directional_file = self._tex_path(
-            charts_dir / "node_position_directional_analysis_page.png"
-        )
+        directional_files = {
+            key: self._tex_path(charts_dir / f"node_position_directional_{key}_page.png")
+            for key in ("dep_pp", "rcv_pp", "rec_pp", "fb_dep", "fb_rcv")
+        }
         chart_executive_file = self._tex_path(
             charts_dir / "node_position_executive_summary_page.png"
         )
@@ -602,7 +628,14 @@ Generated On & : & @@GENERATED@@ \\
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.985\linewidth]{@@CHART_XY_ANALYSIS@@}
+\includegraphics[width=0.985\linewidth]{@@CHART_XY_PREPLOT@@}
+\end{figure}
+
+\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth]{@@CHART_XY_CROSS@@}
 \end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -642,15 +675,9 @@ Generated On & : & @@GENERATED@@ \\
 \end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% CDF AND BOXPLOTS PAGE
+%% CDF AND BOXPLOTS PAGES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\newpage
-\swlreportpage
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{@@CHART_CDF_BOXPLOTS@@}
-\end{figure}
+@@CDF_PAGES@@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% HEATMAP AND DEPTH PROFILE PAGE
@@ -664,33 +691,14 @@ Generated On & : & @@GENERATED@@ \\
 \end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% DIRECTIONAL ANALYSIS PAGE
+%% DIRECTIONAL ANALYSIS PAGES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\newpage
-\swlreportpage
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{@@CHART_DIRECTIONAL@@}
-\end{figure}
+@@DIRECTIONAL_PAGES@@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% POLAR PAGE
+%% POLAR PAGES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\newpage
-\swlreportpage
-
-\begin{center}
-{\Large\bfseries\textcolor{swlnavy}{POLAR OFFSET VS AZIMUTH}}
-\end{center}
-
-\vspace{1mm}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.985\linewidth]{@@CHART_POLAR@@}
-\end{figure}
+@@POLAR_PAGES@@
 
 \end{document}
 """
@@ -712,13 +720,38 @@ Generated On & : & @@GENERATED@@ \\
             "@@CHART_LINE_INFO@@": chart_line_info_file,
             "@@CHART_QC_DASHBOARD@@": chart_qc_dashboard_file,
             "@@TABLE_PAGES@@": table_pages,
-            "@@CHART_XY_ANALYSIS@@": chart_xy_analysis_file,
+            "@@CHART_XY_PREPLOT@@": chart_xy_preplot_file,
+            "@@CHART_XY_CROSS@@": chart_xy_cross_file,
             "@@CHART_OFFSETS@@": chart_offsets_file,
             "@@CHART_IL_XL@@": chart_il_xl_file,
-            "@@CHART_POLAR@@": chart_polar_file,
-            "@@CHART_CDF_BOXPLOTS@@": chart_cdf_boxplots_file,
+            "@@POLAR_PAGES@@": "\n".join(
+                r"""\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{%s}
+\end{figure}""" % chart_file
+                for chart_file in (polar_group_2_file, polar_group_3_file, polar_stats_file)
+            ),
+            "@@CDF_PAGES@@": "\n".join(
+                r"""\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{%s}
+\end{figure}""" % cdf_files[key]
+                for key in ("dep_pp", "rcv_pp", "rec_pp", "fb_dep", "fb_rcv")
+            ),
             "@@CHART_HEATMAP_PROFILE@@": chart_heatmap_profile_file,
-            "@@CHART_DIRECTIONAL@@": chart_directional_file,
+            "@@DIRECTIONAL_PAGES@@": "\n".join(
+                r"""\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{%s}
+\end{figure}""" % directional_files[key]
+                for key in ("dep_pp", "rcv_pp", "rec_pp", "fb_dep", "fb_rcv")
+            ),
         }
 
         for old, new in replacements.items():
@@ -999,7 +1032,7 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         self._make_executive_summary_page(df, charts_dir, line, float(max_radial_offset))
         self._make_line_information_page(df, charts_dir, line)
         self._make_qc_dashboard_page(df, charts_dir, line, float(max_radial_offset))
-        self._make_xy_offsets_analysis_page(df=df, charts_dir=charts_dir, max_radial_offset=float(max_radial_offset))
+        self._make_xy_offsets_analysis_pages(df=df, charts_dir=charts_dir, max_radial_offset=float(max_radial_offset))
         self._make_chart_page_offsets(df, charts_dir)
         self._make_chart_page_il_xl_radial(df, charts_dir)
         self._make_cdf_boxplots_page(df, charts_dir, float(max_radial_offset))
@@ -1166,7 +1199,26 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         for p,c in zip(pos,counts): bax.text(c+.2,p,str(c),va='center',fontsize=8)
         fig.savefig(charts_dir / "node_position_qc_dashboard_page.png",dpi=180,bbox_inches='tight'); plt.close(fig)
 
-    def _make_xy_offsets_analysis_page(self, df, charts_dir, max_radial_offset):
+    def _make_xy_offsets_analysis_pages(self, df, charts_dir, max_radial_offset):
+        pages = [
+            ("PREPLOT COORDINATE COMPARISONS", "node_position_xy_preplot_page.png", [
+                ("Deployment vs Preplot", "dep_pp_dx", "dep_pp_dy", "ROV"),
+                ("Recovery vs Preplot", "rcv_pp_dx", "rcv_pp_dy", "ROV1"),
+                ("REC_DB vs Preplot", "rec_pp_dx", "rec_pp_dy", "ROV"),
+            ]),
+            ("INTER-COORDINATE COMPARISONS", "node_position_xy_cross_page.png", [
+                ("Deployment vs Recovery", "dep_rcv_dx", "dep_rcv_dy", "ROV1"),
+                ("REC_DB vs Deployment", "fb_dep_dx", "fb_dep_dy", "ROV"),
+                ("REC_DB vs Recovery", "fb_rcv_dx", "fb_rcv_dy", "ROV1"),
+            ]),
+        ]
+        for page_title, filename, specs in pages:
+            self._make_xy_offsets_analysis_page(
+                df, charts_dir, max_radial_offset, page_title, filename, specs
+            )
+
+    def _make_xy_offsets_analysis_page(self, df, charts_dir, max_radial_offset,
+                                       page_title, filename, plot_specs):
         """
         Single-page XY cross-plot dashboard.
 
@@ -1191,7 +1243,7 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         title_ax.text(
             0.5,
             0.90,
-            "XY OFFSETS ANALYSIS",
+            page_title,
             ha="center",
             va="center",
             fontsize=24,
@@ -1206,13 +1258,11 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
             fontsize=12,
         )
 
-        plot_specs = [
-            ("Deployment vs Preplot", "dep_pp_dx", "dep_pp_dy"),
-            ("REC_DB vs Deployment", "fb_dep_dx", "fb_dep_dy"),
-            ("REC_DB vs Preplot", "rec_pp_dx", "rec_pp_dy"),
-        ]
-
-        rovs = sorted([str(x) for x in df["ROV"].dropna().unique()]) if "ROV" in df.columns else []
+        rov_values = []
+        for _, _, _, color_col in plot_specs:
+            if color_col in df.columns:
+                rov_values.extend(str(x) for x in df[color_col].dropna().unique())
+        rovs = sorted(set(rov_values))
         cmap = plt.get_cmap("tab10")
         rov_colors = {rov: cmap(i % 10) for i, rov in enumerate(rovs)}
 
@@ -1245,7 +1295,7 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
                 frameon=True,
             )
 
-        for col_idx, (title, xcol, ycol) in enumerate(plot_specs):
+        for col_idx, (title, xcol, ycol, color_col) in enumerate(plot_specs):
             ax = fig.add_subplot(gs[1, col_idx])
             self._draw_xy_offset_analysis_plot(
                 ax=ax,
@@ -1255,6 +1305,7 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
                 title=title,
                 max_radial_offset=max_radial_offset,
                 rov_colors=rov_colors,
+                color_col=color_col,
             )
 
             stats_ax = fig.add_subplot(gs[2, col_idx])
@@ -1282,16 +1333,16 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         )
 
         fig.savefig(
-            charts_dir / "node_position_xy_analysis_page.png",
+            charts_dir / filename,
             dpi=180,
             bbox_inches="tight",
         )
         plt.close(fig)
 
-    def _draw_xy_offset_analysis_plot(self, ax, df, xcol, ycol, title, max_radial_offset, rov_colors):
+    def _draw_xy_offset_analysis_plot(self, ax, df, xcol, ycol, title, max_radial_offset, rov_colors, color_col="ROV"):
         base_cols = [xcol, ycol, "Station"]
-        if "ROV" in df.columns:
-            base_cols.append("ROV")
+        if color_col in df.columns:
+            base_cols.append(color_col)
 
         clean = df[base_cols].dropna(subset=[xcol, ycol]).copy()
 
@@ -1300,8 +1351,8 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
             ax.grid(True, linewidth=0.3, alpha=0.55)
             return
 
-        if "ROV" in clean.columns:
-            for rov, part in clean.groupby("ROV"):
+        if color_col in clean.columns:
+            for rov, part in clean.groupby(color_col):
                 ax.scatter(
                     part[xcol],
                     part[ycol],
@@ -1661,37 +1712,64 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         plt.close(fig)
 
     def _make_cdf_boxplots_page(self, df, charts_dir, max_radial_offset):
-        """Create a combined empirical CDF, percentile table and boxplot page."""
-        plot_df = df.copy().reset_index(drop=True)
-        radial = pd.to_numeric(plot_df["dep_pp_dr"], errors="coerce").dropna().to_numpy(float)
-        inline = np.abs(pd.to_numeric(plot_df["dep_il"], errors="coerce").dropna().to_numpy(float))
-        crossline = np.abs(pd.to_numeric(plot_df["dep_xl"], errors="coerce").dropna().to_numpy(float))
+        """Create one CDF/boxplot page for each requested coordinate comparison."""
+        specs = [
+            ("dep_pp", "Deployment vs Preplot", "dep_z", None),
+            ("rcv_pp", "Recovery vs Preplot", "rcv_z", None),
+            ("rec_pp", "REC_DB vs Preplot", "fb_z", None),
+            ("fb_dep", "REC_DB vs Deployment", "fb_z", "dep_z"),
+            ("fb_rcv", "REC_DB vs Recovery", "fb_z", "rcv_z"),
+        ]
+        for prefix, title, z_a, z_b in specs:
+            self._make_cdf_boxplots_single(
+                df, charts_dir, max_radial_offset, prefix, title, z_a, z_b
+            )
 
-        # A physically meaningful vertical comparison: magnitude of REC_DB depth
-        # minus magnitude of deployment elevation/depth.
-        z_delta = (
-            np.abs(pd.to_numeric(plot_df["fb_z"], errors="coerce"))
-            - np.abs(pd.to_numeric(plot_df["dep_z"], errors="coerce"))
-        ).dropna().to_numpy(float)
+    def _make_cdf_boxplots_single(self, df, charts_dir, max_radial_offset,
+                                  prefix, comparison_title, z_a, z_b):
+        plot_df = df.copy().reset_index(drop=True)
+        dx_signed = pd.to_numeric(plot_df[f"{prefix}_dx"], errors="coerce").dropna().to_numpy(float)
+        dy_signed = pd.to_numeric(plot_df[f"{prefix}_dy"], errors="coerce").dropna().to_numpy(float)
+        radial = pd.to_numeric(plot_df[f"{prefix}_dr"], errors="coerce").dropna().to_numpy(float)
+        inline_signed = pd.to_numeric(plot_df[f"{prefix}_il"], errors="coerce").dropna().to_numpy(float)
+        crossline_signed = pd.to_numeric(plot_df[f"{prefix}_xl"], errors="coerce").dropna().to_numpy(float)
+        delta_x = np.abs(dx_signed)
+        delta_y = np.abs(dy_signed)
+        inline = np.abs(inline_signed)
+        crossline = np.abs(crossline_signed)
+        if z_b:
+            z_delta = (
+                np.abs(pd.to_numeric(plot_df[z_a], errors="coerce"))
+                - np.abs(pd.to_numeric(plot_df[z_b], errors="coerce"))
+            ).dropna().to_numpy(float)
+        else:
+            z_delta = np.array([], dtype=float)
 
         fig = plt.figure(figsize=(18, 10.3))
         gs = fig.add_gridspec(2, 2, width_ratios=[1.65, 1.0], height_ratios=[1.05, 1.0], hspace=0.36, wspace=0.22)
-        fig.suptitle("CDF & BOXPLOTS", fontsize=20, fontweight="bold", y=0.98)
+        fig.suptitle(f"CDF & BOXPLOTS - {comparison_title}", fontsize=20, fontweight="bold", y=0.98)
 
         ax_cdf = fig.add_subplot(gs[0, 0])
-        for values, label in ((radial, "Radial offset"), (inline, "|In-line offset|"), (crossline, "|Crossline offset|")):
+        cdf_series = (
+            (radial, "Radial offset", "#1f77b4", "-"),
+            (delta_x, "|Delta X|", "#ff7f0e", "-"),
+            (delta_y, "|Delta Y|", "#2ca02c", "-"),
+            (inline, "|In-line offset|", "#9467bd", "--"),
+            (crossline, "|X-line offset|", "#d62728", "-."),
+        )
+        for values, label, color, linestyle in cdf_series:
             values = values[np.isfinite(values)]
             if values.size:
                 x = np.sort(values)
                 y = np.arange(1, len(x) + 1) / len(x) * 100.0
-                ax_cdf.plot(x, y, linewidth=2.0, label=label)
+                ax_cdf.plot(x, y, linewidth=1.8, color=color, linestyle=linestyle, label=label)
         ax_cdf.axvline(max_radial_offset, linestyle="--", linewidth=1.0, label=f"QC limit ({max_radial_offset:.1f} m)")
         ax_cdf.set_title("CUMULATIVE DISTRIBUTION FUNCTION (CDF)", fontsize=11, fontweight="bold")
         ax_cdf.set_xlabel("Absolute offset (m)")
         ax_cdf.set_ylabel("Cumulative percentage (%)")
         ax_cdf.set_ylim(0, 101)
         ax_cdf.grid(True, linewidth=0.35, alpha=0.55)
-        ax_cdf.legend(fontsize=8, loc="lower right")
+        ax_cdf.legend(fontsize=7.5, loc="lower right", ncol=2)
 
         ax_pct = fig.add_subplot(gs[0, 1])
         ax_pct.axis("off")
@@ -1700,9 +1778,9 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         for q in percentiles:
             def qv(a):
                 return f"{np.nanpercentile(a, q):.2f}" if len(a) else ""
-            rows.append([f"{q}%" + (" (Median)" if q == 50 else ""), qv(radial), qv(inline), qv(crossline)])
-        tbl = ax_pct.table(cellText=rows, colLabels=["Percentile", "Radial", "|IL|", "|XL|"], cellLoc="center", colLoc="center", bbox=[0.02, 0.26, 0.96, 0.62])
-        tbl.auto_set_font_size(False); tbl.set_fontsize(9); tbl.scale(1, 1.35)
+            rows.append([f"{q}%" + (" (Median)" if q == 50 else ""), qv(radial), qv(delta_x), qv(delta_y), qv(inline), qv(crossline)])
+        tbl = ax_pct.table(cellText=rows, colLabels=["Percentile", "Radial", "|dX|", "|dY|", "|IL|", "|XL|"], cellLoc="center", colLoc="center", bbox=[0.00, 0.26, 1.00, 0.62])
+        tbl.auto_set_font_size(False); tbl.set_fontsize(8.2); tbl.scale(1, 1.35)
         for (r, c), cell in tbl.get_celld().items():
             cell.set_linewidth(0.5)
             if r == 0:
@@ -1711,8 +1789,11 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         ax_pct.text(0.05, 0.15, "Green: good (< 1 m)\nYellow: acceptable (1–2 m)\nRed: warning (> 2 m)", transform=ax_pct.transAxes, fontsize=9, va="top")
 
         ax_box = fig.add_subplot(gs[1, :])
-        datasets = [plot_df["dep_il"].dropna(), plot_df["dep_xl"].dropna(), radial, z_delta]
-        labels = ["In-line (m)", "Crossline (m)", "Radial (m)", "Depth ΔZ (m)"]
+        datasets = [dx_signed, dy_signed, inline_signed, crossline_signed, radial]
+        labels = ["Delta X (m)", "Delta Y (m)", "In-line (m)", "X-line (m)", "Radial (m)"]
+        if z_delta.size:
+            datasets.append(z_delta)
+            labels.append("Depth dZ (m)")
         box = ax_box.boxplot(datasets, labels=labels, patch_artist=True, showmeans=True,
                              meanprops=dict(marker="D", markerfacecolor="white", markeredgecolor="black", markersize=4))
         for patch in box["boxes"]:
@@ -1723,66 +1804,123 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         ax_box.text(0.99, 0.96, "Box: 25–75%\nLine: median\nWhiskers: 1.5×IQR\nDots: outliers", transform=ax_box.transAxes, ha="right", va="top", fontsize=8)
 
         fig.subplots_adjust(left=0.055, right=0.97, top=0.91, bottom=0.08)
-        fig.savefig(charts_dir / "node_position_cdf_boxplots_page.png", dpi=180, bbox_inches="tight")
+        fig.savefig(charts_dir / f"node_position_cdf_boxplots_{prefix}_page.png", dpi=180, bbox_inches="tight")
         plt.close(fig)
 
     def _make_heatmap_depth_profile_page(self, df, charts_dir, max_radial_offset):
-        """Create radial-offset heat strip and water-depth/radial profile page."""
+        """Create three shared-scale heatmaps and a combined depth/offset profile."""
         plot_df = df.copy().sort_values("Station").reset_index(drop=True)
         station = plot_df["Station"].to_numpy(float)
-        radial = plot_df["dep_pp_dr"].to_numpy(float)
-        depth = np.abs(plot_df["dep_z"].to_numpy(float))
+        dep_radial = pd.to_numeric(plot_df["dep_pp_dr"], errors="coerce").to_numpy(float)
+        rcv_radial = pd.to_numeric(plot_df["rcv_pp_dr"], errors="coerce").to_numpy(float)
+        recdb_radial = pd.to_numeric(plot_df["rec_pp_dr"], errors="coerce").to_numpy(float)
+        dep_depth = np.abs(pd.to_numeric(plot_df["dep_z"], errors="coerce").to_numpy(float))
+        rcv_depth = np.abs(pd.to_numeric(plot_df["rcv_z"], errors="coerce").to_numpy(float))
+
+        radial_parts = [
+            x[np.isfinite(x)] for x in (dep_radial, rcv_radial, recdb_radial)
+            if np.any(np.isfinite(x))
+        ]
+        finite_radials = np.concatenate(radial_parts) if radial_parts else np.array([], dtype=float)
+        color_max = max(max_radial_offset, float(np.nanpercentile(finite_radials, 98))) if finite_radials.size else max_radial_offset
 
         fig = plt.figure(figsize=(18, 10.3))
-        gs = fig.add_gridspec(3, 1, height_ratios=[0.72, 1.45, 0.45], hspace=0.58)
-        fig.suptitle("HEATMAP & WATER DEPTH PROFILE", fontsize=20, fontweight="bold", y=0.98)
+        gs = fig.add_gridspec(5, 1, height_ratios=[0.28, 0.28, 0.28, 1.48, 0.48], hspace=0.42)
+        fig.suptitle("RADIAL OFFSET HEATMAPS & WATER DEPTH PROFILE", fontsize=20, fontweight="bold", y=0.985)
 
-        ax_hm = fig.add_subplot(gs[0, 0])
-        heat = np.tile(radial, (6, 1))
-        im = ax_hm.imshow(heat, aspect="auto", interpolation="nearest", cmap="RdYlGn_r",
-                          vmin=0, vmax=max(max_radial_offset, float(np.nanpercentile(radial, 98))))
-        ax_hm.set_yticks([])
-        tick_idx = np.linspace(0, len(station)-1, min(8, len(station)), dtype=int)
-        ax_hm.set_xticks(tick_idx)
-        ax_hm.set_xticklabels([str(int(station[i])) for i in tick_idx])
-        ax_hm.set_xlabel("Station")
-        ax_hm.set_title("RADIAL OFFSET HEATMAP ALONG LINE", fontsize=11, fontweight="bold")
-        cbar = fig.colorbar(im, ax=ax_hm, orientation="horizontal", pad=0.30, fraction=0.12)
-        cbar.set_label("Radial offset (m)")
+        heat_specs = [
+            ("Deployment vs Preplot", dep_radial),
+            ("Recovery vs Preplot", rcv_radial),
+            ("REC_DB vs Preplot", recdb_radial),
+        ]
+        tick_idx = np.linspace(0, len(station) - 1, min(8, len(station)), dtype=int)
+        heat_axes = []
+        im = None
+        for idx, (title, values) in enumerate(heat_specs):
+            ax_hm = fig.add_subplot(gs[idx, 0])
+            heat_axes.append(ax_hm)
+            heat = np.tile(values, (4, 1))
+            im = ax_hm.imshow(heat, aspect="auto", interpolation="nearest", cmap="RdYlGn_r",
+                              vmin=0, vmax=color_max)
+            ax_hm.set_yticks([])
+            ax_hm.set_title(title, loc="left", fontsize=9, fontweight="bold", pad=2)
+            ax_hm.set_xticks(tick_idx)
+            if idx == 2:
+                ax_hm.set_xticklabels([str(int(station[i])) for i in tick_idx], fontsize=8)
+                ax_hm.set_xlabel("Station", fontsize=9)
+            else:
+                ax_hm.set_xticklabels([])
+                ax_hm.tick_params(axis="x", length=0)
 
-        ax_depth = fig.add_subplot(gs[1, 0])
+        # One compact shared vertical color bar to the left of all heatmaps.
+        cax = fig.add_axes([0.045, 0.615, 0.012, 0.205])
+        cbar = fig.colorbar(im, cax=cax, orientation="vertical")
+        cbar.set_label("Radial offset (m)", fontsize=8)
+        cbar.ax.tick_params(labelsize=7)
+
+        ax_depth = fig.add_subplot(gs[3, 0])
         ax_rad = ax_depth.twinx()
-        l1, = ax_depth.plot(station, depth, linewidth=1.8, label="Water depth")
-        l2, = ax_rad.plot(station, radial, linewidth=1.5, label="Radial offset")
+        lines = []
+        lines += ax_depth.plot(station, dep_depth, color="#222222", linestyle="-", linewidth=1.7,
+                               label="Deployment water depth")
+        lines += ax_depth.plot(station, rcv_depth, color="#777777", linestyle="--", linewidth=1.6,
+                               label="Recovery water depth")
+        lines += ax_rad.plot(station, dep_radial, color="#1f77b4", linestyle="-", linewidth=1.35,
+                             label="Deployment radial offset")
+        lines += ax_rad.plot(station, rcv_radial, color="#ff7f0e", linestyle="--", linewidth=1.35,
+                             label="Recovery radial offset")
+        lines += ax_rad.plot(station, recdb_radial, color="#2ca02c", linestyle="-.", linewidth=1.35,
+                             label="REC_DB radial offset")
         ax_depth.set_xlabel("Station")
         ax_depth.set_ylabel("Water depth (m)")
         ax_rad.set_ylabel("Radial offset (m)")
         ax_depth.grid(True, linewidth=0.35, alpha=0.5)
-        ax_depth.set_title("WATER DEPTH & RADIAL OFFSET PROFILE", fontsize=11, fontweight="bold")
-        ax_depth.legend([l1, l2], [l1.get_label(), l2.get_label()], loc="upper left", fontsize=8)
+        ax_depth.set_title("DEPLOYMENT / RECOVERY WATER DEPTH & RADIAL OFFSETS", fontsize=11, fontweight="bold")
+        ax_depth.legend(lines, [line.get_label() for line in lines], loc="upper right", fontsize=8,
+                        ncol=2, frameon=True)
 
-        ax_sum = fig.add_subplot(gs[2, 0]); ax_sum.axis("off")
+        ax_sum = fig.add_subplot(gs[4, 0]); ax_sum.axis("off")
+        def stats(values, decimals):
+            clean = values[np.isfinite(values)]
+            if not clean.size:
+                return ["", "", ""]
+            return [f"{np.min(clean):.{decimals}f}", f"{np.mean(clean):.{decimals}f}", f"{np.max(clean):.{decimals}f}"]
         summary = [
             ["PROFILE SUMMARY", "Min", "Average", "Max"],
-            ["Water depth (m)", f"{np.nanmin(depth):.1f}", f"{np.nanmean(depth):.1f}", f"{np.nanmax(depth):.1f}"],
-            ["Radial offset (m)", f"{np.nanmin(radial):.2f}", f"{np.nanmean(radial):.2f}", f"{np.nanmax(radial):.2f}"],
+            ["Deployment water depth (m)", *stats(dep_depth, 1)],
+            ["Recovery water depth (m)", *stats(rcv_depth, 1)],
+            ["Deployment radial offset (m)", *stats(dep_radial, 2)],
+            ["Recovery radial offset (m)", *stats(rcv_radial, 2)],
+            ["REC_DB radial offset (m)", *stats(recdb_radial, 2)],
         ]
-        tbl = ax_sum.table(cellText=summary[1:], colLabels=summary[0], cellLoc="center", colLoc="center", bbox=[0.20, 0.02, 0.60, 0.92])
-        tbl.auto_set_font_size(False); tbl.set_fontsize(9); tbl.scale(1, 1.3)
+        tbl = ax_sum.table(cellText=summary[1:], colLabels=summary[0], cellLoc="center", colLoc="center",
+                           bbox=[0.18, 0.00, 0.64, 0.98])
+        tbl.auto_set_font_size(False); tbl.set_fontsize(8.5); tbl.scale(1, 1.18)
         for (r, c), cell in tbl.get_celld().items():
             cell.set_linewidth(0.5)
             if r == 0:
                 cell.set_facecolor("#eaf2f8"); cell.set_text_props(weight="bold")
 
-        fig.subplots_adjust(left=0.06, right=0.94, top=0.91, bottom=0.07)
+        fig.subplots_adjust(left=0.12, right=0.95, top=0.91, bottom=0.055)
         fig.savefig(charts_dir / "node_position_heatmap_depth_profile_page.png", dpi=180, bbox_inches="tight")
         plt.close(fig)
 
     def _make_directional_analysis_page(self, df, charts_dir):
-        """Create rose diagram, circular statistics and sector radial table."""
-        clean = df[["dep_pp_az", "dep_pp_dr"]].dropna().copy()
-        az_deg = clean["dep_pp_az"].to_numpy(float)
-        radial = clean["dep_pp_dr"].to_numpy(float)
+        """Create five rose-diagram pages using a different color per comparison."""
+        specs = [
+            ("dep_pp", "Deployment vs Preplot", "#1f77b4"),
+            ("rcv_pp", "Recovery vs Preplot", "#ff7f0e"),
+            ("rec_pp", "REC_DB vs Preplot", "#2ca02c"),
+            ("fb_dep", "REC_DB vs Deployment", "#9467bd"),
+            ("fb_rcv", "REC_DB vs Recovery", "#d62728"),
+        ]
+        for prefix, title, color in specs:
+            self._make_directional_analysis_single(df, charts_dir, prefix, title, color)
+
+    def _make_directional_analysis_single(self, df, charts_dir, prefix, comparison_title, color):
+        clean = df[[f"{prefix}_az", f"{prefix}_dr"]].dropna().copy()
+        az_deg = clean[f"{prefix}_az"].to_numpy(float)
+        radial = clean[f"{prefix}_dr"].to_numpy(float)
         theta = np.deg2rad(az_deg)
 
         # Circular mean and concentration.
@@ -1799,14 +1937,14 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
 
         fig = plt.figure(figsize=(18, 10.3))
         gs = fig.add_gridspec(2, 2, width_ratios=[1.55, 0.85], height_ratios=[1.0, 0.30], hspace=0.30, wspace=0.25)
-        fig.suptitle("DIRECTIONAL ANALYSIS (ROSE DIAGRAM)", fontsize=20, fontweight="bold", y=0.98)
+        fig.suptitle(f"DIRECTIONAL ANALYSIS - {comparison_title}", fontsize=20, fontweight="bold", y=0.98, color=color)
 
         ax = fig.add_subplot(gs[0, 0], projection="polar")
-        ax.bar(centers, counts, width=widths, bottom=0.0, alpha=0.78, edgecolor="black", linewidth=0.35)
+        ax.bar(centers, counts, width=widths, bottom=0.0, alpha=0.78, color=color, edgecolor="black", linewidth=0.35)
         ax.set_theta_zero_location("N"); ax.set_theta_direction(-1)
-        ax.set_title("ROSE DIAGRAM OF DEPLOYMENT RADIAL OFFSETS", fontsize=11, fontweight="bold", pad=18)
+        ax.set_title(f"ROSE DIAGRAM - {comparison_title}", fontsize=11, fontweight="bold", pad=18, color=color)
         ax.grid(True, linewidth=0.35, alpha=0.55)
-        ax.plot([math.radians(mean_dir), math.radians(mean_dir)], [0, max(counts.max(), 1)], linewidth=2.2, linestyle="--", label=f"Mean {mean_dir:.1f}°")
+        ax.plot([math.radians(mean_dir), math.radians(mean_dir)], [0, max(counts.max(), 1)], linewidth=2.2, linestyle="--", color=color, label=f"Mean {mean_dir:.1f}°")
         ax.legend(loc="lower left", bbox_to_anchor=(-0.12, -0.10), fontsize=8)
 
         ax_tbl = fig.add_subplot(gs[0, 1]); ax_tbl.axis("off")
@@ -1821,7 +1959,7 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         for (r, c), cell in stats.get_celld().items():
             cell.set_linewidth(0.5)
             if r == 0:
-                cell.set_facecolor("#eaf2f8"); cell.set_text_props(weight="bold")
+                cell.set_facecolor(color); cell.set_text_props(weight="bold", color="white")
 
         sectors = [(0,45),(45,90),(90,135),(135,180),(180,225),(225,270),(270,315),(315,360)]
         sec_rows = []
@@ -1836,95 +1974,137 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         for (r, c), cell in sec.get_celld().items():
             cell.set_linewidth(0.5)
             if r == 0:
-                cell.set_facecolor("#eaf2f8"); cell.set_text_props(weight="bold")
+                cell.set_facecolor(color); cell.set_text_props(weight="bold", color="white")
 
         best_i = int(np.nanargmax(sec_means)) if any(np.isfinite(sec_means)) else 0
         lo, hi = sectors[best_i]
         directions = ["NNE", "ENE", "ESE", "SSE", "SSW", "WSW", "WNW", "NNW"]
         ax_note = fig.add_subplot(gs[1, :]); ax_note.axis("off")
-        ax_note.text(0.03, 0.5, f"Dominant radial-offset sector: {lo}°–{hi}° ({directions[best_i]} direction).", fontsize=13, fontweight="bold", va="center")
-        ax_note.add_patch(Rectangle((0.01, 0.12), 0.98, 0.75, fill=False, linewidth=0.8, transform=ax_note.transAxes, clip_on=False))
+        ax_note.text(0.03, 0.5, f"Dominant radial-offset sector: {lo}°–{hi}° ({directions[best_i]} direction).", fontsize=13, fontweight="bold", color=color, va="center")
+        ax_note.add_patch(Rectangle((0.01, 0.12), 0.98, 0.75, fill=False, edgecolor=color, linewidth=1.2, transform=ax_note.transAxes, clip_on=False))
 
         fig.subplots_adjust(left=0.06, right=0.95, top=0.90, bottom=0.08)
-        fig.savefig(charts_dir / "node_position_directional_analysis_page.png", dpi=180, bbox_inches="tight")
+        fig.savefig(charts_dir / f"node_position_directional_{prefix}_page.png", dpi=180, bbox_inches="tight")
         plt.close(fig)
 
     def _make_polar_offsets_page(self, df, charts_dir):
         specs = [
-            ("Deployment vs Preplot", "dep_pp_az", "dep_pp_dr"),
-            ("REC_DB vs Preplot", "rec_pp_az", "rec_pp_dr"),
-            ("Deployment vs REC_DB", "dep_rec_az", "dep_rec_dr"),
+            ("dep_pp", "Deployment vs Preplot", "dep_pp_az", "dep_pp_dr", "ROV"),
+            ("rcv_pp", "Recovery vs Preplot", "rcv_pp_az", "rcv_pp_dr", "ROV1"),
+            ("rec_pp", "REC_DB vs Preplot", "rec_pp_az", "rec_pp_dr", "ROV"),
+            ("fb_dep", "REC_DB vs Deployment", "fb_dep_az", "fb_dep_dr", "ROV"),
+            ("fb_rcv", "REC_DB vs Recovery", "fb_rcv_az", "fb_rcv_dr", "ROV1"),
         ]
 
-        fig = plt.figure(figsize=(16.2, 9.4))
-        gs = fig.add_gridspec(1, 3, wspace=0.28)
-
-        rovs = sorted([str(x) for x in df["ROV"].dropna().unique()]) if "ROV" in df.columns else []
+        rov_values = []
+        for color_col in ("ROV", "ROV1"):
+            if color_col in df.columns:
+                rov_values.extend(str(x) for x in df[color_col].dropna().unique())
+        rovs = sorted(set(rov_values))
         cmap = plt.get_cmap("tab10")
         rov_colors = {rov: cmap(i % 10) for i, rov in enumerate(rovs)}
 
-        for idx, (title, az_col, r_col) in enumerate(specs):
-            ax = fig.add_subplot(gs[0, idx], projection="polar")
-            cols = [az_col, r_col, "Station"] + (["ROV"] if "ROV" in df.columns else [])
-            clean = df[cols].dropna(subset=[az_col, r_col]).copy()
+        groups = [
+            (specs[:2], "node_position_polar_group_2_page.png"),
+            (specs[2:], "node_position_polar_group_3_page.png"),
+        ]
+        for group_specs, filename in groups:
+            fig = plt.figure(figsize=(16.2, 9.4))
+            gs = fig.add_gridspec(1, len(group_specs), wspace=0.30)
+            for idx, spec in enumerate(group_specs):
+                ax = fig.add_subplot(gs[0, idx], projection="polar")
+                self._draw_polar_comparison(ax, df, spec, rov_colors)
 
+            if rovs:
+                handles = [
+                    plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=rov_colors[rov],
+                               markeredgecolor="black", markersize=7, label=rov)
+                    for rov in rovs
+                ]
+                fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.91),
+                           ncol=min(len(rovs), 8), title="ROV", fontsize=9, frameon=True)
+            fig.suptitle("POLAR OFFSET VS AZIMUTH", fontsize=20, fontweight="bold", y=0.97)
+            fig.text(0.5, 0.045, "Azimuth is clockwise from North. Radius is horizontal offset in meters. Red star marks the maximum offset.", ha="center", fontsize=10)
+            fig.subplots_adjust(left=0.04, right=0.98, top=0.82, bottom=0.11)
+            fig.savefig(charts_dir / filename, dpi=180)
+            plt.close(fig)
+
+        self._make_polar_statistics_table(df, charts_dir, specs)
+
+    def _draw_polar_comparison(self, ax, df, spec, rov_colors):
+        _key, title, az_col, r_col, color_col = spec
+        cols = [az_col, r_col, "Station"] + ([color_col] if color_col in df.columns else [])
+        clean = df[cols].dropna(subset=[az_col, r_col]).copy()
+        ax.set_theta_zero_location("N")
+        ax.set_theta_direction(-1)
+        ax.set_title(title, fontsize=12, fontweight="bold", pad=18)
+        ax.grid(True, linewidth=0.35, alpha=0.65)
+        ax.tick_params(labelsize=8)
+        if clean.empty:
+            return
+
+        radius_all = clean[r_col].to_numpy(dtype=float)
+        q95 = float(np.nanquantile(radius_all, 0.95))
+        q98 = float(np.nanquantile(radius_all, 0.98))
+        rmax_visible = max(q95 * 1.45, q98 * 1.12, 2.0)
+        if color_col in clean.columns:
+            for rov, part in clean.groupby(color_col):
+                ax.scatter(np.deg2rad(part[az_col].to_numpy(float)), part[r_col].to_numpy(float),
+                           s=20, alpha=0.86, color=rov_colors.get(str(rov), "#333333"),
+                           edgecolors="black", linewidths=0.18)
+        else:
+            ax.scatter(np.deg2rad(clean[az_col].to_numpy(float)), clean[r_col].to_numpy(float),
+                       s=20, alpha=0.86, edgecolors="black", linewidths=0.18)
+
+        max_row = clean.loc[clean[r_col].idxmax()]
+        true_max = float(max_row[r_col])
+        theta = math.radians(float(max_row[az_col]))
+        shown_radius = min(true_max, rmax_visible * 0.96)
+        ax.scatter([theta], [shown_radius], s=95, marker="*", color="red",
+                   edgecolors="black", linewidths=0.4, zorder=6)
+        ax.text(theta, shown_radius, f" {int(max_row['Station'])} / {true_max:.1f} m",
+                fontsize=7, color="red", fontweight="bold", zorder=7)
+        ax.set_ylim(0, rmax_visible)
+
+    def _make_polar_statistics_table(self, df, charts_dir, specs):
+        rows = []
+        for _key, title, az_col, r_col, _color_col in specs:
+            clean = df[[az_col, r_col]].dropna().copy()
             if clean.empty:
-                ax.set_title(title, fontsize=12, fontweight="bold", pad=16)
+                rows.append([title, "0", "", "", "", "", "", ""])
                 continue
+            radial = clean[r_col].astype(float)
+            azimuth = np.deg2rad(clean[az_col].astype(float).to_numpy())
+            mean_dir = (math.degrees(math.atan2(np.mean(np.sin(azimuth)), np.mean(np.cos(azimuth)))) + 360.0) % 360.0
+            rows.append([
+                title, str(len(clean)), f"{radial.mean():.2f}", f"{radial.std(ddof=1):.2f}",
+                f"{radial.median():.2f}", f"{radial.quantile(.95):.2f}",
+                f"{radial.max():.2f}", f"{mean_dir:.1f}°",
+            ])
 
-            radius_all = clean[r_col].to_numpy(dtype=float)
-            q95 = float(np.nanquantile(radius_all, 0.95)) if len(radius_all) else 1.0
-            q98 = float(np.nanquantile(radius_all, 0.98)) if len(radius_all) else q95
-            rmax_visible = max(q95 * 1.45, q98 * 1.12, 2.0)
-
-            if "ROV" in clean.columns and rovs:
-                for rov, part in clean.groupby("ROV"):
-                    ax.scatter(
-                        np.deg2rad(part[az_col].to_numpy(dtype=float)),
-                        part[r_col].to_numpy(dtype=float),
-                        s=22,
-                        alpha=0.86,
-                        color=rov_colors.get(str(rov), "#333333"),
-                        edgecolors="black",
-                        linewidths=0.20,
-                        label=str(rov),
-                    )
-            else:
-                ax.scatter(
-                    np.deg2rad(clean[az_col].to_numpy(dtype=float)),
-                    clean[r_col].to_numpy(dtype=float),
-                    s=22,
-                    alpha=0.86,
-                    edgecolors="black",
-                    linewidths=0.20,
-                )
-
-            max_pos = clean[r_col].idxmax()
-            max_row = clean.loc[max_pos]
-            max_theta = math.radians(float(max_row[az_col]))
-            true_max_radius = float(max_row[r_col])
-            shown_radius = min(true_max_radius, rmax_visible * 0.96)
-
-            ax.scatter([max_theta], [shown_radius], s=105, marker="*", color="red", edgecolors="black", linewidths=0.45, zorder=6)
-            ax.text(max_theta, shown_radius, f" {int(max_row['Station'])} / R={true_max_radius:.1f}", fontsize=7, color="red", fontweight="bold", zorder=7)
-
-            ax.set_ylim(0, rmax_visible)
-            ax.set_theta_zero_location("N")
-            ax.set_theta_direction(-1)
-            ax.set_title(title, fontsize=12, fontweight="bold", pad=16)
-            ax.grid(True, linewidth=0.35, alpha=0.65)
-            ax.tick_params(labelsize=8)
-
-        if rovs:
-            handles = [
-                plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=rov_colors[rov], markeredgecolor="black", markersize=7, label=rov)
-                for rov in rovs
-            ]
-            fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.94), ncol=min(len(rovs), 8), title="ROV", fontsize=8, title_fontsize=9, frameon=True)
-
-        fig.text(0.5, 0.045, "Azimuth is measured clockwise from North. Radius is horizontal offset in meters. Red star marks maximum offset; label shows true radius.", ha="center", fontsize=10)
-        fig.subplots_adjust(left=0.04, right=0.98, top=0.84, bottom=0.12)
-        fig.savefig(charts_dir / "node_position_polar_offsets_page.png", dpi=180)
+        fig, ax = plt.subplots(figsize=(16.2, 9.4))
+        ax.axis("off")
+        fig.suptitle("POLAR OFFSET STATISTICS SUMMARY", fontsize=22, fontweight="bold", y=0.94)
+        columns = ["Comparison", "Nodes", "Mean radial\n(m)", "Std radial\n(m)",
+                   "Median radial\n(m)", "P95 radial\n(m)", "Maximum radial\n(m)", "Mean azimuth"]
+        table = ax.table(cellText=rows, colLabels=columns, cellLoc="center", colLoc="center",
+                         colWidths=[0.25, 0.08, 0.11, 0.11, 0.11, 0.11, 0.13, 0.10],
+                         bbox=[0.03, 0.30, 0.94, 0.42])
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1, 1.45)
+        for (row, col), cell in table.get_celld().items():
+            cell.set_linewidth(0.55)
+            if row == 0:
+                cell.set_facecolor("#d9eaf7")
+                cell.set_text_props(weight="bold")
+            elif col == 0:
+                cell.set_facecolor("#f3f7fa")
+                cell.set_text_props(weight="bold", ha="left")
+            elif row % 2 == 0:
+                cell.set_facecolor("#f8fafc")
+        fig.text(0.5, 0.22, "All radial values are horizontal offsets in meters. Mean azimuth is measured clockwise from North.", ha="center", fontsize=11)
+        fig.savefig(charts_dir / "node_position_polar_statistics_page.png", dpi=180, bbox_inches="tight")
         plt.close(fig)
 
     def _draw_delta_station(self, ax, df, cols, labels, title, ylabel):

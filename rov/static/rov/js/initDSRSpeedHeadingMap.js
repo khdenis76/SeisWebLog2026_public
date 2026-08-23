@@ -1,23 +1,36 @@
 export function initDSRSpeedHeadingMap() {
-    const tab = document.getElementById("dsr-speed-heading-tab");
-    const container = document.getElementById("dsr-speed-heading-map");
+    const mapConfigs = [
+        {
+            tabId: "dsr-speed-heading-tab",
+            containerId: "dsr-speed-heading-map",
+            url: "/project/rov/api/dsr-speed-heading-map/",
+            label: "deployment",
+        },
+        {
+            tabId: "dsr-recovery-speed-heading-tab",
+            containerId: "dsr-recovery-speed-heading-map",
+            url: "/project/rov/api/dsr-recovery-speed-heading-map/",
+            label: "recovery",
+        },
+    ];
 
-    if (!tab || !container) return;
+    mapConfigs.forEach(({ tabId, containerId, url, label }) => {
+      const tab = document.getElementById(tabId);
+      const container = document.getElementById(containerId);
+      if (!tab || !container) return;
 
-    let loaded = false;
+      let loaded = false;
 
-    async function loadMap() {
+      async function loadMap() {
         if (loaded) return;
 
         container.innerHTML = `
             <div class="text-muted small p-2">
-                Loading DSR speed / heading map...
+                Loading DSR ${label} speed / heading map...
             </div>
         `;
 
         try {
-            const url = "/project/rov/api/dsr-speed-heading-map/";
-
             const response = await fetch(url, {
                 headers: { "X-Requested-With": "XMLHttpRequest" }
             });
@@ -39,12 +52,12 @@ export function initDSRSpeedHeadingMap() {
             const item = await response.json();
 
             container.innerHTML = "";
-            await Bokeh.embed.embed_item(item, "dsr-speed-heading-map");
+            await Bokeh.embed.embed_item(item, containerId);
 
             loaded = true;
 
         } catch (err) {
-            console.error("DSR speed heading map error:", err);
+            console.error(`DSR ${label} speed heading map error:`, err);
             container.innerHTML = `
                 <div class="text-danger p-2">
                     Failed to load map<br>
@@ -52,7 +65,8 @@ export function initDSRSpeedHeadingMap() {
                 </div>
             `;
         }
-    }
+      }
 
-    tab.addEventListener("shown.bs.tab", loadMap);
+      tab.addEventListener("shown.bs.tab", loadMap);
+    });
 }

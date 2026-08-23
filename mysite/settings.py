@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "svp.apps.SvpConfig",
     'noar.apps.NoarConfig',
     "production_monitor",
+    'statistics_report.apps.StatisticsReportConfig',
 
 ]
 

@@ -1,0 +1,21 @@
+.line-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem .8rem;
+  max-height: 180px;
+  overflow: auto;
+  padding: .55rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .375rem;
+}
+
+.line-picker label {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  min-width: 85px;
+}
+
+.line-picker input {
+  width: auto !important;
+}

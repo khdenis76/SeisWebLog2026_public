@@ -112,6 +112,9 @@ class RibbonBar(QtWidgets.QTabWidget):
     node_selection_requested = QtCore.Signal(str)
     clear_node_selection_requested = QtCore.Signal()
     daily_dsr_production_requested = QtCore.Signal(str)
+    source_preplot_load_requested = QtCore.Signal()
+    source_points_load_requested = QtCore.Signal()
+    tabular_point_import_requested = QtCore.Signal()
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -180,6 +183,30 @@ class RibbonBar(QtWidgets.QTabWidget):
         layer_group.commands.itemAt(0).widget().clicked.connect(self.select_all_layers_requested)
         layer_group.commands.itemAt(1).widget().clicked.connect(self.clear_all_layers_requested)
         self._insert_group(layers, layer_group)
+
+        optional_source_group = RibbonGroup("Optional source data")
+        self.load_source_preplot_button = RibbonButton("Source preplot", icon("preplot"))
+        self.load_source_preplot_button.setToolTip(
+            "Load Source Preplot on demand. It is not loaded during startup."
+        )
+        self.load_source_points_button = RibbonButton("Source points", icon("station"))
+        self.load_source_points_button.setToolTip(
+            "Load SPSolution source-point layers on demand. They are not loaded during startup."
+        )
+        self.load_source_preplot_button.clicked.connect(self.source_preplot_load_requested)
+        self.load_source_points_button.clicked.connect(self.source_points_load_requested)
+        optional_source_group.add_button(self.load_source_preplot_button)
+        optional_source_group.add_button(self.load_source_points_button)
+        self._insert_group(layers, optional_source_group)
+
+        import_group = RibbonGroup("Import")
+        self.import_points_button = RibbonButton("Excel / CSV", icon("station"))
+        self.import_points_button.setToolTip(
+            "Import a spreadsheet as a point layer and choose coordinates, labels, and symbol style."
+        )
+        self.import_points_button.clicked.connect(self.tabular_point_import_requested)
+        import_group.add_button(self.import_points_button)
+        self._insert_group(layers, import_group)
 
         production_group = RibbonGroup("DSR production")
         self.daily_dsr_button = RibbonButton("Daily production", icon("calendar"))

@@ -75,6 +75,16 @@
            </button>
       </li>
       <li class="nav-item" role="presentation">
+           <button class="nav-link pill-hist"
+                   id="dsr-recovery-speed-heading-tab"
+                   data-bs-toggle="tab"
+                   data-bs-target="#dsr-recovery-speed-heading-pane"
+                   type="button"
+                   role="tab">
+               DSR Recovery Speed / Heading
+           </button>
+      </li>
+      <li class="nav-item" role="presentation">
                <button class="nav-link pill-calendar"
                        data-bs-toggle="pill"
                        data-bs-target="#dbd-prod-tab"
@@ -147,6 +157,15 @@
                    type="button"
                    role="tab">
                REC_DB Polar Histogram
+           </button>
+       </li>
+       <li class="nav-item" role="presentation">
+           <button class="nav-link pill-hist lazy-plotly-polar-tab"
+                   id="recdb-polar-rov-tab" data-bs-toggle="tab"
+                   data-bs-target="#recdb-polar-rov-pane"
+                   data-url="{% url 'load_recdb_polar_histograms_by_rov' %}"
+                   data-target="recdb-polar-rov-container" type="button" role="tab">
+               REC_DB Polar by ROV
            </button>
        </li>
 </ul>
@@ -358,6 +377,13 @@
           </div>
 
       </div>
+      <div class="tab-pane fade" id="dsr-recovery-speed-heading-pane" role="tabpanel">
+          <div class="text-muted small py-2">Map will load when tab opens...</div>
+          <div id="dsr-recovery-speed-heading-map"
+               class="w-100 bokeh-light-scope"
+               style="height: 80vh;">
+          </div>
+      </div>
       <div class="tab-pane fade" id="dsr-polar-pane"role="tabpanel">
          <div id="dsr-polar-container" class="w-100" style="min-height: 900px;">
                  <div class="text-muted small">Click DSR Polar Histogram to load plots.</div>
@@ -368,6 +394,11 @@
          role="tabpanel">
         <div id="recdb-polar-container" class="w-100" style="min-height: 650px;">
             <div class="text-muted small">Click REC_DB Polar Histogram to load plots.</div>
+        </div>
+    </div>
+    <div class="tab-pane fade" id="recdb-polar-rov-pane" role="tabpanel">
+        <div id="recdb-polar-rov-container" class="w-100" style="min-height: 650px;">
+            <div class="text-muted small">Click REC_DB Polar by ROV to load plots.</div>
         </div>
     </div>
 </div>

@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSettings, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -58,6 +58,7 @@ class RoiRectItem(QGraphicsRectItem):
 
 class RoiGraphicsView(QGraphicsView):
     roi_drawn = Signal(int, int, int, int)
+    zoom_changed = Signal(int)
 
     def __init__(self, parent_dialog):
         super().__init__()
@@ -76,6 +77,10 @@ class RoiGraphicsView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.NoDrag)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+        self._minimum_zoom = 0.05
+        self._maximum_zoom = 20.0
 
     def set_image(self, pixmap: QPixmap):
         self.scene_obj.clear()
@@ -85,14 +90,53 @@ class RoiGraphicsView(QGraphicsView):
         self.scene_obj.setSceneRect(QRectF(pixmap.rect()))
 
         self.resetTransform()
+        self.fit_image()
+
+    def current_zoom(self) -> float:
+        return float(self.transform().m11())
+
+    def _emit_zoom(self):
+        self.zoom_changed.emit(max(1, int(round(self.current_zoom() * 100))))
+
+    def set_zoom(self, factor: float):
+        if not self.pixmap_item:
+            return
+        factor = max(self._minimum_zoom, min(self._maximum_zoom, float(factor)))
+        current = self.current_zoom()
+        if current <= 0:
+            return
+        self.scale(factor / current, factor / current)
+        self._emit_zoom()
+
+    def zoom_in(self):
+        self.set_zoom(self.current_zoom() * 1.25)
+
+    def zoom_out(self):
+        self.set_zoom(self.current_zoom() / 1.25)
+
+    def actual_size(self):
+        self.set_zoom(1.0)
+
+    def fit_image(self):
+        if not self.pixmap_item or self.scene_obj.sceneRect().isEmpty():
+            return
+        self.resetTransform()
         self.fitInView(self.scene_obj.sceneRect(), Qt.KeepAspectRatio)
+        self._emit_zoom()
 
     def wheelEvent(self, event):
-        zoom = 1.2
         if event.angleDelta().y() > 0:
-            self.scale(zoom, zoom)
+            self.zoom_in()
         else:
-            self.scale(1 / zoom, 1 / zoom)
+            self.zoom_out()
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.fit_image()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def draw_rois(self, rois: list[RoiRow], selected: int = -1):
         for item in self.roi_items:
@@ -192,14 +236,33 @@ class RoiEditorDialog(QDialog):
         top.addWidget(self.btn_delete)
         root.addLayout(top)
 
-        splitter = QSplitter()
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.setHandleWidth(8)
 
         # left: image
         self.view = RoiGraphicsView(self)
         left = QWidget()
         left_layout = QVBoxLayout(left)
+
+        zoom_bar = QHBoxLayout()
+        self.btn_zoom_out = QPushButton("Zoom Out")
+        self.btn_zoom_in = QPushButton("Zoom In")
+        self.btn_actual_size = QPushButton("100%")
+        self.btn_fit_image = QPushButton("Fit Image")
+        self.zoom_label = QLabel("Zoom: 100%")
+        self.zoom_label.setMinimumWidth(90)
+        self.zoom_label.setAlignment(Qt.AlignCenter)
+        zoom_bar.addWidget(self.btn_zoom_out)
+        zoom_bar.addWidget(self.btn_zoom_in)
+        zoom_bar.addWidget(self.btn_actual_size)
+        zoom_bar.addWidget(self.btn_fit_image)
+        zoom_bar.addStretch(1)
+        zoom_bar.addWidget(self.zoom_label)
+        left_layout.addLayout(zoom_bar)
         left_layout.addWidget(self.view)
-        splitter.addWidget(left)
+        left.setMinimumWidth(420)
+        self.splitter.addWidget(left)
 
         # right: info + table + test
         right = QWidget()
@@ -254,10 +317,20 @@ class RoiEditorDialog(QDialog):
         right_layout.addWidget(self.preview)
         right_layout.addWidget(self.ocr_result)
 
-        splitter.addWidget(right)
-        splitter.setSizes([900, 550])
+        right.setMinimumWidth(360)
+        self.splitter.addWidget(right)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 1)
 
-        root.addWidget(splitter)
+        settings = QSettings("SeisWebLog", "OCRStudio")
+        splitter_state = settings.value("roi_editor/splitter_state")
+        if splitter_state:
+            self.splitter.restoreState(splitter_state)
+        else:
+            self.splitter.setSizes([1000, 450])
+        self.splitter.splitterMoved.connect(self._save_splitter_state)
+
+        root.addWidget(self.splitter)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         root.addWidget(buttons)
@@ -267,6 +340,13 @@ class RoiEditorDialog(QDialog):
         self.btn_delete.clicked.connect(self.delete_roi)
         self.btn_test.clicked.connect(self.test_roi)
         self.btn_test_all.clicked.connect(self.test_all)
+        self.btn_zoom_out.clicked.connect(self.view.zoom_out)
+        self.btn_zoom_in.clicked.connect(self.view.zoom_in)
+        self.btn_actual_size.clicked.connect(self.view.actual_size)
+        self.btn_fit_image.clicked.connect(self.view.fit_image)
+        self.view.zoom_changed.connect(
+            lambda percent: self.zoom_label.setText(f"Zoom: {percent}%")
+        )
 
         self.view.roi_drawn.connect(self.add_or_update_roi)
 
@@ -275,6 +355,11 @@ class RoiEditorDialog(QDialog):
 
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+
+    def _save_splitter_state(self, *_):
+        QSettings("SeisWebLog", "OCRStudio").setValue(
+            "roi_editor/splitter_state", self.splitter.saveState()
+        )
 
     def _load_config_rois(self):
         fields = []

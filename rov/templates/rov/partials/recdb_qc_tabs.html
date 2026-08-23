@@ -22,6 +22,52 @@
          <i class="fa-solid fa-water"></i><span>DSR(Rec) VS REC DB</span>
        </button>
     </li>
+
+    <li class="nav-item" role="presentation">
+       <button class="qc-btn qc-water"
+               id="tab-recdb-line-offsets"
+               data-bs-toggle="tab"
+               data-bs-target="#pane-recdb-line-offsets"
+               type="button" role="tab">
+         <i class="fa-solid fa-chart-line"></i><span>LINE OFFSETS</span>
+       </button>
+    </li>
+
+    <li class="nav-item" role="presentation">
+       <button class="qc-btn qc-water"
+               id="tab-recdb-matrix-deployment"
+               data-bs-toggle="tab"
+               data-bs-target="#pane-recdb-matrix-deployment"
+               data-plot-url="{% url 'recdb_offset_matrix_json' 'deployment' %}"
+               data-plot-target="plot-recdb-matrix-deployment"
+               type="button" role="tab">
+         <i class="fa-solid fa-table-cells"></i><span>MATRIX DEP</span>
+       </button>
+    </li>
+
+    <li class="nav-item" role="presentation">
+       <button class="qc-btn qc-water"
+               id="tab-recdb-matrix-recovery"
+               data-bs-toggle="tab"
+               data-bs-target="#pane-recdb-matrix-recovery"
+               data-plot-url="{% url 'recdb_offset_matrix_json' 'recovery' %}"
+               data-plot-target="plot-recdb-matrix-recovery"
+               type="button" role="tab">
+         <i class="fa-solid fa-table-cells"></i><span>MATRIX REC</span>
+       </button>
+    </li>
+
+    <li class="nav-item" role="presentation">
+       <button class="qc-btn qc-water"
+               id="tab-recdb-rov-histograms"
+               data-bs-toggle="tab"
+               data-bs-target="#pane-recdb-rov-histograms"
+               data-plot-url="{% url 'recdb_rov_histograms_json' %}"
+               data-plot-target="plot-recdb-rov-histograms"
+               type="button" role="tab">
+         <i class="fa-solid fa-chart-column"></i><span>ROV HISTOGRAMS</span>
+       </button>
+    </li>
 </ul>
 
 <div class="tab-content border rounded-3 p-2" id="qcTabsContent">
@@ -38,6 +84,48 @@
              class="qc-plot-slot w-100"
              style="height: 78vh;">
             Open tab to load…
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="pane-recdb-line-offsets" role="tabpanel">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="fw-bold">Receiver Line:</span>
+            <span id="recdb-line-offset-label" class="badge text-bg-primary">Not selected</span>
+        </div>
+        <div id="plot-recdb-line-offsets"
+             class="qc-plot-slot w-100"
+             data-plot-url="{% url 'recdb_line_offsets_json' %}"
+             style="height: 72vh;">
+            Click a DSR line in the left panel to load the plot.
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="pane-recdb-matrix-deployment" role="tabpanel">
+        <div id="plot-recdb-matrix-deployment"
+             class="qc-plot-slot w-100"
+             style="height: 78vh;">
+            Open tab to load the deployment matrix.
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="pane-recdb-matrix-recovery" role="tabpanel">
+        <div id="plot-recdb-matrix-recovery"
+             class="qc-plot-slot w-100"
+             style="height: 78vh;">
+            Open tab to load the recovery matrix.
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="pane-recdb-rov-histograms" role="tabpanel">
+        <div class="alert alert-light border py-2 px-3 mb-2 small">
+            Separate percentage histograms are shown for each deployment ROV and
+            recovery ROV1. All plots use common 0.5 m offset bins and linked axes.
+            The solid line is the mean; dashed lines show ±1 sample STD.
+        </div>
+        <div id="plot-recdb-rov-histograms"
+             class="qc-plot-slot w-100"
+             style="min-height: 78vh;">
+            Open tab to load the ROV offset histograms.
         </div>
     </div>
 </div>

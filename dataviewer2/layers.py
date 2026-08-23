@@ -43,6 +43,7 @@ class FastPointLayer(QtCore.QObject):
         self.max_visible_points = 30000
         self.show_points_below = 50000
         self.point_color = str(point_color)
+        self.phase_colors: dict[str, str] = {}
         self.line_color = str(line_color or point_color)
         self.line_width = 1.0
         self.line_style = "solid"
@@ -135,11 +136,17 @@ class FastPointLayer(QtCore.QObject):
             self.scatter.setData([], [])
             return
 
-        self.scatter.setData(
-            x=self.data.x[indices],
-            y=self.data.y[indices],
+        options = dict(
+            x=self.data.x[indices], y=self.data.y[indices],
             data=np.arange(indices.size, dtype=np.int64),
         )
+        phases = self.data.metadata.get("phase")
+        if self.phase_colors and phases is not None:
+            options["brush"] = [
+                pg.mkBrush(QtGui.QColor(self.phase_colors.get(str(phases[i]), self.point_color)))
+                for i in indices
+            ]
+        self.scatter.setData(**options)
 
     def set_visible(self, visible: bool) -> None:
         if visible and not self.loaded:
@@ -240,6 +247,12 @@ class FastPointLayer(QtCore.QObject):
             self.scatter.setSymbol(_text_symbol(self.marker_text))
         else:
             self.scatter.setSymbol(symbol_map.get(self.symbol_name.lower(), "o"))
+        self.refresh_view()
+
+    def set_phase_colors(self, colors: dict[str, str]) -> None:
+        """Apply per-point colors using values from the ``phase`` metadata field."""
+        self.phase_colors = {str(key): str(value) for key, value in colors.items()}
+        self.refresh_view()
 
     @property
     def bounds(self):

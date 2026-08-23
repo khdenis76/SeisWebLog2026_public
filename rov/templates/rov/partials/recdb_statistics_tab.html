@@ -1,0 +1,100 @@
+<div class="row g-2 mt-1 mb-3">
+    <div class="col-6 col-lg-3">
+        <div class="card h-100 border-primary shadow-sm">
+            <div class="card-body py-2">
+                <div class="small text-muted">Processed lines</div>
+                <div class="fs-3 fw-bold text-primary">{{ stats.processed_lines }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card h-100 border-success shadow-sm">
+            <div class="card-body py-2">
+                <div class="small text-muted">Processed nodes (unique NODE_ID)</div>
+                <div class="fs-3 fw-bold text-success">{{ stats.processed_nodes }}</div>
+                <div class="small text-muted">{{ stats.processed_stations }} receiver position{{ stats.processed_stations|pluralize }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card h-100 border-info shadow-sm">
+            <div class="card-body py-2">
+                <div class="small text-muted">Recovered nodes</div>
+                <div class="fs-3 fw-bold text-info">{{ stats.recovered_nodes }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card h-100 {% if stats.unprocessed_nodes %}border-danger{% else %}border-success{% endif %} shadow-sm">
+            <div class="card-body py-2">
+                <div class="small text-muted">Recovered, not processed</div>
+                <div class="fs-3 fw-bold {% if stats.unprocessed_nodes %}text-danger{% else %}text-success{% endif %}">
+                    {{ stats.unprocessed_nodes }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-header py-2 fw-bold">
+        <i class="fa-solid fa-chart-line text-primary me-1"></i>
+        Maximum Offsets from Preplot by Line
+    </div>
+    <div class="card-body p-1">
+        {% if recdb_offsets_div %}
+            {{ recdb_offsets_div|safe }}
+            {{ recdb_offsets_script|safe }}
+        {% else %}
+            <div class="text-center text-muted py-4" id="recdb-max-distance-empty">
+                No REC_DB or DSR offset data are available.
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h6 class="mb-0 fw-bold">
+        <i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>
+        Unprocessed stations on partially processed recovered lines
+    </h6>
+    <span class="badge text-bg-secondary">
+        {{ stats.partial_unprocessed_nodes }} station{{ stats.partial_unprocessed_nodes|pluralize }} on
+        {{ stats.partial_lines }} line{{ stats.partial_lines|pluralize }}
+    </span>
+</div>
+
+<div class="table-responsive border rounded" style="max-height: 42vh; overflow-y: auto;">
+    <table class="table table-sm table-striped table-hover align-middle mb-0">
+        <thead class="table-dark sticky-top">
+            <tr>
+                <th style="width: 14%;">Line</th>
+                <th style="width: 18%;" class="text-center">Unprocessed Stations</th>
+                <th>Station List</th>
+                <th style="width: 18%;" class="text-center">Unprocessed %</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for group in stats.missing_by_line %}
+            <tr>
+                <td class="fw-bold">{{ group.line }}</td>
+                <td class="text-center"><span class="badge text-bg-danger">{{ group.count }}</span></td>
+                <td class="text-wrap">{{ group.stations_csv }}</td>
+                <td class="text-center">
+                    <span class="badge {% if group.unprocessed_pct >= 10 %}text-bg-danger{% elif group.unprocessed_pct > 0 %}text-bg-warning{% else %}text-bg-success{% endif %}">
+                        {{ group.unprocessed_pct|floatformat:1 }}%
+                    </span>
+                    <div class="small text-muted mt-1">{{ group.count }} of {{ group.recovered_count }}</div>
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="4" class="text-center text-success py-4">
+                    <i class="fa-solid fa-circle-check me-1"></i>
+                    No partially processed recovered lines have missing stations.
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>

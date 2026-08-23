@@ -25,6 +25,23 @@ class CustomDsrLayerDefinition:
     categories: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class ImportedPointLayerDefinition:
+    id: str
+    name: str
+    source_file: str
+    x_field: str
+    y_field: str
+    label_fields: list[str] = field(default_factory=list)
+    label_separator: str = " "
+    sheet_name: str = ""
+    group_name: str = "Imported Layers"
+    color: str = "#ff80ab"
+    point_size: float = 7.0
+    symbol: str = "Circle"
+    show_labels: bool = True
+
+
 class ProjectViewerConfig:
     """Project-local persistent DataViewer settings.
 
@@ -43,6 +60,7 @@ class ProjectViewerConfig:
         self.path = self.config_dir / "dataviewer2.json"
         self.shape_styles: dict[str, dict[str, Any]] = {}
         self.custom_dsr_layers: list[CustomDsrLayerDefinition] = []
+        self.imported_point_layers: list[ImportedPointLayerDefinition] = []
         self.group_order: list[str] = []
         self.layer_order: dict[str, list[str]] = {}
         self.theme: str = "night"
@@ -91,6 +109,12 @@ class ProjectViewerConfig:
                 self.custom_dsr_layers.append(CustomDsrLayerDefinition(**raw))
             except TypeError:
                 continue
+        self.imported_point_layers = []
+        for raw in payload.get("imported_point_layers") or []:
+            try:
+                self.imported_point_layers.append(ImportedPointLayerDefinition(**raw))
+            except TypeError:
+                continue
 
     def save(self) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -98,6 +122,7 @@ class ProjectViewerConfig:
             "version": self.VERSION,
             "shape_styles": self.shape_styles,
             "custom_dsr_layers": [asdict(item) for item in self.custom_dsr_layers],
+            "imported_point_layers": [asdict(item) for item in self.imported_point_layers],
             "group_order": self.group_order,
             "layer_order": self.layer_order,
             "theme": self.theme,
@@ -125,6 +150,19 @@ class ProjectViewerConfig:
 
     def remove_custom_layer(self, definition_id: str) -> None:
         self.custom_dsr_layers = [item for item in self.custom_dsr_layers if item.id != definition_id]
+        self.save()
+
+    def add_imported_point_layer(self, definition: ImportedPointLayerDefinition) -> None:
+        self.imported_point_layers = [
+            item for item in self.imported_point_layers if item.id != definition.id
+        ]
+        self.imported_point_layers.append(definition)
+        self.save()
+
+    def remove_imported_point_layer(self, definition_id: str) -> None:
+        self.imported_point_layers = [
+            item for item in self.imported_point_layers if item.id != definition_id
+        ]
         self.save()
 
     def set_layer_tree_order(

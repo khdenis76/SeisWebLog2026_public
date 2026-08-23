@@ -2267,6 +2267,400 @@ WHERE Area IS NOT NULL
         html = render_to_string("rov/partials/dsr_statistic_table.html",{"data":data})
         return html
 
+    def get_recdb_statistics(self) -> dict:
+        """Return project-wide REC_DB totals and recovered points still missing from REC_DB."""
+        sql = """
+            WITH
+            processed AS (
+                SELECT DISTINCT
+                    CAST(Line AS INTEGER) AS Line,
+                    CAST(Point AS INTEGER) AS Station,
+                    NODE_ID
+                FROM REC_DB
+                WHERE Line IS NOT NULL AND Point IS NOT NULL
+            ),
+            recovered AS (
+                SELECT DISTINCT
+                    CAST(Line AS INTEGER) AS Line,
+                    CAST(Station AS INTEGER) AS Station,
+                    NULLIF(TRIM(COALESCE(Node, '')), '') AS Node
+                FROM DSR
+                WHERE Line IS NOT NULL
+                  AND Station IS NOT NULL
+                  AND NULLIF(TRIM(COALESCE(TimeStamp1, '')), '') IS NOT NULL
+            ),
+            missing AS (
+                SELECT r.Line, r.Station, r.Node
+                FROM recovered r
+                LEFT JOIN processed p
+                  ON p.Line = r.Line AND p.Station = r.Station
+                WHERE p.Station IS NULL
+            )
+            SELECT
+                (SELECT COUNT(DISTINCT Line) FROM processed) AS processed_lines,
+                (SELECT COUNT(DISTINCT NODE_ID) FROM processed WHERE NODE_ID IS NOT NULL) AS processed_nodes,
+                (SELECT COUNT(DISTINCT printf('%d:%d', Line, Station)) FROM processed) AS processed_stations,
+                (SELECT COUNT(*) FROM recovered) AS recovered_nodes,
+                (SELECT COUNT(*) FROM missing) AS unprocessed_nodes
+        """
+
+        missing_sql = """
+            WITH
+            processed AS (
+                SELECT DISTINCT
+                    CAST(Line AS INTEGER) AS Line,
+                    CAST(Point AS INTEGER) AS Station
+                FROM REC_DB
+                WHERE Line IS NOT NULL AND Point IS NOT NULL
+            ),
+            recovered AS (
+                SELECT DISTINCT
+                    CAST(Line AS INTEGER) AS Line,
+                    CAST(Station AS INTEGER) AS Station,
+                    NULLIF(TRIM(COALESCE(Node, '')), '') AS Node
+                FROM DSR
+                WHERE Line IS NOT NULL
+                  AND Station IS NOT NULL
+                  AND NULLIF(TRIM(COALESCE(TimeStamp1, '')), '') IS NOT NULL
+            ),
+            recovered_line_totals AS (
+                SELECT Line, COUNT(*) AS RecoveredCount
+                FROM recovered
+                GROUP BY Line
+            )
+            SELECT
+                r.Line,
+                r.Station,
+                r.Node,
+                t.RecoveredCount
+            FROM recovered r
+            JOIN recovered_line_totals t ON t.Line = r.Line
+            LEFT JOIN processed p
+              ON p.Line = r.Line AND p.Station = r.Station
+            WHERE p.Station IS NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM recovered rr
+                  JOIN processed pp
+                    ON pp.Line = rr.Line AND pp.Station = rr.Station
+                  WHERE rr.Line = r.Line
+              )
+            ORDER BY r.Line, r.Station
+        """
+
+        max_distance_sql = """
+            SELECT
+                CAST(Line AS INTEGER) AS Line,
+                MAX(
+                    (REC_X - RPRE_X) * (REC_X - RPRE_X) +
+                    (REC_Y - RPRE_Y) * (REC_Y - RPRE_Y)
+                ) AS MaxDistanceSquared
+            FROM REC_DB
+            WHERE Line IS NOT NULL
+              AND REC_X IS NOT NULL AND REC_Y IS NOT NULL
+              AND RPRE_X IS NOT NULL AND RPRE_Y IS NOT NULL
+            GROUP BY CAST(Line AS INTEGER)
+            ORDER BY CAST(Line AS INTEGER)
+        """
+
+        dsr_offset_sql = """
+            SELECT
+                CAST(Line AS INTEGER) AS Line,
+                MAX(
+                    CASE
+                        WHEN NULLIF(TRIM(CAST(RangeToPreplot AS TEXT)), '') IS NOT NULL
+                        THEN CAST(RangeToPreplot AS REAL)
+                    END
+                ) AS MaxDeploymentOffset,
+                MAX(
+                    CASE
+                        WHEN NULLIF(TRIM(CAST(RangeToPreplot1 AS TEXT)), '') IS NOT NULL
+                        THEN CAST(RangeToPreplot1 AS REAL)
+                    END
+                ) AS MaxRecoveryOffset
+            FROM DSR
+            WHERE Line IS NOT NULL
+            GROUP BY CAST(Line AS INTEGER)
+            ORDER BY CAST(Line AS INTEGER)
+        """
+
+        empty = {
+            "processed_lines": 0,
+            "processed_nodes": 0,
+            "processed_stations": 0,
+            "recovered_nodes": 0,
+            "unprocessed_nodes": 0,
+            "partial_unprocessed_nodes": 0,
+            "partial_lines": 0,
+            "missing_by_line": [],
+            "max_distance_by_line": [],
+            "offsets_by_line": [],
+        }
+
+        with self._connect() as conn:
+            tables = {
+                row["name"]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('DSR', 'REC_DB')"
+                )
+            }
+            if tables != {"DSR", "REC_DB"}:
+                return empty
+
+            totals_row = conn.execute(sql).fetchone()
+            missing_rows = conn.execute(missing_sql).fetchall()
+            distance_rows = conn.execute(max_distance_sql).fetchall()
+            dsr_offset_rows = conn.execute(dsr_offset_sql).fetchall()
+
+        result = dict(empty)
+        if totals_row:
+            for key in (
+                "processed_lines", "processed_nodes", "processed_stations",
+                "recovered_nodes", "unprocessed_nodes"
+            ):
+                result[key] = int(totals_row[key] or 0)
+
+        grouped = {}
+        for row in missing_rows:
+            line = int(row["Line"])
+            group = grouped.setdefault(line, {
+                "recovered_count": int(row["RecoveredCount"] or 0),
+                "nodes": [],
+            })
+            group["nodes"].append({
+                "station": int(row["Station"]),
+                "node": row["Node"] or "—",
+            })
+
+        result["missing_by_line"] = [
+            {
+                "line": line,
+                "count": len(group["nodes"]),
+                "recovered_count": group["recovered_count"],
+                "unprocessed_pct": round(
+                    100.0 * len(group["nodes"]) / group["recovered_count"], 1
+                ) if group["recovered_count"] else 0.0,
+                "stations_csv": ", ".join(
+                    str(item["station"]) for item in group["nodes"]
+                ),
+                "nodes": group["nodes"],
+            }
+            for line, group in grouped.items()
+        ]
+        result["partial_lines"] = len(result["missing_by_line"])
+        result["partial_unprocessed_nodes"] = sum(
+            group["count"] for group in result["missing_by_line"]
+        )
+        result["max_distance_by_line"] = [
+            {
+                "line": int(row["Line"]),
+                "max_distance": round(math.sqrt(float(row["MaxDistanceSquared"])), 3),
+            }
+            for row in distance_rows
+            if row["Line"] is not None and row["MaxDistanceSquared"] is not None
+        ]
+
+        offsets = {}
+        for row in distance_rows:
+            if row["Line"] is None or row["MaxDistanceSquared"] is None:
+                continue
+            line = int(row["Line"])
+            offsets.setdefault(line, {"line": line})["rec_db"] = round(
+                math.sqrt(float(row["MaxDistanceSquared"])), 3
+            )
+
+        for row in dsr_offset_rows:
+            if row["Line"] is None:
+                continue
+            line = int(row["Line"])
+            item = offsets.setdefault(line, {"line": line})
+            item["deployment"] = (
+                round(float(row["MaxDeploymentOffset"]), 3)
+                if row["MaxDeploymentOffset"] is not None else None
+            )
+            item["recovery"] = (
+                round(float(row["MaxRecoveryOffset"]), 3)
+                if row["MaxRecoveryOffset"] is not None else None
+            )
+
+        result["offsets_by_line"] = [
+            {
+                "line": line,
+                "rec_db": offsets[line].get("rec_db"),
+                "deployment": offsets[line].get("deployment"),
+                "recovery": offsets[line].get("recovery"),
+            }
+            for line in sorted(offsets)
+        ]
+        return result
+
+    def get_recdb_line_offsets(self, line: int) -> list[dict]:
+        """Return REC_DB and DSR preplot offsets by station for one receiver line."""
+        rec_sql = """
+            SELECT
+                CAST(Point AS INTEGER) AS Station,
+                MAX(
+                    (REC_X - RPRE_X) * (REC_X - RPRE_X) +
+                    (REC_Y - RPRE_Y) * (REC_Y - RPRE_Y)
+                ) AS DistanceSquared
+            FROM REC_DB
+            WHERE CAST(Line AS INTEGER) = ?
+              AND Point IS NOT NULL
+              AND REC_X IS NOT NULL AND REC_Y IS NOT NULL
+              AND RPRE_X IS NOT NULL AND RPRE_Y IS NOT NULL
+            GROUP BY CAST(Point AS INTEGER)
+        """
+        dsr_sql = """
+            SELECT
+                CAST(Station AS INTEGER) AS Station,
+                MAX(
+                    CASE
+                        WHEN NULLIF(TRIM(CAST(RangeToPreplot AS TEXT)), '') IS NOT NULL
+                        THEN CAST(RangeToPreplot AS REAL)
+                    END
+                ) AS Deployment,
+                MAX(
+                    CASE
+                        WHEN NULLIF(TRIM(CAST(RangeToPreplot1 AS TEXT)), '') IS NOT NULL
+                        THEN CAST(RangeToPreplot1 AS REAL)
+                    END
+                ) AS Recovery
+            FROM DSR
+            WHERE CAST(Line AS INTEGER) = ?
+              AND Station IS NOT NULL
+            GROUP BY CAST(Station AS INTEGER)
+        """
+
+        offsets = {}
+        with self._connect() as conn:
+            for row in conn.execute(rec_sql, (int(line),)):
+                if row["Station"] is None or row["DistanceSquared"] is None:
+                    continue
+                station = int(row["Station"])
+                offsets.setdefault(station, {"station": station})["rec_db"] = round(
+                    math.sqrt(float(row["DistanceSquared"])), 3
+                )
+
+            for row in conn.execute(dsr_sql, (int(line),)):
+                if row["Station"] is None:
+                    continue
+                station = int(row["Station"])
+                item = offsets.setdefault(station, {"station": station})
+                item["deployment"] = (
+                    round(float(row["Deployment"]), 3)
+                    if row["Deployment"] is not None else None
+                )
+                item["recovery"] = (
+                    round(float(row["Recovery"]), 3)
+                    if row["Recovery"] is not None else None
+                )
+
+        return [
+            {
+                "station": station,
+                "rec_db": offsets[station].get("rec_db"),
+                "deployment": offsets[station].get("deployment"),
+                "recovery": offsets[station].get("recovery"),
+            }
+            for station in sorted(offsets)
+        ]
+
+    def get_recdb_offset_matrix(self, mode: str) -> list[dict]:
+        """Return radial REC_DB-to-DSR offsets for a deployment or recovery matrix."""
+        mode = (mode or "deployment").strip().lower()
+        if mode == "deployment":
+            dsr_x, dsr_y = "PrimaryEasting", "PrimaryNorthing"
+        elif mode == "recovery":
+            dsr_x, dsr_y = "PrimaryEasting1", "PrimaryNorthing1"
+        else:
+            raise ValueError("Mode must be deployment or recovery")
+
+        sql = f"""
+            SELECT
+                CAST(r.Line AS INTEGER) AS Line,
+                CAST(r.Point AS INTEGER) AS Station,
+                MAX(
+                    (r.REC_X - d.{dsr_x}) * (r.REC_X - d.{dsr_x}) +
+                    (r.REC_Y - d.{dsr_y}) * (r.REC_Y - d.{dsr_y})
+                ) AS OffsetSquared
+            FROM REC_DB r
+            JOIN DSR d
+              ON d.Line = r.Line
+             AND d.Station = r.Point
+            WHERE r.Line IS NOT NULL
+              AND r.Point IS NOT NULL
+              AND r.REC_X IS NOT NULL
+              AND r.REC_Y IS NOT NULL
+              AND d.{dsr_x} IS NOT NULL
+              AND d.{dsr_y} IS NOT NULL
+            GROUP BY CAST(r.Line AS INTEGER), CAST(r.Point AS INTEGER)
+            ORDER BY CAST(r.Line AS INTEGER), CAST(r.Point AS INTEGER)
+        """
+
+        with self._connect() as conn:
+            rows = conn.execute(sql).fetchall()
+
+        return [
+            {
+                "line": int(row["Line"]),
+                "station": int(row["Station"]),
+                "offset": round(math.sqrt(float(row["OffsetSquared"])), 3),
+            }
+            for row in rows
+            if row["Line"] is not None
+            and row["Station"] is not None
+            and row["OffsetSquared"] is not None
+        ]
+
+    def get_recdb_offsets_by_rov(self) -> list[dict]:
+        """Return REC_DB-to-primary-DSR radial offsets grouped by deployment/recovery ROV."""
+        comparisons = (
+            ("deployment", "ROV", "PrimaryEasting", "PrimaryNorthing"),
+            ("recovery", "ROV1", "PrimaryEasting1", "PrimaryNorthing1"),
+        )
+        result = []
+
+        with self._connect() as conn:
+            for mode, rov_col, dsr_x, dsr_y in comparisons:
+                sql = f"""
+                    SELECT
+                        TRIM(CAST(d.{rov_col} AS TEXT)) AS ROVName,
+                        CAST(r.Line AS INTEGER) AS Line,
+                        CAST(r.Point AS INTEGER) AS Station,
+                        MAX(
+                            (r.REC_X - d.{dsr_x}) * (r.REC_X - d.{dsr_x}) +
+                            (r.REC_Y - d.{dsr_y}) * (r.REC_Y - d.{dsr_y})
+                        ) AS OffsetSquared
+                    FROM REC_DB r
+                    JOIN DSR d
+                      ON d.Line = r.Line
+                     AND d.Station = r.Point
+                    WHERE r.Line IS NOT NULL
+                      AND r.Point IS NOT NULL
+                      AND r.REC_X IS NOT NULL
+                      AND r.REC_Y IS NOT NULL
+                      AND d.{dsr_x} IS NOT NULL
+                      AND d.{dsr_y} IS NOT NULL
+                      AND TRIM(COALESCE(CAST(d.{rov_col} AS TEXT), '')) <> ''
+                    GROUP BY
+                        TRIM(CAST(d.{rov_col} AS TEXT)),
+                        CAST(r.Line AS INTEGER),
+                        CAST(r.Point AS INTEGER)
+                    ORDER BY ROVName, Line, Station
+                """
+                for row in conn.execute(sql):
+                    if row["OffsetSquared"] is None:
+                        continue
+                    result.append({
+                        "mode": mode,
+                        "rov": row["ROVName"],
+                        "line": int(row["Line"]),
+                        "station": int(row["Station"]),
+                        "offset": math.sqrt(max(0.0, float(row["OffsetSquared"]))),
+                    })
+
+        return result
+
     def get_rovs_for_timeframe(
             self,
             mode="day",
@@ -5136,15 +5530,5 @@ WHERE Area IS NOT NULL
             rows = conn.execute(query).fetchall()
 
         return [row[0] for row in rows]
-
-
-
-
-
-
-
-
-
-
 
 

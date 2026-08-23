@@ -125,6 +125,16 @@ class MapLabelManager:
 
         def replace(match: re.Match[str]) -> str:
             requested = match.group(1).strip()
+            virtual = requested.casefold().replace("_", "")
+            try:
+                if virtual in {"mapeasting", "eastingx"}:
+                    return self._format_value(layer.data.x[index])
+                if virtual in {"mapnorthing", "northingy"}:
+                    return self._format_value(layer.data.y[index])
+                if virtual in {"sourceindex", "recordindex"}:
+                    return self._format_value(layer.data.source_index[index])
+            except Exception:
+                return ""
             actual = requested if requested in metadata else by_lower.get(requested.lower())
             if actual is None:
                 return ""

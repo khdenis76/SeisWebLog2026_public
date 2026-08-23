@@ -11,12 +11,19 @@ import pickle
 import numpy as np
 from bokeh.embed import json_item, components
 from bokeh.layouts import column, gridplot
-from bokeh.palettes import Turbo256
+from bokeh.palettes import Category20, Turbo256
+from bokeh.models import (
+    BasicTicker, ColorBar, ColumnDataSource, HoverTool,
+    CustomJS, Legend, LegendItem, LinearColorMapper, Range1d, RangeSlider,
+    Span,
+)
+from bokeh.plotting import figure
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse, FileResponse, Http404
 from django.shortcuts import render, redirect
 from django.template.loader import render_to_string
+from django.utils.html import escape
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST, require_GET
 
@@ -31,6 +38,370 @@ from utils.decorators import log_action
 from baseproject.utils.project_template_db import ProjectTemplateDB
 from rov.reports.node_position_comparison import NodePositionComparisonReport
 from utils.audit import audit_event
+
+
+def _make_recdb_offsets_plot(rows):
+    """Build the REC_DB/DSR maximum offset-by-line Bokeh chart."""
+    data = {
+        "line": [row["line"] for row in rows],
+        "rec_db": [row.get("rec_db") for row in rows],
+        "deployment": [row.get("deployment") for row in rows],
+        "recovery": [row.get("recovery") for row in rows],
+    }
+    source = ColumnDataSource(data=data)
+    plot = figure(
+        height=390,
+        sizing_mode="stretch_width",
+        x_axis_label="Receiver Line",
+        y_axis_label="Maximum Offset from Preplot (m)",
+        tools="pan,wheel_zoom,box_zoom,reset,save",
+        active_scroll="wheel_zoom",
+        toolbar_location="above",
+    )
+
+    series = (
+        ("rec_db", "REC_DB", "#3366ff", "circle"),
+        ("deployment", "DSR Deployment", "#21a366", "triangle"),
+        ("recovery", "DSR Recovery", "#f28e2b", "square"),
+    )
+    hover_renderers = []
+    legend_items = []
+    for field, label, color, marker in series:
+        line_renderer = plot.line(
+            x="line", y=field, source=source,
+            line_width=2, color=color, alpha=0.9,
+        )
+        points = plot.scatter(
+            x="line", y=field, source=source,
+            marker=marker, size=8, color=color, alpha=0.95,
+        )
+        hover_renderers.append(points)
+        legend_items.append(LegendItem(
+            label=label,
+            renderers=[line_renderer, points],
+        ))
+
+    plot.add_tools(HoverTool(
+        renderers=hover_renderers,
+        tooltips=[
+            ("Line", "@line{0}"),
+            ("REC_DB", "@rec_db{0.000} m"),
+            ("Deployment", "@deployment{0.000} m"),
+            ("Recovery", "@recovery{0.000} m"),
+        ],
+        mode="mouse",
+    ))
+    legend = Legend(
+        items=legend_items,
+        location="top_left",
+        orientation="horizontal",
+        click_policy="hide",
+        background_fill_alpha=0.75,
+    )
+    plot.add_layout(legend, "above")
+    plot.xgrid.grid_line_alpha = 0.25
+    plot.ygrid.grid_line_alpha = 0.25
+    return plot
+
+
+def _make_recdb_line_offsets_plot(rows, line):
+    """Build a station-by-station REC_DB/DSR offset chart for one line."""
+    source = ColumnDataSource(data={
+        "station": [row["station"] for row in rows],
+        "rec_db": [row.get("rec_db") for row in rows],
+        "deployment": [row.get("deployment") for row in rows],
+        "recovery": [row.get("recovery") for row in rows],
+    })
+    plot = figure(
+        title=f"Receiver Line {line} — Offset from Preplot by Station",
+        height=650,
+        sizing_mode="stretch_width",
+        x_axis_label="Station",
+        y_axis_label="Range to Preplot (m)",
+        tools="pan,wheel_zoom,box_zoom,reset,save",
+        active_scroll="wheel_zoom",
+        toolbar_location="above",
+    )
+
+    series = (
+        ("rec_db", "REC_DB", "#3366ff", "circle"),
+        ("deployment", "DSR Deployment", "#21a366", "triangle"),
+        ("recovery", "DSR Recovery", "#f28e2b", "square"),
+    )
+    hover_renderers = []
+    legend_items = []
+    for field, label, color, marker in series:
+        line_renderer = plot.line(
+            x="station", y=field, source=source,
+            line_width=2, color=color, alpha=0.9,
+        )
+        points = plot.scatter(
+            x="station", y=field, source=source,
+            marker=marker, size=8, color=color, alpha=0.95,
+        )
+        hover_renderers.append(points)
+        legend_items.append(LegendItem(
+            label=label,
+            renderers=[line_renderer, points],
+        ))
+
+    plot.add_tools(HoverTool(
+        renderers=hover_renderers,
+        tooltips=[
+            ("Station", "@station{0}"),
+            ("REC_DB", "@rec_db{0.000} m"),
+            ("Deployment", "@deployment{0.000} m"),
+            ("Recovery", "@recovery{0.000} m"),
+        ],
+        mode="mouse",
+    ))
+    plot.add_layout(Legend(
+        items=legend_items,
+        orientation="horizontal",
+        click_policy="hide",
+        background_fill_alpha=0.75,
+    ), "above")
+    plot.xgrid.grid_line_alpha = 0.25
+    plot.ygrid.grid_line_alpha = 0.25
+    return plot
+
+
+def _make_recdb_offset_matrix_plot(rows, mode):
+    """Build a line/station heat matrix colored by radial REC_DB-to-DSR offset."""
+    lines = sorted({row["line"] for row in rows})
+    stations = sorted({row["station"] for row in rows})
+
+    def median_step(values, default=1.0):
+        differences = [b - a for a, b in zip(values, values[1:]) if b > a]
+        return float(np.median(differences)) if differences else default
+
+    cell_width = max(median_step(lines) * 0.88, 0.8)
+    cell_height = max(median_step(stations) * 0.88, 0.8)
+    mapper = LinearColorMapper(
+        palette=Turbo256,
+        low=0.0,
+        high=20.0,
+        low_color=Turbo256[0],
+        high_color=Turbo256[-1],
+        nan_color="#d9d9d9",
+    )
+    source = ColumnDataSource(data={
+        "line": [row["line"] for row in rows],
+        "station": [row["station"] for row in rows],
+        "offset": [row["offset"] for row in rows],
+    })
+
+    label = "Deployment" if mode == "deployment" else "Recovery"
+    plot = figure(
+        title=f"REC_DB vs DSR {label} — Radial Offset Matrix",
+        height=720,
+        sizing_mode="stretch_width",
+        x_axis_label="Receiver Line",
+        y_axis_label="Station",
+        tools="pan,wheel_zoom,box_zoom,reset,save",
+        active_scroll="wheel_zoom",
+        toolbar_location="above",
+    )
+    cells = plot.rect(
+        x="line", y="station",
+        width=cell_width, height=cell_height,
+        source=source,
+        fill_color={"field": "offset", "transform": mapper},
+        line_color=None,
+    )
+    plot.add_tools(HoverTool(
+        renderers=[cells],
+        tooltips=[
+            ("Line", "@line{0}"),
+            ("Station", "@station{0}"),
+            ("Radial offset", "@offset{0.000} m"),
+        ],
+    ))
+    color_bar = ColorBar(
+        color_mapper=mapper,
+        ticker=BasicTicker(),
+        title="Offset (m)",
+        label_standoff=8,
+        width=18,
+    )
+    plot.add_layout(color_bar, "right")
+    plot.xgrid.grid_line_alpha = 0.12
+    plot.ygrid.grid_line_alpha = 0.12
+
+    finite_offsets = [
+        float(row["offset"])
+        for row in rows
+        if row.get("offset") is not None and np.isfinite(row["offset"])
+    ]
+    available_max = max(50.0, math.ceil(max(finite_offsets, default=20.0)))
+    color_range = RangeSlider(
+        title="Color scale range (m)",
+        start=0.0,
+        end=available_max,
+        value=(0.0, 20.0),
+        step=0.5,
+        sizing_mode="stretch_width",
+    )
+    color_range.js_on_change("value", CustomJS(
+        args={"mapper": mapper},
+        code="""
+            mapper.low = cb_obj.value[0];
+            mapper.high = cb_obj.value[1];
+            mapper.change.emit();
+        """,
+    ))
+    return column(color_range, plot, sizing_mode="stretch_width")
+
+
+def _make_recdb_rov_histograms(rows, bin_width=0.5):
+    """Build one percentage histogram per deployment ROV and recovery ROV1.
+
+    Every plot uses the same 0.5 m bin boundaries and linked axis ranges so
+    the ROV distributions can be compared directly.  Statistics use the
+    sample standard deviation (ddof=1); a one-row group has STD = 0.0.
+    """
+    try:
+        bin_width = float(bin_width)
+    except (TypeError, ValueError):
+        bin_width = 0.5
+    if not np.isfinite(bin_width) or bin_width <= 0:
+        bin_width = 0.5
+
+    grouped = {"deployment": {}, "recovery": {}}
+    all_values = []
+    for row in rows:
+        mode = str(row.get("mode") or "").strip().lower()
+        if mode not in grouped:
+            continue
+        rov = str(row.get("rov") or "").strip()
+        if not rov:
+            continue
+        try:
+            value = float(row["offset"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if np.isfinite(value) and value >= 0:
+            grouped[mode].setdefault(rov, []).append(value)
+            all_values.append(value)
+
+    if not all_values:
+        raise ValueError(
+            "No matched REC_DB and DSR coordinates with ROV information were found."
+        )
+
+    # Fixed, common bin edges: 0.0, 0.5, 1.0, ... for every ROV and mode.
+    upper = max(bin_width, math.ceil(max(all_values) / bin_width) * bin_width)
+    edges = np.arange(0.0, upper + bin_width * 1.01, bin_width)
+    if len(edges) < 2:
+        edges = np.array([0.0, bin_width])
+
+    prepared = []
+    maximum_percentage = 0.0
+    for mode in ("deployment", "recovery"):
+        for rov in sorted(grouped[mode], key=str.casefold):
+            values = np.asarray(grouped[mode][rov], dtype=float)
+            counts, _ = np.histogram(values, bins=edges)
+            percentages = counts.astype(float) / len(values) * 100.0
+            maximum_percentage = max(
+                maximum_percentage,
+                float(percentages.max()) if percentages.size else 0.0,
+            )
+            prepared.append({
+                "mode": mode,
+                "rov": rov,
+                "values": values,
+                "counts": counts,
+                "percentages": percentages,
+                "mean": float(np.mean(values)),
+                "std": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0,
+            })
+
+    # Common linked X and Y ranges maintain identical scales across all plots.
+    x_range = Range1d(start=0.0, end=float(edges[-1]))
+    y_end = max(5.0, math.ceil(maximum_percentage / 5.0) * 5.0)
+    y_range = Range1d(start=0.0, end=min(100.0, y_end))
+    mode_colors = {"deployment": "#21a366", "recovery": "#f28e2b"}
+    mode_labels = {
+        "deployment": ("Deployment", "ROV", "Primary Deployment"),
+        "recovery": ("Recovery", "ROV1", "Primary Recovery"),
+    }
+
+    plots = []
+    for item in prepared:
+        mode = item["mode"]
+        rov = item["rov"]
+        mode_label, rov_field, comparison_label = mode_labels[mode]
+        color = mode_colors[mode]
+        mean = item["mean"]
+        std = item["std"]
+        title = (
+            f"{mode_label} — {rov_field} {rov} | REC_DB vs {comparison_label} | "
+            f"N={len(item['values'])}, Mean={mean:.2f} m, STD={std:.2f} m"
+        )
+        plot = figure(
+            title=title,
+            height=330,
+            sizing_mode="stretch_width",
+            x_range=x_range,
+            y_range=y_range,
+            x_axis_label="Radial Offset (m) — common 0.5 m bins",
+            y_axis_label="Percentage of Nodes (%)",
+            tools="pan,wheel_zoom,box_zoom,reset,save",
+            active_scroll="wheel_zoom",
+            toolbar_location="above",
+        )
+        source = ColumnDataSource(data={
+            "left": edges[:-1],
+            "right": edges[1:],
+            "count": item["counts"],
+            "percentage": item["percentages"],
+            "rov": [rov] * (len(edges) - 1),
+            "mode": [mode_label] * (len(edges) - 1),
+        })
+        renderer = plot.quad(
+            top="percentage", bottom=0,
+            left="left", right="right",
+            source=source,
+            fill_color=color, fill_alpha=0.55,
+            line_color=color, line_width=1.3,
+        )
+        plot.add_tools(HoverTool(
+            renderers=[renderer],
+            tooltips=[
+                ("Mode", "@mode"),
+                (rov_field, "@rov"),
+                ("Offset range", "@left{0.0}–@right{0.0} m"),
+                ("Percentage", "@percentage{0.0}%"),
+                ("Nodes", "@count{0}"),
+            ],
+        ))
+
+        # Mean and sample-standard-deviation markers.
+        plot.add_layout(Span(
+            location=mean,
+            dimension="height",
+            line_color="#1f1f1f",
+            line_width=2,
+            line_dash="solid",
+        ))
+        if std > 0:
+            for location in (mean - std, mean + std):
+                if 0.0 <= location <= edges[-1]:
+                    plot.add_layout(Span(
+                        location=location,
+                        dimension="height",
+                        line_color="#555555",
+                        line_width=1.5,
+                        line_dash="dashed",
+                    ))
+
+        plot.xgrid.grid_line_alpha = 0.20
+        plot.ygrid.grid_line_alpha = 0.20
+        plot.title.text_font_size = "13px"
+        plots.append(plot)
+
+    return column(*plots, sizing_mode="stretch_width")
+
 # Create your views here.
 @login_required
 @log_action("show_rov_page", object_type="ROV")
@@ -157,6 +528,12 @@ def rov_main_view(request):
     sm_file_name = Path(project.export_csv / "sm.csv")
     dsrdb.export_dsr_to_csv(file_name=sm_file_name, sql=dsrdb.build_dsr_export_sql())
     dsr_statistics_table =dsrdb.get_dsr_html_stat()
+    recdb_statistics = dsrdb.get_recdb_statistics()
+    recdb_offsets_script = ""
+    recdb_offsets_div = ""
+    if recdb_statistics.get("offsets_by_line"):
+        recdb_offsets_plot = _make_recdb_offsets_plot(recdb_statistics["offsets_by_line"])
+        recdb_offsets_script, recdb_offsets_div = components(recdb_offsets_plot)
     bbox_vessel_options = dsrdb.get_bbox_vessel_options()
     bbox_file_tbody = dsrdb.get_bbox_file_table()
     dsr_lines =dsrdb.get_rlsolution_lines()
@@ -170,6 +547,9 @@ def rov_main_view(request):
                    "ok": True,
                    "configs": rows,
                    "dsr_statistics_table":dsr_statistics_table,
+                   "recdb_statistics": recdb_statistics,
+                   "recdb_offsets_script": recdb_offsets_script,
+                   "recdb_offsets_div": recdb_offsets_div,
                    "pp_map_script":pp_map_script,
                    "pp_map_div":pp_map_div,
                    "d_dep_script":d_dep_script,
@@ -2488,9 +2868,10 @@ def rov_dsr_speed_heading_map_json(request):
     line = request.GET.get("line")
     line = int(line) if line else None
 
+    dsrdb = DSRDB(project.db_path)
     dsr_plot = DSRMapPlots(
         project.db_path,
-        default_epsg=32615,
+        default_epsg=dsrdb.pdb.get_main().epsg,
         use_tiles=True,
     )
 
@@ -2501,6 +2882,34 @@ def rov_dsr_speed_heading_map_json(request):
         is_show=False,
     )
 
+    return JsonResponse(item, safe=False)
+
+@login_required
+@log_action("rov_dsr_recovery_speed_heading_map_json", object_type="DSR_MAP")
+def rov_dsr_recovery_speed_heading_map_json(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    line = request.GET.get("line")
+    line = int(line) if line else None
+    dsrdb = DSRDB(project.db_path)
+    dsr_plot = DSRMapPlots(
+        project.db_path,
+        default_epsg=dsrdb.pdb.get_main().epsg,
+        use_tiles=True,
+    )
+    item = dsr_plot.make_dsr_deploy_speed_heading_map(
+        line=line,
+        solution_fk=1,
+        phase="recovery",
+        jason_item=True,
+        is_show=False,
+    )
     return JsonResponse(item, safe=False)
 
 @login_required
@@ -2595,6 +3004,87 @@ def recdb_bullseye_qc_json(request, mode="deployment"):
     )
 
     return JsonResponse({"ok": True, "plot": item})
+
+
+@require_GET
+@login_required
+@log_action("load REC_DB single-line offsets", object_type="REC_DB")
+def recdb_line_offsets_json(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    try:
+        line = int(request.GET.get("line", ""))
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "Select a valid receiver line."}, status=400)
+
+    rows = DSRDB(project.db_path).get_recdb_line_offsets(line)
+    if not rows:
+        return JsonResponse({
+            "ok": False,
+            "error": f"No REC_DB or DSR offset data found for line {line}.",
+        }, status=404)
+
+    plot = _make_recdb_line_offsets_plot(rows, line)
+    return JsonResponse({"ok": True, "plot": json_item(plot)})
+
+
+@require_GET
+@login_required
+@log_action("load REC_DB radial offset matrix", object_type="REC_DB")
+def recdb_offset_matrix_json(request, mode="deployment"):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    mode = (mode or "deployment").strip().lower()
+    if mode not in ("deployment", "recovery"):
+        return JsonResponse({"ok": False, "error": "Invalid matrix mode."}, status=400)
+
+    rows = DSRDB(project.db_path).get_recdb_offset_matrix(mode)
+    if not rows:
+        return JsonResponse({
+            "ok": False,
+            "error": f"No REC_DB vs DSR {mode} coordinate pairs found.",
+        }, status=404)
+
+    plot = _make_recdb_offset_matrix_plot(rows, mode)
+    return JsonResponse({"ok": True, "plot": json_item(plot)})
+
+
+@require_GET
+@login_required
+@log_action("load REC_DB offset histograms by ROV", object_type="REC_DB")
+def recdb_rov_histograms_json(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project."}, status=400)
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+
+    rows = DSRDB(project.db_path).get_recdb_offsets_by_rov()
+    if not rows:
+        return JsonResponse({
+            "ok": False,
+            "error": "No matched REC_DB and DSR coordinates with ROV information were found.",
+        }, status=404)
+
+    try:
+        plot = _make_recdb_rov_histograms(rows, bin_width=0.5)
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=404)
+    return JsonResponse({"ok": True, "plot": json_item(plot)})
 
 @login_required
 @log_action("export selected node position comparison reports", object_type="ROV")
@@ -2782,7 +3272,7 @@ def load_recdb_polar_histograms(request):
             use_tiles=True,
         )
 
-        rec_df = plots.read_recdb(lines=lines)
+        rec_df = plots.read_recdb_with_dsr(lines=lines)
 
         rec_vs_rpre = plots.polar_histogram_plotly(
             df=rec_df,
@@ -2814,26 +3304,108 @@ def load_recdb_polar_histograms(request):
             json_return=False,
         )
 
+        rec_vs_dsr_recovery = plots.polar_histogram_plotly(
+            df=rec_df,
+            e_col="REC_X", n_col="REC_Y",
+            preplot_e_col="DSR_PrimaryEasting1",
+            preplot_n_col="DSR_PrimaryNorthing1",
+            group_col=None,
+            title="REC_DB REC_X / REC_Y vs DSR Primary Recovery",
+            angle_bins=angle_bins, max_radius=max_radius, template=template,
+            is_show=False, json_return=False,
+        )
+
+        comparison_specs = [
+            ("RPRE_X", "RPRE_Y", "REC_DB vs RPRE — Percent"),
+            ("RFIELD_X", "RFIELD_Y", "REC_DB vs RFIELD — Percent"),
+            ("DSR_PrimaryEasting1", "DSR_PrimaryNorthing1", "REC_DB vs DSR Primary Recovery — Percent"),
+        ]
+        percent_plots = [plots.polar_histogram_plotly(
+            df=rec_df, e_col="REC_X", n_col="REC_Y",
+            preplot_e_col=x_col, preplot_n_col=y_col, group_col=None,
+            title=plot_title, angle_bins=angle_bins, max_radius=max_radius,
+            template=template, is_show=False, json_return=False,
+            percent=True, show_dominant_sector=True,
+        ) for x_col, y_col, plot_title in comparison_specs]
+
         html = f"""
         <div class="row g-2">
-            <div class="col-12 col-xl-6 mb-2">
+            <div class="col-12 col-xl-4 mb-2">
                 <div class="card h-100">
                     <div class="card-body p-1" style="height: 520px;">
                         {rec_vs_rpre}
                     </div>
                 </div>
             </div>
-            <div class="col-12 col-xl-6 mb-2">
+            <div class="col-12 col-xl-4 mb-2">
                 <div class="card h-100">
                     <div class="card-body p-1" style="height: 520px;">
                         {rec_vs_rfield}
                     </div>
                 </div>
             </div>
+            <div class="col-12 col-xl-4 mb-2">
+                <div class="card h-100"><div class="card-body p-1" style="height: 520px;">
+                    {rec_vs_dsr_recovery}
+                </div></div>
+            </div>
+            {''.join(f'<div class="col-12 col-xl-4 mb-2"><div class="card h-100"><div class="card-body p-1" style="height: 520px;">{plot}</div></div></div>' for plot in percent_plots)}
         </div>
         """
 
         return JsonResponse({"ok": True, "html": html})
 
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+
+@require_GET
+@login_required
+@log_action("load_recdb_polar_histograms_by_rov", object_type="REC_DB")
+def load_recdb_polar_histograms_by_rov(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project"}, status=400)
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+    try:
+        line = request.GET.get("line")
+        lines = [int(line)] if line and str(line).isdigit() else None
+        angle_bins = int(request.GET.get("angle_bins", 36))
+        max_radius = request.GET.get("max_radius", "")
+        max_radius = float(max_radius) if max_radius not in ("", None, "none") else None
+        pdb = ProjectDB(project.db_path)
+        template = "plotly_dark" if pdb.get_main().color_scheme == "dark" else "plotly_white"
+        plots = DSRMapPlots(project.db_path, default_epsg=pdb.get_main().epsg, use_tiles=True)
+        rec_df = plots.read_recdb_with_dsr(lines=lines)
+        rec_df["DSR_ROV"] = rec_df["DSR_ROV"].fillna("Unknown").astype(str).str.strip()
+        rec_df.loc[rec_df["DSR_ROV"] == "", "DSR_ROV"] = "Unknown"
+        rov_names = sorted(rec_df["DSR_ROV"].unique().tolist())
+        specs = [
+            ("RPRE_X", "RPRE_Y", "REC_DB vs RPRE"),
+            ("RFIELD_X", "RFIELD_Y", "REC_DB vs RFIELD"),
+            ("DSR_PrimaryEasting1", "DSR_PrimaryNorthing1", "REC_DB vs DSR Primary Recovery"),
+        ]
+        rov_sections = []
+        for rov_name in rov_names:
+            rov_df = rec_df[rec_df["DSR_ROV"] == rov_name].copy()
+            cards = []
+            for x_col, y_col, title in specs:
+                plot = plots.polar_histogram_plotly(
+                    df=rov_df, e_col="REC_X", n_col="REC_Y",
+                    preplot_e_col=x_col, preplot_n_col=y_col,
+                    group_col=None, title=f"{title} — ROV {rov_name}",
+                    angle_bins=angle_bins, max_radius=max_radius,
+                    template=template, is_show=False, json_return=False,
+                    percent=True, show_dominant_sector=True,
+                )
+                cards.append(f'<div class="col-12 col-xl-4 mb-2"><div class="card h-100"><div class="card-body p-1" style="height: 540px;">{plot}</div></div></div>')
+            rov_sections.append(
+                f'<div class="col-12"><h5 class="mt-3 mb-1">ROV: {escape(rov_name)}</h5></div>'
+                + "".join(cards)
+            )
+        if not rov_sections:
+            return JsonResponse({"ok": True, "html": '<div class="alert alert-warning m-2">No matched DSR.ROV data found.</div>'})
+        return JsonResponse({"ok": True, "html": f'<div class="row g-2">{"".join(rov_sections)}</div>'})
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)

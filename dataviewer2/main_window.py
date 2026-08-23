@@ -5,10 +5,13 @@ import csv
 import hashlib
 import html
 from pathlib import Path
+import shutil
+import uuid
 
 import pyqtgraph as pg
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
+from shiboken6 import isValid
 
 from .layers import FastPointLayer, FastShapeLayer
 from .measurement import MeasurementTool
@@ -53,7 +56,7 @@ class DrawingLayer:
             item.setZValue(float(z) + offset * 0.001)
 from .bbox import BlackBoxWindow
 from .dsr_qc import DsrQcWindow
-from .config import ProjectViewerConfig, CustomDsrLayerDefinition
+from .config import ProjectViewerConfig, CustomDsrLayerDefinition, ImportedPointLayerDefinition
 from .custom_dsr_dialog import CustomDsrLayerDialog
 from .icons_manager import icon
 from .labels import MapLabelManager
@@ -68,6 +71,7 @@ from .theme import apply_application_theme, normalize_theme
 from .geotiff_layer import GeoTiffLayer, GeoTiffDisplayOptions
 from .comparison_layer import PointComparisonLayer
 from .heading_panel import HeadingPanel
+from .tabular_import import TabularPointImportDialog, load_imported_point_data
 
 
 class LayerTreeWidget(QtWidgets.QTreeWidget):
@@ -216,7 +220,7 @@ class MainWindow(QtWidgets.QMainWindow):
     """Main DataViewer 2.0 shell with ribbon, docks and fast map canvas."""
 
     MAIN_GROUP_ORDER = [
-        "Receiver Preplots", "Source Preplots", "DSR", "Survey Manager", "Receiver Database",
+        "Receiver Preplots", "Source Preplots", "Survey Manager", "Receiver Database", "DSR",
         "Source Lines", "Source Points", "OCR Images", "Drawings",
         "Project shapes", "Geopackage", "BlackBox",
     ]
@@ -228,8 +232,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.viewer_config = ProjectViewerConfig(project_path)
         apply_application_theme(QtWidgets.QApplication.instance(), self.viewer_config.theme)
         self.thread_pool = QtCore.QThreadPool.globalInstance()
-        self.thread_pool.setMaxThreadCount(2)
+        self.thread_pool.setMaxThreadCount(
+            max(2, min(4, QtCore.QThread.idealThreadCount()))
+        )
         self._workers: set[FunctionWorker] = set()
+        self._busy_cursor_depth = 0
+        self._optional_source_loads: set[str] = set()
+        self._batch_registering_layers = False
         self.layers: OrderedDict[str, object] = OrderedDict()
         self.layer_items: dict[str, QtWidgets.QTreeWidgetItem] = {}
         self._reloading_layers: set[str] = set()
@@ -257,6 +266,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._dsr_station_values: list[int] = []
         self._dsr_auto_zoom = True
         self._custom_definition_by_layer: dict[str, CustomDsrLayerDefinition] = {}
+        self._imported_definition_by_layer: dict[str, ImportedPointLayerDefinition] = {}
         self._dsr_line_overlays: dict[tuple[str, int], FastPointLayer] = {}
         self._replacement_window: MainWindow | None = None
         self.radial_circle_item: RadialCircleItem | None = None
@@ -302,6 +312,21 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.selection_guide.setZValue(1000000)
         self.plot_item.addItem(self.selection_guide)
+        crosshair_pen = pg.mkPen(
+            "#ff6d00", width=1.2, style=QtCore.Qt.PenStyle.DashLine
+        )
+        self.map_crosshair_x = pg.InfiniteLine(
+            angle=90, movable=False, pen=crosshair_pen
+        )
+        self.map_crosshair_y = pg.InfiniteLine(
+            angle=0, movable=False, pen=crosshair_pen
+        )
+        for guide in (self.map_crosshair_x, self.map_crosshair_y):
+            guide.setZValue(999999)
+            guide.setVisible(False)
+            self.plot_item.addItem(guide, ignoreBounds=True)
+        self.plot_widget.viewport().setCursor(QtCore.Qt.CursorShape.CrossCursor)
+        self.plot_widget.viewport().installEventFilter(self)
         self.setCentralWidget(self.plot_widget)
 
         self._build_layers_dock()
@@ -395,6 +420,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ribbon.clear_node_selection_requested.connect(self._clear_node_selection)
         self.ribbon.daily_dsr_production_requested.connect(self._create_daily_dsr_production)
         self.ribbon.view3d_open_requested.connect(self._open_bathymetry_3d_window)
+        self.ribbon.source_preplot_load_requested.connect(self._load_source_preplot_on_demand)
+        self.ribbon.source_points_load_requested.connect(self._load_source_points_on_demand)
+        self.ribbon.tabular_point_import_requested.connect(self._import_tabular_point_layer)
         self.ribbon.set_radial_default(self._radial_circle_style["radius"])
 
         epsg = self.repository.project_epsg() or "unknown"
@@ -430,6 +458,13 @@ class MainWindow(QtWidgets.QMainWindow):
             ("Status bar", self.ribbon.status_bar_button),
         ):
             self._add_mirrored_toggle(panels_menu, title, button)
+        windows_menu = self.view_windows_menu = view_menu.addMenu("Window")
+        self._add_menu_command(
+            windows_menu,
+            "3D Surface Workbench",
+            "view3d",
+            self.ribbon.view3d_open_requested,
+        )
         view_menu.addSeparator()
         self._add_mirrored_toggle(view_menu, "Grid", self.ribbon.grid_button)
         self._add_mirrored_toggle(view_menu, "Line / point labels", self.ribbon.labels_button)
@@ -441,6 +476,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tools_menu = self.tools_menu = self.main_menu_bar.addMenu("&Tools")
         self._add_menu_command(tools_menu, "Zoom all", "zoom_all", self.ribbon.zoom_all_requested)
         self._add_menu_command(tools_menu, "Refresh layers", "reload", self.ribbon.refresh_requested)
+        self._add_menu_command(tools_menu, "Import Excel / CSV point layer…", "station", self.ribbon.tabular_point_import_requested)
 
         measurement_menu = self.measurement_menu = self.main_menu_bar.addMenu("&Measure")
 
@@ -1202,7 +1238,12 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         finite = np.isfinite(line_values)
         rounded = np.zeros(line_values.size, dtype=np.int64)
         rounded[finite] = np.rint(line_values[finite]).astype(np.int64)
-        indices = np.flatnonzero(finite & (rounded == int(line)))
+        phase_values = layer.data.metadata.get("phase")
+        deployment = (
+            np.asarray([str(value) == "Deployment" for value in phase_values], dtype=bool)
+            if phase_values is not None else np.ones(line_values.size, dtype=bool)
+        )
+        indices = np.flatnonzero(finite & deployment & (rounded == int(line)))
         if indices.size == 0:
             QtWidgets.QMessageBox.information(self, "Receiver-line report", "No DSR Primary records were found for this line.")
             return
@@ -1233,13 +1274,31 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
     def _start_worker(self, worker: FunctionWorker) -> None:
         """Keep Python worker wrappers alive until their signals finish."""
         self._workers.add(worker)
+        self._push_busy_cursor()
 
         def cleanup(*_args) -> None:
             self._workers.discard(worker)
+            self._pop_busy_cursor()
 
         worker.signals.completed.connect(cleanup)
         worker.signals.failed.connect(cleanup)
         self.thread_pool.start(worker)
+
+    def _push_busy_cursor(self) -> None:
+        """Reference-count the application's hourglass cursor."""
+        if self._busy_cursor_depth == 0:
+            QtWidgets.QApplication.setOverrideCursor(
+                QtCore.Qt.CursorShape.WaitCursor
+            )
+        self._busy_cursor_depth += 1
+
+    def _pop_busy_cursor(self) -> None:
+        """Restore the normal cursor after the last overlapping load ends."""
+        if self._busy_cursor_depth <= 0:
+            return
+        self._busy_cursor_depth -= 1
+        if self._busy_cursor_depth == 0:
+            QtWidgets.QApplication.restoreOverrideCursor()
 
     def _attach_geopackage(self) -> None:
         # Import lazily so optional GeoPackage UI cannot prevent DataViewer startup.
@@ -1247,6 +1306,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         dialog = GeoPackageAttachDialog(self)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
+        self._push_busy_cursor()
         try:
             self.repository.attach_geopackage(dialog.gpkg_path, dialog.selected_layers())
             definitions = [d for d in self.repository.load_geopackage_definitions()
@@ -1273,8 +1333,15 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             import traceback
             self.details.appendPlainText(traceback.format_exc() + "\n")
             QtWidgets.QMessageBox.critical(self, "Attach GeoPackage", str(exc))
+        finally:
+            self._pop_busy_cursor()
 
     def _start_loading(self) -> None:
+        self._push_busy_cursor()
+        # Startup may register many layers from asynchronous callbacks. Defer
+        # the O(n) render-order rebuild and configuration write until all jobs
+        # have finished instead of repeating them after every layer.
+        self._batch_registering_layers = True
         # Establish a deterministic project layer tree before asynchronous jobs
         # complete in an arbitrary order.
         for group_name in self.MAIN_GROUP_ORDER:
@@ -1283,9 +1350,9 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         jobs = [
             ("OCR Images", "OCR Image Counts", self.repository.load_ocr_image_counts, "#00000000", None, None),
             ("DSR", "DSR Primary Deployment", lambda: self.repository.load_dsr_layer("primary"), "#41d26f", "#41d26f", "line"),
+            ("DSR", "DSR Primary Recovery", lambda: self.repository.load_dsr_layer("recovery_primary"), "#ff9d3d", "#ff9d3d", "line"),
             ("DSR", "DSR Secondary Deployment", lambda: self.repository.load_dsr_layer("secondary"), "#44a7ff", "#44a7ff", "line"),
-            ("DSR", "DSR Primary Recover", lambda: self.repository.load_dsr_layer("recovery_primary"), "#ff9d3d", "#ff9d3d", "line"),
-            ("DSR", "DSR Secondary Recover", lambda: self.repository.load_dsr_layer("recovery_secondary"), "#ab47bc", "#ab47bc", "line"),
+            ("DSR", "DSR Secondary Recovery", lambda: self.repository.load_dsr_layer("recovery_secondary"), "#ab47bc", "#ab47bc", "line"),
             ("Survey Manager", "SM Deployment", lambda: self.repository.load_survey_manager_layer("deployment"), "#00e676", None, None),
             ("Survey Manager", "SM Recovery", lambda: self.repository.load_survey_manager_layer("recovery"), "#ffab40", None, None),
             ("Receiver Database", "Receiver database coordinates", self.repository.load_rec_db, "#f05cff", None, None),
@@ -1317,8 +1384,14 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 QtWidgets.QApplication.processEvents()
 
         custom_definitions = list(self.viewer_config.custom_dsr_layers)
+        imported_definitions = list(self.viewer_config.imported_point_layers)
         surface_definitions = self._load_surface_definitions()
-        self._pending = len(jobs) + 3 + len(custom_definitions) + len(surface_definitions)
+        # Only Receiver Preplot is loaded here. Source Preplot and SPSolution
+        # source points are intentionally available on demand from the ribbon.
+        self._pending = (
+            len(jobs) + 1 + len(custom_definitions) + len(imported_definitions)
+            + len(surface_definitions)
+        )
         self.statusBar().showMessage(f"Loading {self._pending} database layer(s)…")
         for group, name, function, point_color, line_color, connect_by in jobs:
             worker = FunctionWorker(function)
@@ -1329,14 +1402,8 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             worker.signals.failed.connect(self._load_failed)
             self._start_worker(worker)
 
-        source_points_worker = FunctionWorker(self.repository.load_source_points_by_sail_line)
-        source_points_worker.signals.completed.connect(self._source_points_loaded)
-        source_points_worker.signals.failed.connect(self._load_failed)
-        self._start_worker(source_points_worker)
-
         for group, prefix, loader, color in (
             ("Receiver Preplots", "Receiver preplot", self.repository.load_rp_preplot, "#27c2ff"),
-            ("Source Preplots", "Source preplot", self.repository.load_source_preplot, "#66bb6a"),
         ):
             worker = FunctionWorker(loader)
             worker.signals.completed.connect(
@@ -1354,6 +1421,18 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             worker.signals.failed.connect(self._load_failed)
             self._start_worker(worker)
 
+        for definition in imported_definitions:
+            worker = FunctionWorker(
+                lambda d=definition: load_imported_point_data(
+                    self.viewer_config.config_dir, d
+                )
+            )
+            worker.signals.completed.connect(
+                lambda data, d=definition: self._imported_point_layer_loaded(d, data)
+            )
+            worker.signals.failed.connect(self._load_failed)
+            self._start_worker(worker)
+
         for definition in surface_definitions:
             worker = FunctionWorker(
                 lambda d=definition: build_surface_from_definition(
@@ -1367,10 +1446,13 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             self._start_worker(worker)
 
         if self._pending == 0:
+            self._batch_registering_layers = False
+            self._update_layer_z_values()
             self._loading_initial_layers = False
             self._save_layer_tree_order()
             self._zoom_all()
             self.statusBar().showMessage(f"Ready — {len(self.layers)} layer(s)")
+            self._pop_busy_cursor()
 
     def _enforce_main_group_order(self) -> None:
         """Place standard project groups first in their documented order."""
@@ -1633,9 +1715,9 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             "Source preplot": self.repository.load_source_preplot,
             "OCR Image Counts": self.repository.load_ocr_image_counts,
             "DSR Primary Deployment": lambda: self.repository.load_dsr_layer("primary"),
+            "DSR Primary Recovery": lambda: self.repository.load_dsr_layer("recovery_primary"),
             "DSR Secondary Deployment": lambda: self.repository.load_dsr_layer("secondary"),
-            "DSR Primary Recover": lambda: self.repository.load_dsr_layer("recovery_primary"),
-            "DSR Secondary Recover": lambda: self.repository.load_dsr_layer("recovery_secondary"),
+            "DSR Secondary Recovery": lambda: self.repository.load_dsr_layer("recovery_secondary"),
             "Receiver database coordinates": self.repository.load_rec_db,
             "SM Deployment": lambda: self.repository.load_survey_manager_layer("deployment"),
             "SM Recovery": lambda: self.repository.load_survey_manager_layer("recovery"),
@@ -1707,10 +1789,13 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         # Registered vector layers use pyproj/PROJ and must remain on the GUI
         # thread on Windows, matching the safe startup path.
         if isinstance(layer, FastShapeLayer):
+            self._push_busy_cursor()
             try:
                 self._apply_reloaded_layer(layer_name, loader())
             except Exception as exc:
                 self._layer_reload_failed(layer_name, str(exc))
+            finally:
+                self._pop_busy_cursor()
             return
 
         worker = FunctionWorker(loader)
@@ -1737,7 +1822,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                     if key[0] == layer_name:
                         overlay.remove()
                         self._dsr_line_overlays.pop(key, None)
-                if layer_name.startswith("DSR ") or layer_name in {"SM Deployment", "SM Recovery", "Receiver database coordinates"} or (
+                if layer_name.startswith("DSR ") or layer_name in {"Receiver preplot", "SM Deployment", "SM Recovery", "Receiver database coordinates"} or (
                     self._custom_definition_by_layer.get(layer_name) is not None
                     and self._custom_definition_by_layer[layer_name].split_by_line
                 ):
@@ -1864,8 +1949,12 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 if existing_name in desired_layers and desired_layers.index(existing_name) < wanted_index:
                     target += 1
             parent.insertChild(target, item)
-        else:
+        elif self._loading_initial_layers:
             parent.addChild(item)
+        else:
+            # Newly created/imported layers are immediately visible at the top
+            # of their group and therefore render above its existing layers.
+            parent.insertChild(0, item)
         self.layer_items[unique] = item
         layer.set_visible(bool(saved_visible))
         self.viewer_config.mark_layer_present(unique)
@@ -1873,9 +1962,10 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         self._update_group_visibility_icon(parent)
         self._update_group_label_icon(parent)
         self._update_group_reload_icon(parent)
-        self._update_layer_z_values()
-        if not self._loading_initial_layers:
-            self._save_layer_tree_order()
+        if not self._batch_registering_layers:
+            self._update_layer_z_values()
+            if not self._loading_initial_layers:
+                self._save_layer_tree_order()
         return unique
 
     def _point_layer_loaded(self, group: str, name: str, data: PointLayerData, point_color: str, line_color: str | None, connect_by: str | None) -> None:
@@ -1889,9 +1979,13 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             layer.source_table = "REC_DB"
         layer.set_data(data)
         if name == "DSR Primary Deployment":
-            layer.update_style(symbol="circle", marker_text="D", point_size=8.0)
-        elif name == "DSR Primary Recover":
-            layer.update_style(symbol="square", marker_text="R", point_size=8.0)
+            layer.update_style(symbol="square", line_style="dash", point_size=8.0)
+        elif name == "DSR Primary Recovery":
+            layer.update_style(symbol="triangle", line_style="dash", point_size=8.0)
+        elif name == "DSR Secondary Deployment":
+            layer.update_style(symbol="diamond", line_style="dot", point_size=8.0)
+        elif name == "DSR Secondary Recovery":
+            layer.update_style(symbol="cross", line_style="dot", point_size=9.0)
         elif name == "OCR Image Counts":
             layer.update_style(
                 point_color="#00000000",
@@ -1913,19 +2007,31 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 item.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
         self._finish_load()
 
-    def _source_points_loaded(self, datasets: list[PointLayerData]) -> None:
-        for index, data in enumerate(datasets):
-            name = str(data.name)
-            layer = FastPointLayer(self.plot_item, name, self._category_color(name), None, None)
-            layer.source_table = "SPSolution"
-            layer.set_data(data)
-            layer.selection_changed.connect(self._show_record)
-            registered = self._register_layer("Source Points", name, data.count, layer)
-            if registered not in self.viewer_config.layer_visibility:
-                item = self.layer_items.get(registered)
-                if item is not None:
-                    item.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
-        self._finish_load()
+    def _source_points_loaded(
+        self, datasets: list[PointLayerData], *, finish_startup: bool = True
+    ) -> None:
+        previous_batch_state = self._batch_registering_layers
+        self._batch_registering_layers = True
+        try:
+            for index, data in enumerate(datasets):
+                name = str(data.name)
+                layer = FastPointLayer(self.plot_item, name, self._category_color(name), None, None)
+                layer.source_table = "SPSolution"
+                layer.set_data(data)
+                layer.selection_changed.connect(self._show_record)
+                registered = self._register_layer("Source Points", name, data.count, layer)
+                if registered not in self.viewer_config.layer_visibility:
+                    item = self.layer_items.get(registered)
+                    if item is not None:
+                        item.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
+        finally:
+            self._batch_registering_layers = previous_batch_state
+        if not previous_batch_state:
+            self._update_layer_z_values()
+            if not self._loading_initial_layers:
+                self._save_layer_tree_order()
+        if finish_startup:
+            self._finish_load()
 
     @staticmethod
     def _line_sort_key(value: object) -> tuple[int, float | str]:
@@ -1935,9 +2041,27 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             return 1, str(value)
 
     def _preplot_lines_loaded(
-        self, group: str, prefix: str, data: PointLayerData, color: str
+        self, group: str, prefix: str, data: PointLayerData, color: str,
+        *, finish_startup: bool = True,
     ) -> None:
-        """Register a receiver/source preplot as one clickable layer per line."""
+        """Register receiver preplot hierarchically; retain source lines as layers."""
+        if group == "Receiver Preplots":
+            if self.viewer_config.is_layer_removed(prefix):
+                if finish_startup:
+                    self._finish_load()
+                return
+            layer = FastPointLayer(self.plot_item, prefix, color, color, "line")
+            layer.source_table = "RPreplot"
+            layer.set_data(data)
+            layer.update_style(symbol="cross", line_style="solid", point_size=8.0)
+            layer.selection_changed.connect(self._show_record)
+            registered = self._register_layer(group, prefix, data.count, layer)
+            self._attach_dsr_hierarchy(registered)
+            self._prepare_radial_circles(data)
+            if finish_startup:
+                self._finish_load()
+            return
+
         values = data.metadata.get("line", data.metadata.get("sailline"))
         if values is None or values.size != data.count:
             datasets = [("Unknown", np.arange(data.count, dtype=np.int64))]
@@ -1947,23 +2071,98 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 (line, np.flatnonzero(line_keys == line))
                 for line in sorted(set(line_keys.tolist()), key=self._line_sort_key)
             ]
-        for line, indices in datasets:
-            if indices.size == 0:
-                continue
-            line_data = PointLayerData(
-                f"{prefix} — Line {line}",
-                data.x[indices], data.y[indices], data.source_index[indices],
-                {key: value[indices] for key, value in data.metadata.items()},
-            )
-            name = line_data.name
-            layer = FastPointLayer(self.plot_item, name, color, color, "line")
-            layer.source_table = "RPreplot" if group == "Receiver Preplots" else "SPreplot"
-            layer.set_data(line_data)
-            layer.selection_changed.connect(self._show_record)
-            self._register_layer(group, name, line_data.count, layer)
-        if group == "Receiver Preplots":
-            self._prepare_radial_circles(data)
-        self._finish_load()
+        previous_batch_state = self._batch_registering_layers
+        self._batch_registering_layers = True
+        try:
+            for line, indices in datasets:
+                if indices.size == 0:
+                    continue
+                line_data = PointLayerData(
+                    f"{prefix} — Line {line}",
+                    data.x[indices], data.y[indices], data.source_index[indices],
+                    {key: value[indices] for key, value in data.metadata.items()},
+                )
+                name = line_data.name
+                layer = FastPointLayer(self.plot_item, name, color, color, "line")
+                layer.source_table = "SPreplot"
+                layer.set_data(line_data)
+                layer.selection_changed.connect(self._show_record)
+                self._register_layer(group, name, line_data.count, layer)
+        finally:
+            self._batch_registering_layers = previous_batch_state
+        if not previous_batch_state:
+            self._update_layer_z_values()
+            if not self._loading_initial_layers:
+                self._save_layer_tree_order()
+        if finish_startup:
+            self._finish_load()
+
+    def _load_source_preplot_on_demand(self) -> None:
+        key = "source_preplot"
+        if key in self._optional_source_loads:
+            self.statusBar().showMessage("Source Preplot is already loading…", 3000)
+            return
+        if any(name.startswith("Source preplot") for name in self.layers):
+            self.statusBar().showMessage("Source Preplot is already loaded", 3000)
+            return
+        self._optional_source_loads.add(key)
+        self.statusBar().showMessage("Loading Source Preplot on demand…")
+        worker = FunctionWorker(self.repository.load_source_preplot)
+        worker.signals.completed.connect(self._source_preplot_on_demand_loaded)
+        worker.signals.failed.connect(
+            lambda error, load_key=key: self._optional_source_load_failed(load_key, error)
+        )
+        self._start_worker(worker)
+
+    def _source_preplot_on_demand_loaded(self, data: PointLayerData) -> None:
+        self._optional_source_loads.discard("source_preplot")
+        if data.count == 0:
+            self.statusBar().showMessage("No Source Preplot points were found", 4000)
+            return
+        self._preplot_lines_loaded(
+            "Source Preplots", "Source preplot", data, "#66bb6a",
+            finish_startup=False,
+        )
+        self.statusBar().showMessage(
+            f"Loaded {data.count:,} Source Preplot points", 4000
+        )
+
+    def _load_source_points_on_demand(self) -> None:
+        key = "source_points"
+        if key in self._optional_source_loads:
+            self.statusBar().showMessage("Source Points are already loading…", 3000)
+            return
+        if any(
+            getattr(layer, "source_table", "") == "SPSolution"
+            for layer in self.layers.values()
+        ):
+            self.statusBar().showMessage("Source Points are already loaded", 3000)
+            return
+        self._optional_source_loads.add(key)
+        self.statusBar().showMessage("Loading Source Points on demand…")
+        worker = FunctionWorker(self.repository.load_source_points_by_sail_line)
+        worker.signals.completed.connect(self._source_points_on_demand_loaded)
+        worker.signals.failed.connect(
+            lambda error, load_key=key: self._optional_source_load_failed(load_key, error)
+        )
+        self._start_worker(worker)
+
+    def _source_points_on_demand_loaded(self, datasets: list[PointLayerData]) -> None:
+        self._optional_source_loads.discard("source_points")
+        if not datasets:
+            self.statusBar().showMessage("No SPSolution source points were found", 4000)
+            return
+        total = sum(data.count for data in datasets)
+        self._source_points_loaded(datasets, finish_startup=False)
+        self.statusBar().showMessage(
+            f"Loaded {total:,} source points in {len(datasets):,} layer(s)", 5000
+        )
+
+    def _optional_source_load_failed(self, key: str, error: str) -> None:
+        self._optional_source_loads.discard(key)
+        title = "Source Preplot" if key == "source_preplot" else "Source Points"
+        self.details.appendPlainText(f"{title} load failed: {error}\n")
+        QtWidgets.QMessageBox.warning(self, title, str(error))
 
     def _register_shape_data(self, data: ShapeLayerData) -> None:
         style_override = self.viewer_config.shape_styles.get(data.name, {})
@@ -1993,10 +2192,13 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
     def _finish_load(self) -> None:
         self._pending = max(0, self._pending - 1)
         if self._pending == 0:
+            self._batch_registering_layers = False
+            self._update_layer_z_values()
             self._loading_initial_layers = False
             self._save_layer_tree_order()
             self._zoom_all()
             self.statusBar().showMessage(f"Ready — {len(self.layers)} layer(s)")
+            self._pop_busy_cursor()
 
     def _load_failed(self, error: str) -> None:
         self.details.appendPlainText(error + "\n")
@@ -2750,6 +2952,12 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         self.layers.pop(name, None)
         self._reloading_layers.discard(name)
         self._custom_definition_by_layer.pop(name, None)
+        imported_definition = self._imported_definition_by_layer.pop(name, None)
+        if imported_definition is not None and any(
+            item.id == imported_definition.id
+            for item in self.viewer_config.imported_point_layers
+        ):
+            self.viewer_config.remove_imported_point_layer(imported_definition.id)
         item = self.layer_items.pop(name, None)
         if item is not None:
             parent = item.parent()
@@ -2771,6 +2979,121 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         if isinstance(layer, DrawingLayer):
             self._save_persistent_drawings()
         self._save_layer_tree_order()
+
+    def _import_tabular_point_layer(self) -> None:
+        busy_pushed = False
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Import Excel / CSV point layer",
+            str(self.project_path),
+            "Spreadsheet files (*.xlsx *.xlsm *.csv *.txt *.tsv);;Excel files (*.xlsx *.xlsm);;CSV / text files (*.csv *.txt *.tsv)",
+        )
+        if not path:
+            return
+        try:
+            groups = [
+                self.layer_tree.topLevelItem(index).text(0)
+                for index in range(self.layer_tree.topLevelItemCount())
+            ]
+            dialog = TabularPointImportDialog(path, groups, self)
+            if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            source_path = Path(path)
+            definition_id = uuid.uuid4().hex
+            stored_source = str(source_path)
+            if dialog.save_layer.isChecked():
+                destination_dir = self.viewer_config.config_dir / "imported_layers"
+                destination_dir.mkdir(parents=True, exist_ok=True)
+                destination = destination_dir / f"{definition_id}_{source_path.name}"
+                shutil.copy2(source_path, destination)
+                stored_source = str(destination.relative_to(self.viewer_config.config_dir))
+            definition = ImportedPointLayerDefinition(
+                id=definition_id,
+                name=dialog.name_edit.text().strip(),
+                source_file=stored_source,
+                sheet_name=dialog.sheet_combo.currentText(),
+                x_field=dialog.x_combo.currentText(),
+                y_field=dialog.y_combo.currentText(),
+                label_fields=dialog.selected_label_fields(),
+                label_separator=dialog.separator_edit.text(),
+                group_name=dialog.group_combo.currentText().strip() or "Imported Layers",
+                color=dialog.color.name(),
+                point_size=dialog.size_spin.value(),
+                symbol=dialog.symbol_combo.currentText(),
+                show_labels=dialog.show_labels.isChecked(),
+            )
+            self._push_busy_cursor()
+            busy_pushed = True
+            QtWidgets.QApplication.processEvents()
+            data = load_imported_point_data(self.viewer_config.config_dir, definition)
+            registered = self._register_imported_point_layer(definition, data)
+            if dialog.save_layer.isChecked():
+                self.viewer_config.add_imported_point_layer(definition)
+            layer = self.layers.get(registered)
+            if layer is not None and layer.bounds:
+                xmin, xmax, ymin, ymax = layer.bounds
+                self.plot_item.setRange(
+                    xRange=(xmin, xmax), yRange=(ymin, ymax), padding=0.08
+                )
+            self.statusBar().showMessage(
+                f"Imported {data.count:,} point(s) as {definition.name}", 5000
+            )
+        except Exception as exc:
+            import traceback
+            self.details.appendPlainText(traceback.format_exc() + "\n")
+            QtWidgets.QMessageBox.critical(self, "Import Excel / CSV", str(exc))
+        finally:
+            if busy_pushed:
+                self._pop_busy_cursor()
+
+    def _register_imported_point_layer(
+        self, definition: ImportedPointLayerDefinition, data: PointLayerData
+    ) -> str:
+        layer = FastPointLayer(
+            self.plot_item, definition.name, definition.color, definition.color, None
+        )
+        layer.set_data(data)
+        layer.update_style(
+            point_color=definition.color,
+            line_color=definition.color,
+            line_style="none",
+            point_size=definition.point_size,
+            symbol=definition.symbol,
+        )
+        layer.selection_changed.connect(self._show_record)
+        registered = self._register_layer(
+            definition.group_name or "Imported Layers",
+            definition.name,
+            data.count,
+            layer,
+            f"Imported table: {definition.source_file}",
+        )
+        self._imported_definition_by_layer[registered] = definition
+        if definition.label_fields and registered not in self.viewer_config.label_styles:
+            self.label_manager.set_style(registered, {
+                "enabled": definition.show_labels,
+                "format": "{Label}",
+                "font_size": 9.0,
+                "color": definition.color,
+                "offset_x": 5.0,
+                "offset_y": -5.0,
+                "max_labels": 300,
+            })
+        if definition.label_fields and definition.show_labels:
+            self.label_manager.enabled = True
+            self.viewer_config.set_labels_enabled(True)
+            blocker = QtCore.QSignalBlocker(self.ribbon.labels_button)
+            self.ribbon.labels_button.setChecked(True)
+            del blocker
+        self.label_manager.refresh(self.layers)
+        return registered
+
+    def _imported_point_layer_loaded(
+        self, definition: ImportedPointLayerDefinition, data: PointLayerData
+    ) -> None:
+        if not self.viewer_config.is_layer_removed(definition.name):
+            self._register_imported_point_layer(definition, data)
+        self._finish_load()
 
     def _delete_selected_layers(self, names: list[str]) -> None:
         names = [name for name in names if name in self.layers]
@@ -3381,9 +3704,21 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         label_max.setRange(1, 5000); label_max.setValue(int(label_style.get("max_labels", 300)))
         label_color_button = QtWidgets.QPushButton(str(label_style.get("color", "#f3f6f8")))
         label_fields = QtWidgets.QComboBox()
+        label_fields.setEditable(True)
+        label_fields.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        label_fields.completer().setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
+        label_fields.completer().setFilterMode(QtCore.Qt.MatchFlag.MatchContains)
         label_fields.addItem("Insert field…", "")
+        label_fields.addItem("Map Easting", "MapEasting")
+        label_fields.addItem("Map Northing", "MapNorthing")
+        label_fields.addItem("Source index", "SourceIndex")
         if layer.data is not None:
-            for field_name in layer.data.metadata.keys():
+            reserved = {"mapeasting", "mapnorthing", "sourceindex"}
+            for field_name in sorted(
+                layer.data.metadata.keys(), key=lambda value: str(value).casefold()
+            ):
+                if str(field_name).casefold() in reserved:
+                    continue
                 label_fields.addItem(str(field_name), str(field_name))
         def insert_label_field(_index: int) -> None:
             field_name = str(label_fields.currentData() or "")
@@ -3459,6 +3794,16 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             symbol=symbol_combo.currentText(),
             marker_text=marker_text.text(),
         )
+        imported_definition = self._imported_definition_by_layer.get(name)
+        if imported_definition is not None and any(
+            item.id == imported_definition.id
+            for item in self.viewer_config.imported_point_layers
+        ):
+            imported_definition.color = selected["point"].name()
+            imported_definition.point_size = point_size.value()
+            imported_definition.symbol = symbol_combo.currentText()
+            imported_definition.show_labels = label_enabled.isChecked()
+            self.viewer_config.add_imported_point_layer(imported_definition)
         self.label_manager.set_style(name, {
             "enabled": label_enabled.isChecked(),
             "format": label_format.toPlainText(),
@@ -3498,6 +3843,7 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); form.addRow(buttons)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
+        self._push_busy_cursor()
         try:
             options = GeoTiffDisplayOptions(mode=mode.currentText(), cmap=cmap.currentText(), opacity=opacity.value(), contour_interval=interval.value(), contour_color=selected["color"].name(), contour_width=width.value(), contour_style=style.currentText())
             layer = GeoTiffLayer(self.plot_item, path, self.repository.project_epsg(), options)
@@ -3506,27 +3852,112 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             self.statusBar().showMessage(f"Loaded GeoTIFF: {Path(path).name}", 4000)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "GeoTIFF", str(exc))
+        finally:
+            self._pop_busy_cursor()
 
     def _create_point_comparison(self) -> None:
         point_names = [name for name, layer in self.layers.items() if isinstance(layer, FastPointLayer) and layer.data is not None]
         if len(point_names) < 2:
             QtWidgets.QMessageBox.information(self, "Point comparison", "At least two loaded point layers are required.")
             return
-        dialog = QtWidgets.QDialog(self); dialog.setWindowTitle("Point comparison"); form = QtWidgets.QFormLayout(dialog)
-        source = QtWidgets.QComboBox(); source.addItems(point_names)
-        target = QtWidgets.QComboBox(); target.addItems(point_names); target.setCurrentIndex(1)
+
+        # Keep the same group/layer hierarchy that the user sees in the layer
+        # tree.  Selecting a group first makes large projects much easier to
+        # navigate than one flat list containing every point layer.
+        layers_by_group: OrderedDict[str, list[str]] = OrderedDict()
+        point_name_set = set(point_names)
+        for group_index in range(self.layer_tree.topLevelItemCount()):
+            group_item = self.layer_tree.topLevelItem(group_index)
+            names: list[str] = []
+            for child_index in range(group_item.childCount()):
+                child = group_item.child(child_index)
+                name = child.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                if name is not None and str(name) in point_name_set:
+                    names.append(str(name))
+            if names:
+                layers_by_group[str(group_item.text(0))] = names
+        grouped_names = {name for names in layers_by_group.values() for name in names}
+        ungrouped_names = [name for name in point_names if name not in grouped_names]
+        if ungrouped_names:
+            layers_by_group["Other point layers"] = ungrouped_names
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Point comparison")
+        dialog.setMinimumWidth(520)
+        form = QtWidgets.QFormLayout(dialog)
+        source_group = QtWidgets.QComboBox()
+        target_group = QtWidgets.QComboBox()
+        source_group.addItems(list(layers_by_group))
+        target_group.addItems(list(layers_by_group))
+        source = QtWidgets.QComboBox()
+        target = QtWidgets.QComboBox()
         source_line = QtWidgets.QComboBox(); source_station = QtWidgets.QComboBox(); target_line = QtWidgets.QComboBox(); target_station = QtWidgets.QComboBox()
-        def populate():
-            for combo, layer_combo in ((source_line, source),(source_station,source),(target_line,target),(target_station,target)):
-                combo.clear(); data=self.layers[layer_combo.currentText()].data; combo.addItems(list(data.metadata.keys()))
-            def choose(combo, candidates):
-                for candidate in candidates:
-                    idx=combo.findText(candidate, QtCore.Qt.MatchFlag.MatchFixedString)
-                    if idx<0:
-                        idx=next((i for i in range(combo.count()) if combo.itemText(i).casefold()==candidate.casefold()),-1)
-                    if idx>=0: combo.setCurrentIndex(idx); return
-            choose(source_line,("Line","line","DSRLine")); choose(target_line,("Line","line","DSRLine")); choose(source_station,("Station","station","Point")); choose(target_station,("Station","station","Point"))
-        source.currentTextChanged.connect(populate); target.currentTextChanged.connect(populate); populate()
+
+        def choose(combo, candidates):
+            for candidate in candidates:
+                idx = next(
+                    (i for i in range(combo.count()) if combo.itemText(i).casefold() == candidate.casefold()),
+                    -1,
+                )
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                    return
+
+        def populate_fields(layer_combo, line_combo, station_combo):
+            line_combo.clear()
+            station_combo.clear()
+            name = layer_combo.currentData()
+            layer = self.layers.get(str(name)) if name is not None else None
+            if layer is None or layer.data is None:
+                return
+            fields = list(layer.data.metadata.keys())
+            line_combo.addItems(fields)
+            station_combo.addItems(fields)
+            choose(line_combo, ("Line", "line", "DSRLine"))
+            choose(station_combo, ("Station", "station", "Point"))
+
+        def populate_layers(group_combo, layer_combo, preferred=None):
+            group_name = group_combo.currentText()
+            blocker = QtCore.QSignalBlocker(layer_combo)
+            layer_combo.clear()
+            for name in layers_by_group.get(group_name, []):
+                layer_combo.addItem(name, name)
+            if preferred is not None:
+                index = layer_combo.findData(preferred)
+                if index >= 0:
+                    layer_combo.setCurrentIndex(index)
+            del blocker
+
+        def source_group_changed():
+            populate_layers(source_group, source)
+            populate_fields(source, source_line, source_station)
+
+        def target_group_changed():
+            populate_layers(target_group, target)
+            populate_fields(target, target_line, target_station)
+
+        source_group.currentTextChanged.connect(source_group_changed)
+        target_group.currentTextChanged.connect(target_group_changed)
+        source.currentIndexChanged.connect(
+            lambda *_: populate_fields(source, source_line, source_station)
+        )
+        target.currentIndexChanged.connect(
+            lambda *_: populate_fields(target, target_line, target_station)
+        )
+
+        # Preserve the useful old default: first loaded point layer compared
+        # with the second one, even when those layers belong to different groups.
+        group_for_layer = {
+            name: group_name
+            for group_name, names in layers_by_group.items()
+            for name in names
+        }
+        source_group.setCurrentText(group_for_layer[point_names[0]])
+        target_group.setCurrentText(group_for_layer[point_names[1]])
+        populate_layers(source_group, source, point_names[0])
+        populate_layers(target_group, target, point_names[1])
+        populate_fields(source, source_line, source_station)
+        populate_fields(target, target_line, target_station)
         color_button=QtWidgets.QPushButton("#ffd740"); selected={"color":QtGui.QColor("#ffd740")}
         def choose_color():
             c=QtWidgets.QColorDialog.getColor(selected["color"],dialog)
@@ -3536,13 +3967,21 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         style=QtWidgets.QComboBox();style.addItems(["solid","dash","dot","dash dot"]);style.setCurrentText("dash")
         labels=QtWidgets.QCheckBox();labels.setChecked(True)
         group=QtWidgets.QComboBox();group.setEditable(True);group.addItems([self.layer_tree.topLevelItem(i).text(0) for i in range(self.layer_tree.topLevelItemCount())]);group.setCurrentText("Point Comparisons")
-        form.addRow("From layer:",source);form.addRow("To layer:",target);form.addRow("From line field:",source_line);form.addRow("From station field:",source_station);form.addRow("To line field:",target_line);form.addRow("To station field:",target_station)
+        form.addRow("From group:", source_group)
+        form.addRow("From layer:", source)
+        form.addRow("To group:", target_group)
+        form.addRow("To layer:", target)
+        form.addRow("From line field:",source_line);form.addRow("From station field:",source_station);form.addRow("To line field:",target_line);form.addRow("To station field:",target_station)
         form.addRow("Line color:",color_button);form.addRow("Line width:",width);form.addRow("Line style:",style);form.addRow("Distance and bearing labels:",labels);form.addRow("Layer group:",group)
         buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok|QtWidgets.QDialogButtonBox.StandardButton.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
         if dialog.exec()!=QtWidgets.QDialog.DialogCode.Accepted:return
         try:
-            s_layer=self.layers[source.currentText()];t_layer=self.layers[target.currentText()]
-            name=f"{source.currentText()} → {target.currentText()}"
+            source_name = str(source.currentData())
+            target_name = str(target.currentData())
+            if source_name == target_name:
+                raise RuntimeError("Select two different point layers to compare.")
+            s_layer=self.layers[source_name];t_layer=self.layers[target_name]
+            name=f"{source_name} → {target_name}"
             comparison=PointComparisonLayer(self.plot_item,name,s_layer.data,t_layer.data,(source_line.currentText(),source_station.currentText()),(target_line.currentText(),target_station.currentText()),selected["color"].name(),width.value(),style.currentText(),labels.isChecked())
             if comparison.count==0:
                 comparison.remove(); raise RuntimeError("No matching points were found for the selected fields.")
@@ -3907,8 +4346,13 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
 
     def _mouse_moved(self, scene_pos: QtCore.QPointF) -> None:
         if not self.plot_item.sceneBoundingRect().contains(scene_pos):
+            self._set_map_crosshair_visible(False)
+            self.coord_label.setText("X: —   Y: —")
             return
         point = self.plot_item.vb.mapSceneToView(scene_pos)
+        self.map_crosshair_x.setPos(float(point.x()))
+        self.map_crosshair_y.setPos(float(point.y()))
+        self._set_map_crosshair_visible(True)
         self.coord_label.setText(f"X: {point.x():,.3f}   Y: {point.y():,.3f}")
         self._update_heading_from_cursor(float(point.x()), float(point.y()))
         if self._draw_mode == "free":
@@ -3950,6 +4394,24 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 self._draw_radius_label.setZValue(900001); self.plot_item.addItem(self._draw_radius_label)
             self._draw_radius_label.setText(f"{radius:,.2f} m")
             self._draw_radius_label.setPos((x0+x1)/2.0, (y0+y1)/2.0)
+
+    def _set_map_crosshair_visible(self, visible: bool) -> None:
+        for guide in (
+            getattr(self, "map_crosshair_x", None),
+            getattr(self, "map_crosshair_y", None),
+        ):
+            if guide is not None:
+                guide.setVisible(bool(visible))
+
+    def eventFilter(self, watched, event) -> bool:
+        if (
+            hasattr(self, "plot_widget")
+            and watched is self.plot_widget.viewport()
+            and event.type() == QtCore.QEvent.Type.Leave
+        ):
+            self._set_map_crosshair_visible(False)
+            self.coord_label.setText("X: —   Y: —")
+        return super().eventFilter(watched, event)
 
     def _map_clicked(self, event: object) -> None:
         if self._draw_mode is not None:
@@ -4590,15 +5052,27 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
     def _open_bathymetry_3d_window(self) -> None:
         """Open the optional multi-surface PyVista 3D workbench."""
         try:
-            if self.bathymetry_3d_window is None:
-                self.bathymetry_3d_window = Surface3DWindow(self.project_path, self)
-                self.bathymetry_3d_window.setAttribute(
-                    QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True
+            # A PySide wrapper can briefly outlive its C++ window after close.
+            # Treat that stale wrapper exactly like a missing window.
+            if (
+                self.bathymetry_3d_window is None
+                or not isValid(self.bathymetry_3d_window)
+                or not self.bathymetry_3d_window.has_live_render_context()
+            ):
+                old_window = self.bathymetry_3d_window
+                if old_window is not None and isValid(old_window):
+                    old_window.close()
+                window = Surface3DWindow(self.project_path, self)
+                # PyVista finalizes the VTK interactor when its window closes.
+                # Delete that window and create a fresh render context next time.
+                window.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+                window.closed.connect(
+                    lambda current=window: self._bathymetry_3d_window_closed(current)
                 )
-                self.bathymetry_3d_window.destroyed.connect(
-                    lambda *_: setattr(self, "bathymetry_3d_window", None)
-                )
+                self.bathymetry_3d_window = window
             self.bathymetry_3d_window.show()
+            if self.bathymetry_3d_window.isMinimized():
+                self.bathymetry_3d_window.showNormal()
             self.bathymetry_3d_window.raise_()
             self.bathymetry_3d_window.activateWindow()
         except Exception as exc:
@@ -4609,6 +5083,11 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
                 "Install optional dependencies with:\n"
                 "python -m pip install pyvista pyvistaqt vtk",
             )
+
+    def _bathymetry_3d_window_closed(self, window: Surface3DWindow) -> None:
+        """Forget only the workbench instance that actually emitted close."""
+        if self.bathymetry_3d_window is window:
+            self.bathymetry_3d_window = None
 
     def _open_dsr_qc_window(self) -> None:
         window = self._ensure_dsr_qc_window()
@@ -5032,12 +5511,27 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
         track = data.tracks.get(source)
         if track is None:
             return
-        x, y = track
-        finite = np.isfinite(x) & np.isfinite(y)
-        x = x[finite]
-        y = y[finite]
+        raw_x, raw_y = track
+        finite = np.isfinite(raw_x) & np.isfinite(raw_y)
+        x = raw_x[finite]
+        y = raw_y[finite]
         if not x.size:
             self.statusBar().showMessage(f"BlackBox track {source} has no valid coordinates", 4000)
+            return
+
+        track_indices = np.asarray(
+            data.track_indices.get(source, np.arange(raw_x.size, dtype=np.int64)),
+            dtype=np.int64,
+        )
+        usable_count = min(raw_x.size, track_indices.size)
+        original_indices = track_indices[:usable_count][finite[:usable_count]]
+        if original_indices.size != x.size:
+            # Defensive fallback for a malformed external track/index pair.
+            keep = min(original_indices.size, x.size)
+            original_indices = original_indices[:keep]
+            x = x[:keep]
+            y = y[:keep]
+        if not x.size:
             return
 
         key = (int(data.file_info.file_id), str(source))
@@ -5053,12 +5547,36 @@ img{{max-width:100%;border:1px solid #b0bec5}}</style></head><body><h1>{html.esc
             "source": np.asarray([source] * x.size, dtype=object),
             "file": np.asarray([data.file_info.name] * x.size, dtype=object),
             "file_id": np.full(x.size, data.file_info.file_id, dtype=np.int64),
-            "track_group": np.zeros(x.size, dtype=np.int8),
-            "original_index": np.asarray(
-                data.track_indices.get(source, np.arange(x.size, dtype=np.int64)),
+            "file_start": np.asarray([data.file_info.start_time] * x.size, dtype=object),
+            "file_end": np.asarray([data.file_info.end_time] * x.size, dtype=object),
+            "config_id": np.full(
+                x.size,
+                data.file_info.config_id if data.file_info.config_id is not None else -1,
                 dtype=np.int64,
-            )[:x.size],
+            ),
+            "vessel_name": np.asarray([data.file_info.vessel_name] * x.size, dtype=object),
+            "rov1_name": np.asarray([data.file_info.rov1_name] * x.size, dtype=object),
+            "rov2_name": np.asarray([data.file_info.rov2_name] * x.size, dtype=object),
+            "gnss1_name": np.asarray([data.file_info.gnss1_name] * x.size, dtype=object),
+            "gnss2_name": np.asarray([data.file_info.gnss2_name] * x.size, dtype=object),
+            "timestamp": np.asarray(data.time_labels, dtype=object)[original_indices],
+            "elapsed_seconds": np.asarray(data.time_seconds, dtype=float)[original_indices],
+            "easting": np.asarray(x, dtype=float),
+            "northing": np.asarray(y, dtype=float),
+            "track_group": np.zeros(x.size, dtype=np.int8),
+            "original_index": original_indices,
         }
+        # BlackBoxData.columns contains the numeric QC channels discovered in
+        # the actual file schema (heading, depth, motion, DOP, NOS, etc.).
+        # Attach them to the track so they can be inserted into map labels.
+        max_original_index = int(original_indices.max()) if original_indices.size else -1
+        for field_name, values in data.columns.items():
+            key_name = str(field_name)
+            if key_name in metadata:
+                continue
+            array = np.asarray(values)
+            if array.ndim == 1 and array.size > max_original_index:
+                metadata[key_name] = array[original_indices]
         point_data = PointLayerData(f"BlackBox {source}", x, y, source_index, metadata)
         color = self._bbox_layer_color(data.file_info.file_id, source)
         layer = FastPointLayer(

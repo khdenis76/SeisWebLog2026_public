@@ -193,13 +193,41 @@ class SurfaceDataRepository:
             pick("PreplotEasting", "PrimaryEasting", "ActualX", "Easting"),
             pick("PreplotNorthing", "PrimaryNorthing", "ActualY", "Northing"),
             pick(
-                "PrimaryRadial",
-                "ActualZ",
-                "WaterDepth",
                 "PrimaryElevation",
+                "PrimaryElevation1",
+                "SecondaryElevation",
+                "SecondaryElevation1",
+                "WaterDepth",
+                "ActualZ",
                 "Elevation",
+                "Z",
             ),
         )
+
+    def coordinate_pairs(self, source: str) -> list[tuple[str, str, str]]:
+        """Return valid named X/Y pairs for surface construction."""
+        columns = set(self.columns(source))
+        candidates: list[tuple[str, str, str]]
+        if source == "SPSolution":
+            candidates = [
+                ("SPS Easting / Northing", "Easting", "Northing"),
+                ("Source Easting / Northing", "SourceEasting", "SourceNorthing"),
+            ]
+        elif source == "DSR":
+            candidates = [
+                ("Receiver preplot", "PreplotEasting", "PreplotNorthing"),
+                ("Primary deployment", "PrimaryEasting", "PrimaryNorthing"),
+                ("Secondary deployment", "SecondaryEasting", "SecondaryNorthing"),
+                ("Primary recovery", "PrimaryEasting1", "PrimaryNorthing1"),
+                ("Secondary recovery", "SecondaryEasting1", "SecondaryNorthing1"),
+                ("Actual coordinates", "ActualX", "ActualY"),
+            ]
+        else:
+            candidates = [
+                ("Recovery database", "REC_X", "REC_Y"),
+                ("Easting / Northing", "Easting", "Northing"),
+            ]
+        return [item for item in candidates if item[1] in columns and item[2] in columns]
 
     def label_candidates(self, source: str) -> list[str]:
         """Return all fields, with operational identifiers first."""

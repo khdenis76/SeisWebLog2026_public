@@ -1,0 +1,15 @@
+ROI Editor update
+=================
+
+Added:
+- Zoom In and Zoom Out buttons.
+- 100% (actual image pixels) button.
+- Fit Image button.
+- Live zoom percentage display.
+- Mouse-wheel zoom centred under the pointer.
+- Double-click to fit the complete image.
+- Horizontal splitter between the image panel and ROI panel.
+- Remembered splitter position between OCR Studio sessions.
+
+ROI coordinates continue to use original image pixels and are not changed by
+display zoom.

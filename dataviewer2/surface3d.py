@@ -33,6 +33,7 @@ class SceneDefinition:
     y_field: str
     z_field: str
     color_field: str = ""
+    color_mode: str = "Selected field"
     end_x_field: str = ""
     end_y_field: str = ""
     end_z_field: str = ""
@@ -60,6 +61,8 @@ class SceneDefinition:
 class Surface3DWindow(QtWidgets.QMainWindow):
     """Multi-surface 3D scene with point/vector overlays and optional labels."""
 
+    closed = QtCore.Signal()
+
     COLORS = ["#00e5ff", "#ffd740", "#ff6e40", "#ea80fc", "#69f0ae", "#82b1ff", "#ff80ab", "#b2ff59"]
 
     def __init__(self, project_path: str | Path, parent=None) -> None:
@@ -76,13 +79,35 @@ class Surface3DWindow(QtWidgets.QMainWindow):
         self._load_sources()
         self._load_config()
 
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        """Release VTK/OpenGL resources while their Qt context is still valid."""
+        plotter = getattr(self, "plotter", None)
+        if plotter is not None and not getattr(plotter, "_closed", False):
+            try:
+                plotter.close()
+            except Exception:
+                pass
+        self.closed.emit()
+        super().closeEvent(event)
+
+    def has_live_render_context(self) -> bool:
+        """Return whether this workbench still owns a usable QtInteractor."""
+        plotter = getattr(self, "plotter", None)
+        return bool(
+            PYVISTA_AVAILABLE
+            and plotter is not None
+            and not getattr(plotter, "_closed", False)
+            and getattr(plotter, "interactor", None) is not None
+        )
+
     def _build_ui(self) -> None:
         root = QtWidgets.QWidget(); outer = QtWidgets.QHBoxLayout(root); outer.setContentsMargins(4,4,4,4)
         left = QtWidgets.QTabWidget(); left.setMinimumWidth(370); left.setMaximumWidth(420); outer.addWidget(left)
 
         sp = QtWidgets.QWidget(); sl = QtWidgets.QVBoxLayout(sp)
         box=QtWidgets.QGroupBox("Surface definition"); f=QtWidgets.QFormLayout(box)
-        self.s_source=QtWidgets.QComboBox(); self.s_x=QtWidgets.QComboBox(); self.s_y=QtWidgets.QComboBox(); self.s_z=QtWidgets.QComboBox(); self.s_color_field=QtWidgets.QComboBox()
+        self.s_source=QtWidgets.QComboBox(); self.s_pair=QtWidgets.QComboBox(); self.s_x=QtWidgets.QComboBox(); self.s_y=QtWidgets.QComboBox(); self.s_z=QtWidgets.QComboBox(); self.s_color_field=QtWidgets.QComboBox()
+        self.s_color_mode=QtWidgets.QComboBox(); self.s_color_mode.addItems(["Selected field", "Slope angle (degrees)"])
         self.s_line=QtWidgets.QComboBox(); self.s_line.addItem("All lines",None)
         self.s_cmap=QtWidgets.QComboBox(); self.s_cmap.addItems(["turbo","viridis","terrain","gist_earth","plasma","inferno"])
         self.s_style=QtWidgets.QComboBox(); self.s_style.addItems(["Surface","Surface + edges","Points"])
@@ -91,7 +116,7 @@ class Surface3DWindow(QtWidgets.QMainWindow):
         self.s_offset=QtWidgets.QDoubleSpinBox(); self.s_offset.setRange(-100000,100000); self.s_offset.setValue(0)
         self.s_zmode=QtWidgets.QComboBox(); self.s_zmode.addItems(["Use source Z","Depth below sea level (-|Z|)","Invert source Z (-Z)"])
         self.s_name=QtWidgets.QLineEdit(); self.s_name.setPlaceholderText("Automatic name")
-        for label,w in (("Source",self.s_source),("X field",self.s_x),("Y field",self.s_y),("Z field",self.s_z),("Color field",self.s_color_field),("Line filter",self.s_line),("Style",self.s_style),("Color map",self.s_cmap),("Opacity",self.s_opacity),("Vertical scale",self.s_scale),("Z offset",self.s_offset),("Z convention",self.s_zmode),("Name",self.s_name)): f.addRow(label+":",w)
+        for label,w in (("Source",self.s_source),("Coordinate pair",self.s_pair),("X field",self.s_x),("Y field",self.s_y),("Z / elevation field",self.s_z),("Color by",self.s_color_mode),("Color field",self.s_color_field),("Line filter",self.s_line),("Style",self.s_style),("Color map",self.s_cmap),("Opacity",self.s_opacity),("Vertical scale (display)",self.s_scale),("Z offset",self.s_offset),("Z convention",self.s_zmode),("Name",self.s_name)): f.addRow(label+":",w)
         sl.addWidget(box); self.add_surface_btn=QtWidgets.QPushButton("Add surface"); sl.addWidget(self.add_surface_btn)
         left.addTab(sp,"Add surface")
 
@@ -128,7 +153,11 @@ class Surface3DWindow(QtWidgets.QMainWindow):
         left.addTab(scene,"Scene")
 
         if PYVISTA_AVAILABLE:
-            self.plotter=QtInteractor(root); self.plotter.set_background("#111317"); outer.addWidget(self.plotter.interactor,1)
+            self.plotter=QtInteractor(root)
+            self.plotter.set_background("#111317")
+            self.render_widget = self.plotter.interactor
+            self.render_widget.setMinimumSize(640, 480)
+            outer.addWidget(self.render_widget, 1)
             try:
                 self.plotter.enable_point_picking(
                     callback=self._picked_point,
@@ -142,7 +171,7 @@ class Surface3DWindow(QtWidgets.QMainWindow):
             self.plotter=None; msg=QtWidgets.QTextBrowser(); msg.setHtml("<h2>3D dependencies are not installed</h2><pre>python -m pip install pyvista pyvistaqt vtk scipy</pre>"); outer.addWidget(msg,1)
         self.setCentralWidget(root)
 
-        self.s_source.currentTextChanged.connect(self._surface_source_changed); self.o_source.currentTextChanged.connect(self._overlay_source_changed); self.o_type.currentTextChanged.connect(self._overlay_type_changed)
+        self.s_source.currentTextChanged.connect(self._surface_source_changed); self.s_pair.currentIndexChanged.connect(self._surface_pair_changed); self.s_color_mode.currentTextChanged.connect(self._surface_color_mode_changed); self.o_source.currentTextChanged.connect(self._overlay_source_changed); self.o_type.currentTextChanged.connect(self._overlay_type_changed)
         self.o_color.clicked.connect(self._choose_color); self.add_surface_btn.clicked.connect(self.add_surface); self.add_overlay_btn.clicked.connect(self.add_overlay)
         self.refresh_btn.clicked.connect(self.render_scene); self.zoom_btn.clicked.connect(lambda:self.plotter.reset_camera() if self.plotter else None); self.top_btn.clicked.connect(lambda:self.plotter.view_xy() if self.plotter else None)
         self.grid_check.toggled.connect(self.render_scene); self.screenshot_btn.clicked.connect(self.export_screenshot); self.scene_tree.itemChanged.connect(self._visibility_changed); self.scene_tree.customContextMenuRequested.connect(self._scene_menu)
@@ -162,10 +191,30 @@ class Surface3DWindow(QtWidgets.QMainWindow):
     def _surface_source_changed(self,source):
         fields=self.repo.numeric_columns(source); x,y,z=self.repo.default_fields(source)
         for combo,sel in ((self.s_x,x),(self.s_y,y),(self.s_z,z),(self.s_color_field,z)): self._set_combo(combo,fields,sel)
+        self.s_pair.blockSignals(True); self.s_pair.clear()
+        for title, pair_x, pair_y in self.repo.coordinate_pairs(source):
+            self.s_pair.addItem(title, (pair_x, pair_y))
+        self.s_pair.addItem("Custom fields", None)
+        self.s_pair.blockSignals(False)
+        if self.s_pair.count() > 0:
+            self.s_pair.setCurrentIndex(0); self._surface_pair_changed(0)
         self.s_line.clear(); self.s_line.addItem("All lines",None)
         for v in self.repo.line_values(source): self.s_line.addItem(str(v),v)
         note=self.repo.source_note(source)
         if note:self.statusBar().showMessage(note,6000)
+
+    def _surface_pair_changed(self, _index):
+        pair = self.s_pair.currentData()
+        if not pair:
+            self.s_x.setEnabled(True); self.s_y.setEnabled(True); return
+        self.s_x.setCurrentText(str(pair[0])); self.s_y.setCurrentText(str(pair[1]))
+        self.s_x.setEnabled(False); self.s_y.setEnabled(False)
+
+    def _surface_color_mode_changed(self, mode):
+        slope_mode = mode == "Slope angle (degrees)"
+        self.s_color_field.setEnabled(not slope_mode)
+        if slope_mode:
+            self.s_cmap.setCurrentText("turbo")
 
     def _overlay_source_changed(self,source):
         fields=self.repo.numeric_columns(source); x,y,z=self.repo.default_fields(source)
@@ -199,8 +248,12 @@ class Surface3DWindow(QtWidgets.QMainWindow):
         return z*float(scale)+float(offset)
 
     def add_surface(self):
-        name=self.s_name.text().strip() or f"{self.s_source.currentText()} — {self.s_z.currentText()}"
-        definition=SceneDefinition(name,"surface",self.s_source.currentText(),self.s_x.currentText(),self.s_y.currentText(),self.s_z.currentText(),color_field=self.s_color_field.currentText(),line_filter=self.s_line.currentData(),cmap=self.s_cmap.currentText(),opacity=float(self.s_opacity.value()),z_mode=self.s_zmode.currentText(),z_scale=float(self.s_scale.value()),z_offset=float(self.s_offset.value()),style=self.s_style.currentText())
+        if self.s_color_mode.currentText() == "Slope angle (degrees)" and self.s_style.currentText() == "Points":
+            self.s_style.setCurrentText("Surface")
+            self.statusBar().showMessage("Slope coloring requires a triangulated surface; style changed to Surface.", 5000)
+        suffix = "Slope" if self.s_color_mode.currentText() == "Slope angle (degrees)" else self.s_z.currentText()
+        name=self.s_name.text().strip() or f"{self.s_source.currentText()} — {suffix}"
+        definition=SceneDefinition(name,"surface",self.s_source.currentText(),self.s_x.currentText(),self.s_y.currentText(),self.s_z.currentText(),color_field=self.s_color_field.currentText(),color_mode=self.s_color_mode.currentText(),line_filter=self.s_line.currentData(),cmap=self.s_cmap.currentText(),opacity=float(self.s_opacity.value()),z_mode=self.s_zmode.currentText(),z_scale=float(self.s_scale.value()),z_offset=float(self.s_offset.value()),style=self.s_style.currentText())
         self._append_definition(definition)
 
     def add_overlay(self):
@@ -257,6 +310,73 @@ class Surface3DWindow(QtWidgets.QMainWindow):
         glyph = cloud.glyph(scale=False, orient=False, geom=geom)
         self.plotter.add_mesh(glyph, color=color, label=label)
 
+    @staticmethod
+    def _triangulation_input(pts, scalars, physical_pts):
+        """Return distinct, non-collinear XY points suitable for Delaunay 2D."""
+        if pts.shape[0] < 3:
+            return None
+        _, unique_indices = np.unique(pts[:, :2], axis=0, return_index=True)
+        unique_indices = np.sort(unique_indices)
+        unique_pts = pts[unique_indices]
+        unique_scalars = np.asarray(scalars)[unique_indices]
+        if unique_pts.shape[0] < 3:
+            return None
+
+        centered_xy = unique_pts[:, :2] - np.mean(unique_pts[:, :2], axis=0)
+        singular_values = np.linalg.svd(centered_xy, compute_uv=False)
+        if (
+            singular_values.size < 2
+            or not np.isfinite(singular_values[:2]).all()
+            or singular_values[0] <= np.finfo(float).eps
+            or singular_values[1] <= singular_values[0] * 1.0e-10
+        ):
+            return None
+        return unique_pts, unique_scalars, np.asarray(physical_pts)[unique_indices]
+
+    def _add_surface_points(self, pts, scalars, definition):
+        cloud = pv.PolyData(pts)
+        cloud["values"] = scalars
+        self.plotter.add_mesh(
+            cloud,
+            scalars="values",
+            cmap=definition.cmap,
+            opacity=definition.opacity,
+            style="points",
+            point_size=7,
+            render_points_as_spheres=True,
+            label=definition.name,
+            scalar_bar_args={
+                "title": definition.color_field or definition.z_field,
+                "color": "white",
+                "title_font_size": 12,
+                "label_font_size": 10,
+                "fmt": "%.4g",
+            },
+        )
+
+    @staticmethod
+    def _triangle_slope_angles(mesh, physical_points):
+        """Calculate one terrain slope angle per triangle in degrees."""
+        faces = np.asarray(mesh.faces, dtype=np.int64)
+        slopes = np.full(mesh.n_cells, np.nan, dtype=float)
+        cursor = 0
+        for cell_index in range(mesh.n_cells):
+            if cursor >= faces.size:
+                break
+            count = int(faces[cursor])
+            ids = faces[cursor + 1:cursor + 1 + count]
+            cursor += count + 1
+            if ids.size < 3 or np.max(ids) >= physical_points.shape[0]:
+                continue
+            a, b, c = physical_points[ids[:3]]
+            normal = np.cross(b - a, c - a)
+            length = float(np.linalg.norm(normal))
+            if length <= np.finfo(float).eps or not np.isfinite(length):
+                continue
+            cosine = float(np.clip(abs(normal[2]) / length, 0.0, 1.0))
+            slopes[cell_index] = math.degrees(math.acos(cosine))
+        return slopes
+
     def render_scene(self):
         if not self.plotter:return
         self.plotter.clear(); visible=[d for d in self.definitions if d.visible]
@@ -269,26 +389,43 @@ class Surface3DWindow(QtWidgets.QMainWindow):
             xy=np.vstack(all_xy); self.origin=np.array([np.nanmedian(xy[:,0]),np.nanmedian(xy[:,1])])
         for d in visible:
             try:
-                p=self._load_data(d); x=p.x-self.origin[0]; y=p.y-self.origin[1]; z=self._z(p.z,d.z_mode,d.z_scale,d.z_offset); pts=np.c_[x,y,z]; finite=np.isfinite(pts).all(axis=1); pts=pts[finite]; scalars=p.color_values[finite]
+                p=self._load_data(d); x=p.x-self.origin[0]; y=p.y-self.origin[1]; z=self._z(p.z,d.z_mode,d.z_scale,d.z_offset); physical_z=self._z(p.z,d.z_mode,1.0,0.0); pts=np.c_[x,y,z]; physical_pts=np.c_[x,y,physical_z]; finite=np.isfinite(pts).all(axis=1) & np.isfinite(physical_pts).all(axis=1); pts=pts[finite]; physical_pts=physical_pts[finite]; scalars=p.color_values[finite]
                 if pts.shape[0]<1:continue
                 if d.kind=="surface":
-                    cloud=pv.PolyData(pts); cloud["values"]=scalars
-                    if pts.shape[0]>=3:
+                    triangulation = self._triangulation_input(pts, scalars, physical_pts)
+                    if d.style != "Points" and triangulation is not None:
+                        surface_pts, surface_scalars, surface_physical_pts = triangulation
+                        cloud=pv.PolyData(surface_pts); cloud["values"]=surface_scalars
                         mesh=cloud.delaunay_2d()
+                        if mesh.n_cells < 1:
+                            self._add_surface_points(surface_pts, surface_scalars, d)
+                            continue
+                        scalar_name = "values"
+                        scalar_title = d.color_field or d.z_field
+                        clim = None
+                        if d.color_mode == "Slope angle (degrees)":
+                            slopes = self._triangle_slope_angles(mesh, surface_physical_pts)
+                            if np.isfinite(slopes).any():
+                                mesh.cell_data["Slope angle (degrees)"] = slopes
+                                scalar_name = "Slope angle (degrees)"
+                                scalar_title = "Slope angle (degrees)"
+                                clim = (0.0, 90.0)
                         self.plotter.add_mesh(
-                            mesh, scalars="values", cmap=d.cmap, opacity=d.opacity,
+                            mesh, scalars=scalar_name, cmap=d.cmap, opacity=d.opacity,
+                            clim=clim,
                             show_edges=d.style=="Surface + edges",
-                            point_size=4 if d.style!="Points" else 7,
+                            point_size=4,
                             render_points_as_spheres=False, label=d.name,
                             scalar_bar_args={
-                                "title": d.color_field or d.z_field,
+                                "title": scalar_title,
                                 "color": "white",
                                 "title_font_size": 12,
                                 "label_font_size": 10,
                                 "fmt": "%.4g",
                             },
                         )
-                    else:self.plotter.add_points(cloud,color=d.color,point_size=d.size,label=d.name)
+                    else:
+                        self._add_surface_points(pts, scalars, d)
                 elif d.kind=="point":
                     if d.style_mode == "Categorized" and d.category_field in p.metadata:
                         categories = np.asarray(p.metadata[d.category_field], dtype=object)[finite]
@@ -310,10 +447,26 @@ class Surface3DWindow(QtWidgets.QMainWindow):
                     pdata=pv.PolyData(starts); pdata["vectors"]=vectors; glyph=pdata.glyph(orient="vectors",scale=False,factor=1.0,geom=pv.Arrow(tip_length=.25,tip_radius=.08,shaft_radius=.025)); self.plotter.add_mesh(glyph,color=d.color,opacity=d.opacity,label=d.name)
             except Exception as exc:
                 self.statusBar().showMessage(f"{d.name}: {exc}",6000)
-        if self.grid_check.isChecked(): self.plotter.show_grid(xlabel=f"Local Easting + {self.origin[0]:.2f}",ylabel=f"Local Northing + {self.origin[1]:.2f}",zlabel="Z")
+        if self.grid_check.isChecked(): self.plotter.show_grid(xtitle=f"Local Easting + {self.origin[0]:.2f}",ytitle=f"Local Northing + {self.origin[1]:.2f}",ztitle="Z")
         else:self.plotter.show_axes()
-        try:self.plotter.add_legend(bcolor="#20242a")
-        except Exception:pass
+        # PyVista's automatic legend derives 2D faces from mesh/glyph actors.
+        # Degenerate point or glyph bounds can make that path create an invalid
+        # vtkPlaneSource ("Bad plane coordinate system").  The Scene tree is
+        # the authoritative object legend; this text summary is plane-free.
+        visible_names = list(dict.fromkeys(d.name for d in visible))
+        if visible_names:
+            summary = "Visible scene objects:\n" + "\n".join(
+                f"• {name}" for name in visible_names[:12]
+            )
+            if len(visible_names) > 12:
+                summary += f"\n• … and {len(visible_names) - 12} more"
+            self.plotter.add_text(
+                summary,
+                position="upper_right",
+                font_size=9,
+                color="white",
+                shadow=True,
+            )
         self.plotter.reset_camera(); self.plotter.render()
 
     def _picked_point(self, point) -> None:

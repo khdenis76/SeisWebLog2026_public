@@ -361,6 +361,54 @@ class ProjectRepository:
             rows = connection.execute(sql, params).fetchall()
         return self._rows_to_layer(f"DSR {mode.replace('_', ' ').title()}", rows)
 
+    def load_combined_dsr_layer(self, coordinate_type: str) -> PointLayerData:
+        """Return deployment and recovery positions in one Primary/Secondary layer.
+
+        Points are interleaved per DSR row so ``pair`` connects only the deployment
+        and recovery coordinates belonging to the same receiver record.
+        """
+        coordinate_type = str(coordinate_type).strip().lower()
+        modes = {
+            "primary": ("primary", "recovery_primary"),
+            "secondary": ("secondary", "recovery_secondary"),
+        }
+        if coordinate_type not in modes:
+            raise ValueError(f"Unsupported combined DSR coordinate type: {coordinate_type}")
+        deployment = self.load_dsr_layer(modes[coordinate_type][0])
+        recovery = self.load_dsr_layer(modes[coordinate_type][1])
+        entries: dict[int, dict[str, tuple[PointLayerData, int]]] = {}
+        for phase, data in (("Deployment", deployment), ("Recovery", recovery)):
+            for index, source_index in enumerate(data.source_index):
+                entries.setdefault(int(source_index), {})[phase] = (data, index)
+
+        metadata_keys = set(deployment.metadata) | set(recovery.metadata)
+        x_values: list[float] = []
+        y_values: list[float] = []
+        source_values: list[int] = []
+        metadata: dict[str, list[object]] = {key: [] for key in metadata_keys}
+        metadata.update({"phase": [], "pair": []})
+        for source_index in sorted(entries):
+            for phase in ("Deployment", "Recovery"):
+                value = entries[source_index].get(phase)
+                if value is None:
+                    continue
+                data, index = value
+                x_values.append(float(data.x[index]))
+                y_values.append(float(data.y[index]))
+                source_values.append(source_index)
+                for key in metadata_keys:
+                    values = data.metadata.get(key)
+                    metadata[key].append(values[index] if values is not None else None)
+                metadata["phase"].append(phase)
+                metadata["pair"].append(source_index)
+        return PointLayerData(
+            f"DSR {coordinate_type.title()}",
+            np.asarray(x_values, dtype=float),
+            np.asarray(y_values, dtype=float),
+            np.asarray(source_values, dtype=np.int64),
+            {key: np.asarray(values, dtype=object) for key, values in metadata.items()},
+        )
+
     def load_daily_dsr_production(
         self, selected_date: str, mode: str
     ) -> list[PointLayerData]:
