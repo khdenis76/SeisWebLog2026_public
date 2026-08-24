@@ -135,6 +135,11 @@ class EOLReportGeneratorV2:
 
         tex_path_file = line_tmp_dir / f"EOL_Line_{line}.tex"
 
+        # Never let a PDF left by an earlier run hide a failed/empty build.
+        stale_pdf = tex_path_file.with_suffix(".pdf")
+        if stale_pdf.exists():
+            stale_pdf.unlink()
+
         tex_content = self.render_report_tex(line=line)
         tex_path_file.write_text(tex_content, encoding="utf-8")
 
@@ -184,14 +189,63 @@ class EOLReportGeneratorV2:
         layout = self.options.get("report_sections")
 
         if isinstance(layout, list) and layout:
-            return layout
+            return self._normalize_layout(layout)
 
         layout = self.options.get("layout")
 
         if isinstance(layout, list) and layout:
-            return layout
+            return self._normalize_layout(layout)
+
+        # Backward compatibility with the existing EOL modal/views.py.
+        # It sends a list of section keys in options["sections"].
+        layout = self.options.get("sections")
+        if isinstance(layout, list) and layout:
+            return self._normalize_layout(layout)
 
         return []
+
+    @staticmethod
+    def _normalize_layout(layout) -> list[dict]:
+        """Accept V2 dictionaries and legacy section-name strings."""
+        titles = {
+            "front_page": "Front Page",
+            "table_of_contents": "Table of Contents",
+            "line_summary": "Line Summary",
+            "project_map": "Project Map",
+            "dsr_info_table": "DSR Information",
+            "deployment": "Deployment",
+            "deployment_summary_statistic": "Deployment Summary Statistics",
+            "deployment_primary_secondary": "Deployment Primary vs Secondary",
+            "deployment_preplot": "Deployment vs Preplot",
+            "deployment_single_node_map": "Deployment Single Node Maps",
+            "deployment_water_depth": "Deployment Water Depth",
+            "bbox_qc": "Black Box QC",
+            "bbox_qc_gnss": "Black Box GNSS QC",
+            "bbox_qc_motion": "Black Box Motion QC",
+            "deployment_vs_bbox": "Deployment vs Black Box",
+            "source": "Source",
+            "source_summary": "Source Summary",
+            "recovery": "Recovery",
+            "recovery_qc_package": "Recovery QC Package",
+            "final_comparison": "Final Comparison",
+            "comments": "Comments",
+        }
+        normalized = []
+        for item in layout:
+            if isinstance(item, dict):
+                normalized.append(item)
+                continue
+            key = str(item or "").strip()
+            if not key:
+                continue
+            normalized.append({
+                "key": key,
+                "section_title": titles.get(key, key.replace("_", " ").title()),
+                "content_type": "text",
+                "content": "",
+                "numbering": key not in {"front_page", "table_of_contents"},
+            })
+        return normalized
 
     def build_sections(self, line: str):
         result = []
@@ -330,6 +384,11 @@ class EOLReportGeneratorV2:
     # ---------------------------------------------------------
     def render_report_tex(self, line: str) -> str:
         sections = self.build_sections(line)
+        if not sections:
+            raise RuntimeError(
+                "No report content was produced. Select at least one section "
+                "or provide report_sections/layout content."
+            )
         body = "\n".join(section.get("latex", "") for section in sections)
 
         project_name = tex_escape(self.get_project_name())
@@ -506,6 +565,13 @@ class EOLReportGeneratorV2:
                     f"Log file: {log_file}\n\n"
                     f"{err_text}"
                 )
+
+        if not tex_path_file.with_suffix(".pdf").exists():
+            raise RuntimeError(
+                f"LaTeX completed but created no PDF for {tex_name}. "
+                "The document may contain no printable pages. Check the log: "
+                f"{tex_path_file.with_suffix('.log')}"
+            )
 
     def _copy_latex_outputs(self, tex_path_file: Path, final_dir: Path) -> dict:
         final_dir.mkdir(parents=True, exist_ok=True)

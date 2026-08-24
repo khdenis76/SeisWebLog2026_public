@@ -192,6 +192,11 @@ def _build_generator_options(project, payload):
         "lines": lines,
         "sections": sections,
 
+        # The modular generator prefers report_sections. Keep "sections" for
+        # existing section-selection logic and pass through rich V2 layouts
+        # when a newer client supplies them.
+        "report_sections": payload.get("report_sections") or sections,
+
         "prepared_by": str(payload.get("prepared_by") or "").strip(),
         "comments_text": str(payload.get("comments_text") or "").strip(),
 

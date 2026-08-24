@@ -51,6 +51,7 @@ urlpatterns = [
     path("qc/recdb/matrix/<str:mode>/",recdb_offset_matrix_json,name="recdb_offset_matrix_json"),
     path("qc/recdb/rov-histograms/",recdb_rov_histograms_json,name="recdb_rov_histograms_json"),
     path("reports/node-position-comparison/selected/pdf/",export_selected_node_position_comparison_pdfs,name="export_selected_node_position_comparison_pdfs",),
+    path("reports/node-position-comparison/selected/html/",export_selected_node_position_comparison_html,name="export_selected_node_position_comparison_html",),
     path("dsr/polar-histograms/",load_dsr_polar_histograms,name="load_dsr_polar_histograms",),
     path("recdb/polar-histograms/",load_recdb_polar_histograms,name="load_recdb_polar_histograms",),
     path("recdb/polar-histograms/by-rov/",load_recdb_polar_histograms_by_rov,name="load_recdb_polar_histograms_by_rov",),

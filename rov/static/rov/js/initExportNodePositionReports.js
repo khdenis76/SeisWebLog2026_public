@@ -3,7 +3,13 @@ export function initExportNodePositionReports() {
 
     if (!btn) return;
 
-    btn.addEventListener("click", async function () {
+    const options = document.querySelectorAll(".position-report-option");
+    if (!options.length) return;
+
+    options.forEach(option => option.addEventListener("click", async function (event) {
+        event.preventDefault();
+        const format = option.dataset.format;
+        const url = format === "html" ? btn.dataset.htmlUrl : btn.dataset.pdfUrl;
 
         const selectedLines = Array.from(
             document.querySelectorAll(".dsr-line-checkbox:checked")
@@ -36,7 +42,7 @@ export function initExportNodePositionReports() {
         try {
 
             const response = await fetch(
-                btn.dataset.url,
+                url,
                 {
                     method: "POST",
                     body: formData,
@@ -55,7 +61,7 @@ export function initExportNodePositionReports() {
             }
 
             let msg =
-                `Export complete\n\n` +
+                `${format === "html" ? "Interactive HTML" : "PDF"} export complete\n\n` +
                 `Saved:\n${data.export_dir}\n\n` +
                 `Exported: ${data.exported_count}\n` +
                 `Failed: ${data.failed_count}`;
@@ -92,7 +98,7 @@ export function initExportNodePositionReports() {
 
         }
 
-    });
+    }));
 
     console.log(
         "[SWL] initExportNodePositionReports initialized"

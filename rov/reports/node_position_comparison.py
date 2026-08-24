@@ -1,4 +1,5 @@
 import math
+import importlib.util
 import shutil
 import sqlite3
 import subprocess
@@ -346,6 +347,7 @@ class NodePositionComparisonReport:
 
         logo_file = self._prepare_tgs_logo(build_dir)
         self._make_charts(df, charts_dir, line)
+        bbox_page_files = self._make_bbox_report_pages(line, charts_dir)
 
         tex_path = build_dir / f"{line}_Node_Position_Comparison.tex"
         pdf_path = output_dir / f"{line}_Node_Position_Comparison.pdf"
@@ -356,6 +358,7 @@ class NodePositionComparisonReport:
                 df=df,
                 charts_dir=charts_dir,
                 logo_file=logo_file,
+                bbox_page_files=bbox_page_files,
             ),
             encoding="utf-8",
         )
@@ -368,6 +371,52 @@ class NodePositionComparisonReport:
 
         shutil.copy2(built_pdf, pdf_path)
         return pdf_path
+
+    def _make_bbox_report_pages(self, line, charts_dir):
+        """Render GNSS and combined motion QC in fixed 24-hour pages."""
+        module_path = Path(__file__).resolve().with_name("dsr_line_graphics_matplotlib.py")
+        if not module_path.is_file():
+            print(f"[NodeQC] BlackBox plots skipped: module not found: {module_path}")
+            return []
+
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "node_report_dsr_line_graphics_matplotlib", module_path
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            graphics = module.DSRLineGraphicsMatplotlib(self.db_path)
+
+            bbox_dir = Path(charts_dir) / "bbox"
+            bbox_dir.mkdir(parents=True, exist_ok=True)
+            result = graphics.plot_bbox_gnss_and_motion_qc_for_line_paged(
+                line=line,
+                hours_per_page=24,
+                pad_minutes=0,
+                save_dir=str(bbox_dir),
+                gnss_file_prefix=f"{line}_bbox_gnss_24h",
+                motion_file_prefix=f"{line}_bbox_motion_24h",
+                position_difference_file_prefix=f"{line}_bbox_position_difference_24h",
+                mru_difference_file_prefix=f"{line}_bbox_mru_difference_24h",
+                ext="png",
+                dpi=180,
+                figsize=(18, 10),
+                is_show=False,
+                close=True,
+                bb_stride=20,
+                use_multiprocess=False,
+            )
+            page_paths = (
+                result.get("gnss_pages", [])
+                + result.get("motion_pages", [])
+                + result.get("position_difference_pages", [])
+                + result.get("mru_difference_pages", [])
+            )
+            return [Path(p) for p in page_paths]
+        except Exception as exc:
+            # A line can legitimately have no matching BlackBox time range.
+            print(f"[NodeQC] BlackBox plots skipped for line {line}: {exc}")
+            return []
 
     def _run_pdflatex(self, tex_path, build_dir):
         """
@@ -397,7 +446,7 @@ class NodePositionComparisonReport:
     # ------------------------------------------------------------------
     # LATEX
     # ------------------------------------------------------------------
-    def _build_tex(self, line, df, charts_dir, logo_file):
+    def _build_tex(self, line, df, charts_dir, logo_file, bbox_page_files=None):
         project_name = (
             getattr(self.project, "name", "SeisWebLog Project")
             if self.project
@@ -425,6 +474,9 @@ class NodePositionComparisonReport:
         )
         chart_il_xl_file = self._tex_path(
             charts_dir / "node_position_il_xl_radial_page.png"
+        )
+        chart_recdb_cross_file = self._tex_path(
+            charts_dir / "node_position_recdb_cross_comparison_page.png"
         )
         polar_group_2_file = self._tex_path(charts_dir / "node_position_polar_group_2_page.png")
         polar_group_3_file = self._tex_path(charts_dir / "node_position_polar_group_3_page.png")
@@ -646,7 +698,7 @@ Generated On & : & @@GENERATED@@ \\
 \swlreportpage
 
 \begin{center}
-{\Large\bfseries\textcolor{swlnavy}{STATION VS $\Delta X$ / $\Delta Y$ / DEPLOYMENT Z}}
+{\Large\bfseries\textcolor{swlnavy}{PREPLOT COMPARISON: $\Delta X$ / $\Delta Y$ / WATER DEPTH}}
 \end{center}
 
 \vspace{1mm}
@@ -675,6 +727,24 @@ Generated On & : & @@GENERATED@@ \\
 \end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% REC_DB VS DEPLOYMENT / RECOVERY PAGE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\swlreportpage
+
+\begin{center}
+{\Large\bfseries\textcolor{swlnavy}{REC\_DB VS DEPLOYMENT / RECOVERY OFFSETS}}
+\end{center}
+
+\vspace{1mm}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=147mm,keepaspectratio]{@@CHART_RECDB_CROSS@@}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% CDF AND BOXPLOTS PAGES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 @@CDF_PAGES@@
@@ -700,6 +770,11 @@ Generated On & : & @@GENERATED@@ \\
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 @@POLAR_PAGES@@
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% BLACKBOX GNSS AND MOTION QC - 24 HOURS PER PAGE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+@@BBOX_PAGES@@
+
 \end{document}
 """
 
@@ -724,6 +799,7 @@ Generated On & : & @@GENERATED@@ \\
             "@@CHART_XY_CROSS@@": chart_xy_cross_file,
             "@@CHART_OFFSETS@@": chart_offsets_file,
             "@@CHART_IL_XL@@": chart_il_xl_file,
+            "@@CHART_RECDB_CROSS@@": chart_recdb_cross_file,
             "@@POLAR_PAGES@@": "\n".join(
                 r"""\newpage
 \swlreportpage
@@ -732,6 +808,15 @@ Generated On & : & @@GENERATED@@ \\
 \includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{%s}
 \end{figure}""" % chart_file
                 for chart_file in (polar_group_2_file, polar_group_3_file, polar_stats_file)
+            ),
+            "@@BBOX_PAGES@@": "\n".join(
+                r"""\newpage
+\swlreportpage
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.985\linewidth,height=151mm,keepaspectratio]{%s}
+\end{figure}""" % self._tex_path(Path(chart_file))
+                for chart_file in (bbox_page_files or [])
             ),
             "@@CDF_PAGES@@": "\n".join(
                 r"""\newpage
@@ -1035,6 +1120,7 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         self._make_xy_offsets_analysis_pages(df=df, charts_dir=charts_dir, max_radial_offset=float(max_radial_offset))
         self._make_chart_page_offsets(df, charts_dir)
         self._make_chart_page_il_xl_radial(df, charts_dir)
+        self._make_chart_page_recdb_cross_comparisons(df, charts_dir)
         self._make_cdf_boxplots_page(df, charts_dir, float(max_radial_offset))
         self._make_heatmap_depth_profile_page(df, charts_dir, float(max_radial_offset))
         self._make_directional_analysis_page(df, charts_dir)
@@ -1169,12 +1255,12 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         # donuts
         vals=[("DEPLOYMENT",int(info.get('DeployedCount') or len(df)),int(info.get('PlannedPoints') or len(df))), ("RECOVERY",int(info.get('RetrievedCount') or 0),int(info.get('PlannedPoints') or len(df))), ("PROCESSED",int(info.get('ProcessedCount') or df['fb_x'].notna().sum()),int(info.get('PlannedPoints') or len(df)))]
         # Center all three donut charts horizontally and move the group lower.
-        donut_w = 0.15
+        donut_w = 0.14
         donut_gap = 0.035
         donuts_total_w = len(vals) * donut_w + (len(vals) - 1) * donut_gap
         donuts_x0 = (1.0 - donuts_total_w) / 2.0
         for i,(name,count,total) in enumerate(vals):
-            a=fig.add_axes([donuts_x0+i*(donut_w+donut_gap),.035,donut_w,.22]); a.axis('equal'); pct=count/total if total else 0; a.pie([pct,max(0,1-pct)],startangle=90,counterclock=False,colors=['#2ca02c','#e5e9ee'],wedgeprops=dict(width=.22,edgecolor='white')); a.text(0,0,f"{pct*100:.1f}%",ha='center',va='center',fontsize=11,fontweight='bold'); a.set_title(f"{name}\n{count} / {total}",fontsize=8,fontweight='bold'); a.axis('off')
+            a=fig.add_axes([donuts_x0+i*(donut_w+donut_gap),.005,donut_w,.18]); a.axis('equal'); pct=count/total if total else 0; a.pie([pct,max(0,1-pct)],startangle=90,counterclock=False,colors=['#2ca02c','#e5e9ee'],wedgeprops=dict(width=.22,edgecolor='white')); a.text(0,0,f"{pct*100:.1f}%",ha='center',va='center',fontsize=11,fontweight='bold'); a.set_title(f"{name}\n{count} / {total}",fontsize=8,fontweight='bold',pad=2); a.axis('off')
         fig.savefig(charts_dir / "node_position_line_information_page.png",dpi=180,bbox_inches='tight'); plt.close(fig)
 
     def _make_qc_dashboard_page(self, df, charts_dir, line, max_radial_offset):
@@ -1604,7 +1690,7 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         Page contains:
         - Station vs ΔX
         - Station vs ΔY
-        - Station vs Deployment Z from DSR.PrimaryElevation
+        - Deployment, Recovery, and REC_DB water depth profiles
 
         X axis uses sequential node position, but labels show real Station numbers.
         """
@@ -1618,8 +1704,8 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         self._draw_delta_station(
             ax_dx,
             df,
-            ["dep_pp_dx", "rec_pp_dx", "dep_rec_dx"],
-            ["Deployment vs Preplot", "REC_DB vs Preplot", "Deployment vs REC_DB"],
+            ["dep_pp_dx", "rcv_pp_dx", "rec_pp_dx"],
+            ["Deployment vs Preplot", "Recovery vs Preplot", "REC_DB vs Preplot"],
             "STATION vs ΔX",
             "ΔX (m)",
         )
@@ -1627,65 +1713,24 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         self._draw_delta_station(
             ax_dy,
             df,
-            ["dep_pp_dy", "rec_pp_dy", "dep_rec_dy"],
-            ["Deployment vs Preplot", "REC_DB vs Preplot", "Deployment vs REC_DB"],
+            ["dep_pp_dy", "rcv_pp_dy", "rec_pp_dy"],
+            ["Deployment vs Preplot", "Recovery vs Preplot", "REC_DB vs Preplot"],
             "STATION vs ΔY",
             "ΔY (m)",
         )
 
+        depth_df = df.copy()
+        depth_df["deployment_depth"] = np.abs(pd.to_numeric(depth_df["dep_z"], errors="coerce"))
+        depth_df["recovery_depth"] = np.abs(pd.to_numeric(depth_df["rcv_z"], errors="coerce"))
+        depth_df["recdb_depth"] = np.abs(pd.to_numeric(depth_df["fb_z"], errors="coerce"))
         self._draw_delta_station(
             ax_z,
-            df,
-            ["dep_z"],
-            ["Deployment Z (PrimaryElevation)"],
-            "STATION vs DEPLOYMENT Z",
-            "Z (m)",
+            depth_df,
+            ["deployment_depth", "recovery_depth", "recdb_depth"],
+            ["Deployment", "Recovery", "REC_DB"],
+            "STATION vs WATER DEPTH",
+            "Water depth (m)",
         )
-
-        plot_df = df.copy().reset_index(drop=True)
-        if not plot_df.empty and "dep_z" in plot_df.columns:
-            x = np.arange(1, len(plot_df) + 1, dtype=float)
-            z = plot_df["dep_z"]
-
-            if z.notna().any():
-                max_idx = int(z.idxmax())
-                min_idx = int(z.idxmin())
-
-                ax_z.scatter(
-                    [x[max_idx]],
-                    [plot_df.loc[max_idx, "dep_z"]],
-                    s=60,
-                    marker="^",
-                    color="red",
-                    zorder=6,
-                    label="Max Z",
-                )
-                ax_z.scatter(
-                    [x[min_idx]],
-                    [plot_df.loc[min_idx, "dep_z"]],
-                    s=60,
-                    marker="v",
-                    color="blue",
-                    zorder=6,
-                    label="Min Z",
-                )
-                ax_z.text(
-                    x[max_idx],
-                    plot_df.loc[max_idx, "dep_z"],
-                    f" {self._fmt_int(plot_df.loc[max_idx, 'Station'])}",
-                    fontsize=6,
-                    color="red",
-                    fontweight="bold",
-                )
-                ax_z.text(
-                    x[min_idx],
-                    plot_df.loc[min_idx, "dep_z"],
-                    f" {self._fmt_int(plot_df.loc[min_idx, 'Station'])}",
-                    fontsize=6,
-                    color="blue",
-                    fontweight="bold",
-                )
-                ax_z.legend(fontsize=6, loc="upper right")
 
         fig.subplots_adjust(
             left=0.055,
@@ -1704,11 +1749,36 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         ax_il = fig.add_subplot(gs[0, 0])
         ax_xl = fig.add_subplot(gs[1, 0])
         ax_radial = fig.add_subplot(gs[2, 0])
-        self._draw_delta_station(ax_il, df, ["dep_il", "fb_pp_il"], ["Deployment vs Preplot", "REC_DB vs Preplot"], "STATION vs IN-LINE OFFSET", "In-Line Offset (m)")
-        self._draw_delta_station(ax_xl, df, ["dep_xl", "fb_pp_xl"], ["Deployment vs Preplot", "REC_DB vs Preplot"], "STATION vs X-LINE OFFSET", "X-Line Offset (m)")
-        self._draw_delta_station(ax_radial, df, ["dep_pp_dr", "rec_pp_dr"], ["Deployment vs Preplot", "REC_DB vs Preplot"], "STATION vs RADIAL OFFSET", "Radial Offset (m)")
+        preplot_labels = ["Deployment vs Preplot", "Recovery vs Preplot", "REC_DB vs Preplot"]
+        self._draw_delta_station(ax_il, df, ["dep_pp_il", "rcv_pp_il", "rec_pp_il"], preplot_labels, "STATION vs IN-LINE OFFSET", "In-Line Offset (m)")
+        self._draw_delta_station(ax_xl, df, ["dep_pp_xl", "rcv_pp_xl", "rec_pp_xl"], preplot_labels, "STATION vs X-LINE OFFSET", "X-Line Offset (m)")
+        self._draw_delta_station(ax_radial, df, ["dep_pp_dr", "rcv_pp_dr", "rec_pp_dr"], preplot_labels, "STATION vs RADIAL OFFSET", "Radial Offset (m)")
         fig.subplots_adjust(left=0.055, right=0.985, top=0.93, bottom=0.13, hspace=0.58)
         fig.savefig(charts_dir / "node_position_il_xl_radial_page.png", dpi=180)
+        plt.close(fig)
+
+    def _make_chart_page_recdb_cross_comparisons(self, df, charts_dir):
+        """REC_DB vs Deployment/Recovery deltas and directional offsets."""
+        fig = plt.figure(figsize=(18.0, 10.6))
+        gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 1.05], hspace=0.62, wspace=0.20)
+        ax_dx = fig.add_subplot(gs[0, 0])
+        ax_dy = fig.add_subplot(gs[0, 1])
+        ax_il = fig.add_subplot(gs[1, 0])
+        ax_xl = fig.add_subplot(gs[1, 1])
+        ax_radial = fig.add_subplot(gs[2, :])
+        labels = ["REC_DB vs Deployment", "REC_DB vs Recovery"]
+        self._draw_delta_station(ax_dx, df, ["fb_dep_dx", "fb_rcv_dx"], labels,
+                                 "STATION vs DELTA X", "Delta X (m)")
+        self._draw_delta_station(ax_dy, df, ["fb_dep_dy", "fb_rcv_dy"], labels,
+                                 "STATION vs DELTA Y", "Delta Y (m)")
+        self._draw_delta_station(ax_il, df, ["fb_dep_il", "fb_rcv_il"], labels,
+                                 "STATION vs IN-LINE OFFSET", "In-Line Offset (m)")
+        self._draw_delta_station(ax_xl, df, ["fb_dep_xl", "fb_rcv_xl"], labels,
+                                 "STATION vs X-LINE OFFSET", "X-Line Offset (m)")
+        self._draw_delta_station(ax_radial, df, ["fb_dep_dr", "fb_rcv_dr"], labels,
+                                 "STATION vs RADIAL OFFSET", "Radial Offset (m)")
+        fig.subplots_adjust(left=0.055, right=0.985, top=0.94, bottom=0.13)
+        fig.savefig(charts_dir / "node_position_recdb_cross_comparison_page.png", dpi=180)
         plt.close(fig)
 
     def _make_cdf_boxplots_page(self, df, charts_dir, max_radial_offset):
@@ -1763,6 +1833,13 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
                 x = np.sort(values)
                 y = np.arange(1, len(x) + 1) / len(x) * 100.0
                 ax_cdf.plot(x, y, linewidth=1.8, color=color, linestyle=linestyle, label=label)
+        # Horizontal percentile guides make the P50 and P95 intersections
+        # immediately visible for every CDF curve without adding many vertical
+        # lines to the same chart.
+        ax_cdf.axhline(50, color="#4d4d4d", linestyle="--", linewidth=1.15,
+                       label="P50 (50%)", zorder=1)
+        ax_cdf.axhline(95, color="#111111", linestyle=(0, (6, 3)), linewidth=1.25,
+                       label="P95 (95%)", zorder=1)
         ax_cdf.axvline(max_radial_offset, linestyle="--", linewidth=1.0, label=f"QC limit ({max_radial_offset:.1f} m)")
         ax_cdf.set_title("CUMULATIVE DISTRIBUTION FUNCTION (CDF)", fontsize=11, fontweight="bold")
         ax_cdf.set_xlabel("Absolute offset (m)")
@@ -1914,10 +1991,24 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
             ("fb_dep", "REC_DB vs Deployment", "#9467bd"),
             ("fb_rcv", "REC_DB vs Recovery", "#d62728"),
         ]
+        # One common percentage scale for all five polar graphs on this line.
+        bins_deg = np.arange(0, 361, 15)
+        shared_percent_max = 1.0
+        for prefix, _title, _color in specs:
+            azimuth = df[f"{prefix}_az"].dropna().to_numpy(float)
+            if azimuth.size:
+                sector_counts, _ = np.histogram(azimuth, bins=bins_deg)
+                sector_percent = sector_counts.astype(float) * 100.0 / azimuth.size
+                shared_percent_max = max(shared_percent_max, float(sector_percent.max()))
+        # Round the common upper limit upward for an easy-to-read color bar.
+        shared_percent_max = math.ceil(shared_percent_max / 5.0) * 5.0
         for prefix, title, color in specs:
-            self._make_directional_analysis_single(df, charts_dir, prefix, title, color)
+            self._make_directional_analysis_single(
+                df, charts_dir, prefix, title, color, shared_percent_max
+            )
 
-    def _make_directional_analysis_single(self, df, charts_dir, prefix, comparison_title, color):
+    def _make_directional_analysis_single(self, df, charts_dir, prefix, comparison_title,
+                                          color, shared_percent_max):
         clean = df[[f"{prefix}_az", f"{prefix}_dr"]].dropna().copy()
         az_deg = clean[f"{prefix}_az"].to_numpy(float)
         radial = clean[f"{prefix}_dr"].to_numpy(float)
@@ -1932,6 +2023,12 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
 
         bins_deg = np.arange(0, 361, 15)
         counts, _ = np.histogram(az_deg, bins=bins_deg)
+        percentages = counts.astype(float) * 100.0 / len(clean) if len(clean) else counts.astype(float)
+        avg_offsets = np.zeros_like(counts, dtype=float)
+        for i, (lo, hi) in enumerate(zip(bins_deg[:-1], bins_deg[1:])):
+            mask = (az_deg >= lo) & (az_deg < hi)
+            if np.any(mask):
+                avg_offsets[i] = float(np.nanmean(radial[mask]))
         centers = np.deg2rad((bins_deg[:-1] + bins_deg[1:]) / 2.0)
         widths = np.deg2rad(np.diff(bins_deg))
 
@@ -1940,12 +2037,29 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         fig.suptitle(f"DIRECTIONAL ANALYSIS - {comparison_title}", fontsize=20, fontweight="bold", y=0.98, color=color)
 
         ax = fig.add_subplot(gs[0, 0], projection="polar")
-        ax.bar(centers, counts, width=widths, bottom=0.0, alpha=0.78, color=color, edgecolor="black", linewidth=0.35)
+        # Radius represents average radial offset; color represents the share
+        # of valid line nodes falling within each 15-degree sector.
+        count_cmap = plt.get_cmap("YlOrRd")
+        count_norm = plt.Normalize(vmin=0, vmax=max(float(shared_percent_max), 1.0))
+        sector_colors = count_cmap(count_norm(percentages))
+        ax.bar(centers, avg_offsets, width=widths, bottom=0.0, alpha=0.90,
+               color=sector_colors, edgecolor="black", linewidth=0.35)
         ax.set_theta_zero_location("N"); ax.set_theta_direction(-1)
-        ax.set_title(f"ROSE DIAGRAM - {comparison_title}", fontsize=11, fontweight="bold", pad=18, color=color)
+        ax.set_title(f"ROSE DIAGRAM - {comparison_title}", fontsize=11, fontweight="bold", pad=2, color=color)
+        ax.set_ylabel("Avg. radial offset (m)", fontsize=9, fontweight="bold", labelpad=30)
         ax.grid(True, linewidth=0.35, alpha=0.55)
-        ax.plot([math.radians(mean_dir), math.radians(mean_dir)], [0, max(counts.max(), 1)], linewidth=2.2, linestyle="--", color=color, label=f"Mean {mean_dir:.1f}°")
+        ax.plot([math.radians(mean_dir), math.radians(mean_dir)],
+                [0, max(float(avg_offsets.max()), 0.1)], linewidth=2.2,
+                linestyle="--", color=color, label=f"Mean {mean_dir:.1f}°")
         ax.legend(loc="lower left", bbox_to_anchor=(-0.12, -0.10), fontsize=8)
+        count_map = plt.cm.ScalarMappable(norm=count_norm, cmap=count_cmap)
+        count_map.set_array([])
+        cbar = fig.colorbar(count_map, ax=ax, orientation="vertical", location="right",
+                            fraction=0.048, pad=0.10)
+        cbar.set_label("Line nodes in sector (%)", fontsize=9, fontweight="bold")
+        cbar.set_ticks(np.linspace(0, shared_percent_max, 6))
+        cbar.ax.set_yticklabels([f"{x:.0f}%" for x in np.linspace(0, shared_percent_max, 6)])
+        cbar.ax.tick_params(labelsize=8)
 
         ax_tbl = fig.add_subplot(gs[0, 1]); ax_tbl.axis("off")
         stats_rows = [
@@ -1966,21 +2080,30 @@ Primary E95 / N95: @@E95@@ / @@N95@@ m \\
         sec_means = []
         for lo, hi in sectors:
             mask = (az_deg >= lo) & (az_deg < hi)
+            node_count = int(mask.sum())
+            node_percent = node_count * 100.0 / len(clean) if len(clean) else 0.0
             m = float(np.nanmean(radial[mask])) if np.any(mask) else float("nan")
             sec_means.append(m)
-            sec_rows.append([f"{lo}–{hi}", "" if not np.isfinite(m) else f"{m:.2f}"])
-        sec = ax_tbl.table(cellText=sec_rows, colLabels=["Sector (°)", "Avg radial (m)"], cellLoc="center", colLoc="center", bbox=[0.02, 0.02, 0.96, 0.48])
-        sec.auto_set_font_size(False); sec.set_fontsize(9)
+            sec_rows.append([f"{lo}-{hi}", str(node_count), f"{node_percent:.1f}%",
+                             "" if not np.isfinite(m) else f"{m:.2f}"])
+        sec = ax_tbl.table(cellText=sec_rows,
+                           colLabels=["Sector (°)", "Nodes", "Line nodes (%)", "Avg radial (m)"],
+                           colWidths=[0.22, 0.18, 0.28, 0.32], cellLoc="center", colLoc="center",
+                           bbox=[0.02, 0.02, 0.96, 0.48])
+        sec.auto_set_font_size(False); sec.set_fontsize(8.3)
         for (r, c), cell in sec.get_celld().items():
             cell.set_linewidth(0.5)
             if r == 0:
                 cell.set_facecolor(color); cell.set_text_props(weight="bold", color="white")
 
-        best_i = int(np.nanargmax(sec_means)) if any(np.isfinite(sec_means)) else 0
-        lo, hi = sectors[best_i]
-        directions = ["NNE", "ENE", "ESE", "SSE", "SSW", "WSW", "WNW", "NNW"]
+        best_i = int(np.argmax(counts)) if len(counts) else 0
+        lo, hi = int(bins_deg[best_i]), int(bins_deg[best_i + 1])
+        best_count = int(counts[best_i]) if len(counts) else 0
+        best_percent = float(percentages[best_i]) if len(percentages) else 0.0
         ax_note = fig.add_subplot(gs[1, :]); ax_note.axis("off")
-        ax_note.text(0.03, 0.5, f"Dominant radial-offset sector: {lo}°–{hi}° ({directions[best_i]} direction).", fontsize=13, fontweight="bold", color=color, va="center")
+        ax_note.text(0.03, 0.5,
+                     f"Most populated 15° sector: {lo}°-{hi}° - {best_percent:.1f}% ({best_count} nodes).",
+                     fontsize=13, fontweight="bold", color=color, va="center")
         ax_note.add_patch(Rectangle((0.01, 0.12), 0.98, 0.75, fill=False, edgecolor=color, linewidth=1.2, transform=ax_note.transAxes, clip_on=False))
 
         fig.subplots_adjust(left=0.06, right=0.95, top=0.90, bottom=0.08)

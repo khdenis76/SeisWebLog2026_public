@@ -72,16 +72,22 @@
                            <i class="fa-solid fa-file-pdf me-2"></i>
                            Generate EOL Report
                        </button>
-                       <button
-                           type="button"
-                           id="btn-export-node-position-reports"
-                           class="btn btn-outline-danger"
-                           data-url="{% url 'export_selected_node_position_comparison_pdfs' %}">
-
-                           <i class="fa-solid fa-file-pdf"></i>
-                           Export Selected Node Position Reports
-
-                       </button>
+                       <div class="btn-group">
+                           <button type="button"
+                                   id="btn-export-node-position-reports"
+                                   class="btn btn-outline-danger dropdown-toggle"
+                                   data-bs-toggle="dropdown"
+                                   data-pdf-url="{% url 'export_selected_node_position_comparison_pdfs' %}"
+                                   data-html-url="{% url 'export_selected_node_position_comparison_html' %}"
+                                   aria-expanded="false">
+                               <i class="fa-solid fa-chart-line me-1"></i>
+                               Position Report
+                           </button>
+                           <ul class="dropdown-menu">
+                               <li><a class="dropdown-item position-report-option" data-format="pdf" href="#"><i class="fa-solid fa-file-pdf me-2 text-danger"></i>PDF</a></li>
+                               <li><a class="dropdown-item position-report-option" data-format="html" href="#"><i class="fa-solid fa-code me-2 text-primary"></i>Interactive HTML</a></li>
+                           </ul>
+                       </div>
                        <div class="btn-group float-end" role="group">
 
                              <button type="button"

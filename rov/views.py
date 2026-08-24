@@ -37,6 +37,7 @@ from django.core.cache import cache
 from utils.decorators import log_action
 from baseproject.utils.project_template_db import ProjectTemplateDB
 from rov.reports.node_position_comparison import NodePositionComparisonReport
+from rov.reports.node_position_comparison_html import InteractiveNodePositionComparisonReport
 from utils.audit import audit_event
 
 
@@ -3144,6 +3145,46 @@ def export_selected_node_position_comparison_pdfs(request):
         "failed_count": len(failed),
         "exported": exported,
         "failed": failed,
+    })
+
+
+@login_required
+@log_action("export selected interactive node position reports", object_type="ROV")
+def export_selected_node_position_comparison_html(request):
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
+    project = user_settings.active_project
+    if not project:
+        return JsonResponse({"ok": False, "error": "No active project selected."}, status=400)
+    if not project.can_view(request.user):
+        raise PermissionDenied("You are not a member of this project.")
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST request required."}, status=405)
+
+    cleaned_lines = []
+    for line in request.POST.getlist("lines[]") or request.POST.getlist("lines"):
+        try:
+            cleaned_lines.append(int(line))
+        except (TypeError, ValueError):
+            continue
+    cleaned_lines = sorted(set(cleaned_lines))
+    if not cleaned_lines:
+        return JsonResponse({"ok": False, "error": "No lines selected."}, status=400)
+
+    output_dir = project.export_dir / "node_position_comparison" / "interactive_html"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report = InteractiveNodePositionComparisonReport(project.db_path, project=project)
+    exported, failed = [], []
+    for line in cleaned_lines:
+        try:
+            html_path = report.generate_html(line=line, output_dir=output_dir)
+            exported.append({"line": line, "file": html_path.name, "path": str(html_path)})
+        except Exception as exc:
+            failed.append({"line": line, "error": str(exc)})
+
+    return JsonResponse({
+        "ok": True, "export_dir": str(output_dir),
+        "exported_count": len(exported), "failed_count": len(failed),
+        "exported": exported, "failed": failed,
     })
 @require_GET
 @login_required
