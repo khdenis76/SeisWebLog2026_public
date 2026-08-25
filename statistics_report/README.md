@@ -1,5 +1,14 @@
 # Receiver Statistics
 
+## Static PDF report
+
+The PDF export is an EOL-style, multi-page LaTeX/Matplotlib report. It includes
+whole-project completion against RPPreplot, separate deployment and recovery
+day-by-day production by ROV, cumulative progress and prediction, a daily
+production matrix and tables, all coordinate-comparison statistics, ECDF,
+histograms/KDE, bullseye, in-line/cross-line/radial series, progress mapping,
+and separate deployment/recovery polar QC pages. Node-level lists are excluded.
+
 Independent SeisWebLog Django app for DSR, REC_DB and RPPreplot statistics.
 
 The app reads the selected project's `project.sqlite3` directly. It does not

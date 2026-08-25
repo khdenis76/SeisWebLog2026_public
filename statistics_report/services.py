@@ -10,8 +10,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from bokeh.embed import components
-from bokeh.models import ColorBar, ColumnDataSource, HoverTool, LinearAxis, LinearColorMapper, Range1d, Span
-from bokeh.palettes import Category10, Turbo256
+from bokeh.layouts import column
+from bokeh.models import Button, ColorBar, ColumnDataSource, CustomJS, HoverTool, LinearAxis, LinearColorMapper, Range1d, Span
+from bokeh.palettes import Category10, RdBu11, Turbo256
 from bokeh.plotting import figure
 from bokeh.resources import INLINE
 
@@ -490,7 +491,9 @@ class ReceiverStatistics:
             "ROV": df.get(rov_column, pd.Series("All", index=df.index)) if rov_column else pd.Series("All", index=df.index),
         }).dropna(subset=["Offset"])
         if plot_df.empty:
-            return {"plotly": [], "bokeh_script": "", "bokeh_divs": {}, "bokeh_resources": ""}
+            return {"plotly": [], "polar_groups": [], "polar_statistics": [], "production_donuts": [], "histograms_selected": [],
+                    "histograms_recdb": [], "matrix_maps": [], "bokeh_script": "",
+                    "bokeh_divs": {}, "bokeh_resources": ""}
         plot_df["ROV"] = plot_df["ROV"].fillna("Unknown").astype(str)
         rovs = sorted(plot_df["ROV"].unique())
         colors = {rov: Category10[10][i % 10] for i, rov in enumerate(rovs)}
@@ -502,9 +505,9 @@ class ReceiverStatistics:
             p.toolbar.logo = None
             return p
 
-        def histogram(field, title, bin_size=.5):
-            signed = field != "Offset"
-            clipped = plot_df[(plot_df[field] >= (-10 if signed else 0)) & (plot_df[field] <= 10)]
+        def histogram(source_df, field, title, rov, color, bin_size=.5):
+            signed = field not in ("Offset", "Radial")
+            clipped = source_df[(source_df[field] >= (-10 if signed else 0)) & (source_df[field] <= 10)]
             values = clipped[field].dropna().to_numpy()
             if not len(values):
                 values = np.array([0.0])
@@ -514,30 +517,50 @@ class ReceiverStatistics:
                 edges = np.arange(lo, hi, bin_size)
             else:
                 edges = np.histogram_bin_edges(values, bins="auto")
-            p = figure(title=title + " (0.5 m bins; display range ±10 m)", x_axis_label="Offset (m)", y_axis_label="Nodes", height=350, sizing_mode="stretch_width", tools=tools)
-            for rov in rovs:
-                vals = clipped.loc[clipped.ROV == rov, field].dropna().to_numpy()
-                counts, _ = np.histogram(vals, bins=edges)
-                percent = counts / max(1, len(vals)) * 100
-                center = (edges[:-1] + edges[1:]) / 2
-                source = ColumnDataSource({"left": edges[:-1], "right": edges[1:], "center": center, "nodes": counts, "percent": percent})
-                p.quad(top="nodes", bottom=0, left="left", right="right", source=source, fill_color=colors[rov], line_color=colors[rov], alpha=.28, legend_label=f"{rov} nodes")
-                p.add_tools(HoverTool(renderers=[p.renderers[-1]], tooltips=[("ROV", rov), ("Bin", "@left{0.0} to @right{0.0} m"), ("Nodes", "@nodes"), ("Percent", "@percent{0.0}%")]))
-                if len(vals) > 3 and float(np.std(vals)) > 0:
-                    try:
-                        from scipy.stats import gaussian_kde
-                        x = np.linspace(edges[0], edges[-1], 240)
-                        kde_nodes = gaussian_kde(vals)(x) * len(vals) * bin_size
-                        p.line(x, kde_nodes, color=colors[rov], line_width=3, legend_label=f"{rov} KDE · STD {np.std(vals, ddof=1):.2f} m")
-                    except Exception:
-                        pass
+            range_note = "-10 to +10 m" if signed else "0 to 10 m"
+            p = figure(title=f"{title} — {rov} (0.5 m bins; {range_note})", x_axis_label="Offset (m)", y_axis_label="Nodes", height=350, sizing_mode="stretch_width", tools=tools)
+            vals = clipped[field].dropna().to_numpy()
+            counts, _ = np.histogram(vals, bins=edges)
+            percent = counts / max(1, len(vals)) * 100
+            center = (edges[:-1] + edges[1:]) / 2
+            source = ColumnDataSource({"left": edges[:-1], "right": edges[1:], "center": center, "nodes": counts, "percent": percent})
+            bars = p.quad(top="nodes", bottom=0, left="left", right="right", source=source, fill_color=color, line_color=color, alpha=.35, legend_label=f"{rov} nodes")
+            p.add_tools(HoverTool(renderers=[bars], tooltips=[("ROV", rov), ("Bin", "@left{0.0} to @right{0.0} m"), ("Nodes", "@nodes"), ("Percent", "@percent{0.0}%")]))
+            if len(vals) > 3 and float(np.std(vals)) > 0:
+                std = float(np.std(vals, ddof=1)); mean = float(np.mean(vals))
+                # Binned Gaussian KDE: no SciPy dependency, so the curve is
+                # always available in the deployed SeisWebLog environment.
+                bandwidth = max(bin_size / 2, 1.06 * std * len(vals) ** (-.2))
+                radius = min(max(2, int(math.ceil(4 * bandwidth / bin_size))), max(2, (len(counts)-1)//2))
+                offsets = np.arange(-radius, radius + 1) * bin_size
+                kernel = np.exp(-.5 * (offsets / bandwidth) ** 2); kernel /= kernel.sum()
+                kde_nodes = np.convolve(counts.astype(float), kernel, mode="same")
+                p.line(center, kde_nodes, color=color, line_width=4, legend_label=f"KDE (bandwidth {bandwidth:.2f} m)")
+                ymax = max(1.0, float(max(np.max(counts), np.max(kde_nodes))))
+                p.line([mean, mean], [0, ymax], color="#111827", line_width=2, line_dash="solid",
+                       legend_label=f"Mean {mean:.2f} m")
+                p.line([mean-std, mean-std], [0, ymax], color="#dc3545", line_width=2, line_dash="dashed",
+                       legend_label=f"±1 STD ({std:.2f} m)")
+                p.line([mean+std, mean+std], [0, ymax], color="#dc3545", line_width=2, line_dash="dashed")
             return finish(p)
 
-        bokeh_figures = {
-            "hist_de": histogram("DE", "Delta Easting distribution"),
-            "hist_dn": histogram("DN", "Delta Northing distribution"),
-            "hist_radial": histogram("Offset", "Radial offset distribution", .5),
-        }
+        bokeh_figures = {}
+        selected_hist_keys = []
+        for i, rov in enumerate(rovs):
+            subset = plot_df[plot_df.ROV == rov]
+            for field, label in (("DE", "dX / DE"), ("DN", "dY / DN"), ("Offset", "Radial offset")):
+                key = f"hist_selected_{i}_{field.lower()}"; selected_hist_keys.append(key)
+                bokeh_figures[key] = histogram(subset, field, f"{COMPARISONS[selected][0]} — {label}", rov, colors[rov])
+
+        recdb_hist = pd.DataFrame({"DE": _num(df["recdb_preplot_dx"]), "DN": _num(df["recdb_preplot_dy"]),
+                                   "Offset": _num(df["recdb_preplot_offset"]),
+                                   "ROV": df.get("ROV1", pd.Series("Unknown", index=df.index)).fillna("Unknown").astype(str)}).dropna(subset=["Offset"])
+        recdb_hist_keys = []
+        for i, rov in enumerate(sorted(recdb_hist.ROV.unique())):
+            subset = recdb_hist[recdb_hist.ROV == rov]; color = Category10[10][i % 10]
+            for field, label in (("DE", "dX / DE"), ("DN", "dY / DN"), ("Offset", "Radial offset")):
+                key = f"hist_recdb_{i}_{field.lower()}"; recdb_hist_keys.append(key)
+                bokeh_figures[key] = histogram(subset, field, f"REC_DB vs RPPreplot — {label}", rov, color)
 
         bull = figure(title="Bullseye: DE vs DN", x_axis_label="DE / cross-east (m)", y_axis_label="DN / north (m)", height=560, sizing_mode="stretch_width", match_aspect=True, tools=tools)
         limit = 10.0
@@ -562,31 +585,98 @@ class ReceiverStatistics:
         bull.add_tools(HoverTool(tooltips=[("ROV", "@ROV"), ("Line", "@Line"), ("Station", "@Station"), ("DE", "@DE{0.000}"), ("DN", "@DN{0.000}"), ("Radial", "@Offset{0.000}")]))
         bokeh_figures["bullseye"] = finish(bull)
 
+        def ecdf_plot(title, key, metric, rov_field, signed=False):
+            field = f"{key}_{metric}"
+            low, high = (-10, 10) if signed else (0, 10)
+            cdf = figure(title=title, x_axis_label=("Signed offset (m)" if signed else "Radial offset (m)"),
+                         y_axis_label="Cumulative probability (%)", x_range=(low, high), y_range=(0, 101),
+                         height=360, sizing_mode="stretch_width", tools=tools)
+            phase_rovs = df.get(rov_field, pd.Series("All", index=df.index)).fillna("Unknown").astype(str)
+            for i, rov in enumerate(sorted(phase_rovs.unique())):
+                values = _num(df.loc[phase_rovs == rov, field]).dropna().to_numpy()
+                values = values[(values >= low) & (values <= high)]
+                if not len(values):
+                    continue
+                ordered = np.sort(values)
+                cdf.line(ordered, np.arange(1, len(ordered) + 1) / len(ordered) * 100,
+                         color=Category10[10][i % 10], line_width=3,
+                         legend_label=f"{rov} (N={len(ordered)}, P50={np.percentile(ordered,50):.2f}, P95={np.percentile(ordered,95):.2f})")
+            cdf.add_layout(Span(location=50, dimension="width", line_dash="dashed", line_color="#20a44b", line_width=1.5))
+            cdf.add_layout(Span(location=95, dimension="width", line_dash="dashed", line_color="#dc3545", line_width=1.5))
+            cdf.add_layout(Span(location=limit, dimension="height", line_dash="dotdash", line_color="#f58220", line_width=2))
+            if signed:
+                cdf.add_layout(Span(location=-limit, dimension="height", line_dash="dotdash", line_color="#f58220", line_width=2))
+            cdf.text(x=[low+.25, low+.25, min(high-.4, limit+.1)], y=[51, 96, 6],
+                     text=["P50", "P95", f"QC {limit:g} m"], text_font_size="9px",
+                     text_color=["#16833a", "#c93636", "#b85f00"])
+            finish(cdf)
+            toggle = Button(label="Hide / show legend", button_type="primary", width=145, height=30)
+            toggle.js_on_click(CustomJS(args={"legends": cdf.legend}, code="for (const legend of legends) { legend.visible = !legend.visible; }"))
+            return column(toggle, cdf, sizing_mode="stretch_width")
+
         for phase, key, rov_field, output_key in (
             ("Deployment Primary", "dep_primary_preplot", "ROV", "ecdf_deployment"),
             ("Recovery Primary", "rec_primary_preplot", "ROV1", "ecdf_recovery"),
             ("REC_DB", "recdb_preplot", "ROV1", "ecdf_recdb"),
         ):
-            cdf = figure(title=f"{phase} vs RPPreplot — radial ECDF", x_axis_label="Radial offset (m)",
-                         y_axis_label="Cumulative probability (%)", x_range=(0, 10), y_range=(0, 101),
-                         height=350, sizing_mode="stretch_width", tools=tools)
-            phase_rovs = df[rov_field].fillna("Unknown").astype(str)
-            for i, rov in enumerate(sorted(phase_rovs.unique())):
-                values = _num(df.loc[phase_rovs == rov, f"{key}_offset"]).dropna().to_numpy()
-                if not len(values):
-                    continue
-                ordered = np.sort(values)
-                cdf.line(ordered, np.arange(1, len(ordered) + 1) / len(ordered) * 100,
-                         color=Category10[10][i % 10], line_width=3, legend_label=f"{rov} (N={len(ordered)})")
-            bokeh_figures[output_key] = finish(cdf)
+            bokeh_figures[output_key] = ecdf_plot(f"{phase} vs RPPreplot — radial ECDF", key, "offset", rov_field)
 
-        series = figure(title="In-line, cross-line and radial offset series", x_axis_label="Station", y_axis_label="Offset (m)", height=390, sizing_mode="stretch_width", tools=tools)
-        metric_styles = {"Inline": "solid", "Crossline": "dashed", "Offset": "dotdash"}
-        for rov in rovs:
-            subset = plot_df[plot_df.ROV == rov].sort_values("Station")
-            for metric, dash in metric_styles.items():
-                series.line(subset.Station, subset[metric], color=colors[rov], line_dash=dash, line_width=2, alpha=.9, legend_label=f"{rov} {metric}")
-        bokeh_figures["offset_series"] = finish(series)
+        # Component ECDFs follow the comparison selected in the filter.
+        selected_rov = rov_column or ("ROV1" if "rec_" in selected else "ROV")
+        for metric, label in (("dx", "dX / DE"), ("dy", "dY / DN"),
+                              ("inline", "In-line"), ("crossline", "X-line")):
+            bokeh_figures[f"ecdf_component_{metric}"] = ecdf_plot(
+                f"{COMPARISONS[selected][0]} — {label} ECDF", selected, metric, selected_rov, signed=True)
+
+        # Cross-stage radial ECDFs use deployment ROV for REC_DB-to-deployment
+        # and recovery ROV for comparisons that end at recovery.
+        for title, key, rov_field, output_key in (
+            ("Deployment vs Recovery", "dep_primary_rec_primary", "ROV1", "ecdf_dep_recovery"),
+            ("REC_DB vs Deployment", "recdb_dep_primary", "ROV", "ecdf_recdb_deployment"),
+            ("REC_DB vs Recovery", "recdb_rec_primary", "ROV1", "ecdf_recdb_recovery"),
+        ):
+            bokeh_figures[output_key] = ecdf_plot(f"{title} — radial ECDF", key, "offset", rov_field)
+
+        def matrix_map(title, field, rov_field, signed=True, absolute=False):
+            values = _num(df[field]).abs() if absolute else _num(df[field])
+            matrix = pd.DataFrame({"Line": _num(df["Line"]), "Station": _num(df["Station"]), "Value": values,
+                                   "ROV": df.get(rov_field, pd.Series("Unknown", index=df.index)).fillna("Unknown").astype(str)}).dropna(subset=["Line", "Station", "Value"])
+            if signed:
+                low, high, palette = -10.0, 10.0, list(reversed(RdBu11))
+            else:
+                low, high, palette = 0.0, 10.0, Turbo256
+            if absolute and len(matrix):
+                high = max(1.0, min(10.0, float(matrix.Value.quantile(.95))))
+            mapper = LinearColorMapper(palette=palette, low=low, high=high, nan_color="#e5e7eb")
+            p = figure(title=title, x_axis_label="Receiver line", y_axis_label="Station", height=700,
+                       sizing_mode="stretch_width", tools=tools)
+            src = ColumnDataSource(matrix)
+            points = p.scatter("Line", "Station", source=src, marker="square", size=8, alpha=.88,
+                               fill_color={"field":"Value","transform":mapper}, line_color=None)
+            p.add_layout(ColorBar(color_mapper=mapper, title="Absolute m" if absolute else "Offset (m)"), "right")
+            p.add_tools(HoverTool(renderers=[points], tooltips=[("Line", "@Line{0}"), ("Station", "@Station{0}"),
+                                                                ("ROV", "@ROV"), ("Value", "@Value{0.000} m")]))
+            p.toolbar.logo = None
+            return p
+
+        matrix_definitions = (
+            ("Deployment dX vs RPPreplot", "dep_primary_preplot_dx", "ROV", True, False),
+            ("Deployment dY vs RPPreplot", "dep_primary_preplot_dy", "ROV", True, False),
+            ("Deployment radial vs RPPreplot", "dep_primary_preplot_offset", "ROV", False, False),
+            ("Recovery dX vs RPPreplot", "rec_primary_preplot_dx", "ROV1", True, False),
+            ("Recovery dY vs RPPreplot", "rec_primary_preplot_dy", "ROV1", True, False),
+            ("Recovery radial vs RPPreplot", "rec_primary_preplot_offset", "ROV1", False, False),
+            ("REC_DB dX vs RPPreplot", "recdb_preplot_dx", "ROV1", True, False),
+            ("REC_DB dY vs RPPreplot", "recdb_preplot_dy", "ROV1", True, False),
+            ("REC_DB radial vs RPPreplot", "recdb_preplot_offset", "ROV1", False, False),
+            ("Absolute water-depth difference: Deployment vs Recovery", "dep_primary_rec_primary_dz", "ROV1", False, True),
+        )
+        matrix_labels = ("Dep dX", "Dep dY", "Dep radial", "Rec dX", "Rec dY", "Rec radial",
+                         "REC_DB dX", "REC_DB dY", "REC_DB radial", "Dep-Rec depth")
+        matrix_keys = []
+        for i, definition in enumerate(matrix_definitions):
+            key = f"matrix_{i:02d}"; matrix_keys.append(key)
+            bokeh_figures[key] = matrix_map(*definition)
 
         progress = figure(title="Progress map - click legend to hide layers", x_axis_label="Easting", y_axis_label="Northing", height=560, sizing_mode="stretch_width", match_aspect=True, tools=tools)
         map_layers = [
@@ -618,6 +708,7 @@ class ReceiverStatistics:
                 source_data[rov] = pivot[rov].astype(int).tolist()
             total_by_day = pivot.sum(axis=1)
             planned = max(1, int(production["status"][0]["nodes"]))
+            source_data["total"] = total_by_day.astype(int).tolist()
             source_data["progress"] = (total_by_day.cumsum() / planned * 100).tolist()
             pred = prediction_by_phase[phase]
             title = (f"{phase} day by day — {pred['completed']:,}/{pred['planned']:,} nodes | "
@@ -625,9 +716,14 @@ class ReceiverStatistics:
             p = figure(title=title, x_range=groups, x_axis_label="Day", y_axis_label="Nodes",
                        height=400, sizing_mode="stretch_width", tools=tools)
             source = ColumnDataSource(source_data)
-            p.vbar_stack(phase_rovs, x="date", width=.82, source=source,
-                         color=[Category10[10][i % 10] for i in range(len(phase_rovs))],
-                         legend_label=[f"{rov} ({int(pivot[rov].sum()):,} nodes)" for rov in phase_rovs])
+            bars = p.vbar_stack(phase_rovs, x="date", width=.82, source=source,
+                                color=[Category10[10][i % 10] for i in range(len(phase_rovs))],
+                                legend_label=[f"{rov} ({int(pivot[rov].sum()):,} nodes)" for rov in phase_rovs],
+                                name=phase_rovs)
+            p.add_tools(HoverTool(renderers=bars, tooltips=[("Day", "@date"), ("ROV", "$name"),
+                                                            ("ROV nodes", "@$name{0,0}"),
+                                                            ("Total nodes/day", "@total{0,0}"),
+                                                            ("Progress", "@progress{0.0}%")]))
             p.extra_y_ranges = {"progress": Range1d(start=0, end=100)}
             p.add_layout(LinearAxis(y_range_name="progress", axis_label="Progress (% of RPPreplot)"), "right")
             p.line("date", "progress", source=source, y_range_name="progress", color="#111827", line_width=2.5, legend_label=f"{phase} progress")
@@ -637,19 +733,109 @@ class ReceiverStatistics:
 
         script, divs = components(bokeh_figures)
 
-        polar_figures = []
-        for phase, key, rov_field in (("Deployment", "dep_primary_preplot", "ROV"), ("Recovery", "rec_primary_preplot", "ROV1")):
-            phase_data = pd.DataFrame({"Bearing": _num(df[f"{key}_bearing"]), "ROV": df[rov_field].fillna("Unknown")}).dropna(subset=["Bearing"])
+        polar_groups = []
+        polar_statistics = []
+        polar_definitions = (
+            ("Deployment vs Preplot", "dep_primary_preplot", "ROV"),
+            ("Recovery vs Preplot", "rec_primary_preplot", "ROV1"),
+            ("REC_DB vs Preplot", "recdb_preplot", "ROV1"),
+            ("REC_DB vs Deployment", "recdb_dep_primary", "ROV"),
+            ("REC_DB vs Recovery", "recdb_rec_primary", "ROV1"),
+            ("Deployment vs Recovery", "dep_primary_rec_primary", "ROV1"),
+        )
+        for group_label, key, rov_field in polar_definitions:
+            phase_data = pd.DataFrame({"Bearing": _num(df[f"{key}_bearing"]),
+                                       "Offset": _num(df[f"{key}_offset"]),
+                                       "ROV": df.get(rov_field, pd.Series("Unknown", index=df.index)).fillna("Unknown").astype(str)}).dropna(subset=["Bearing", "Offset"])
+            angles = np.radians(phase_data.Bearing.to_numpy())
+            if len(angles):
+                mean_sin, mean_cos = float(np.mean(np.sin(angles))), float(np.mean(np.cos(angles)))
+                vector_length = float(np.hypot(mean_sin, mean_cos))
+                mean_direction = (math.degrees(math.atan2(mean_sin, mean_cos)) + 360) % 360
+                circular_std = math.degrees(math.sqrt(max(0.0, -2 * math.log(max(vector_length, 1e-12)))))
+            else:
+                vector_length = mean_direction = circular_std = 0.0
+            overall = phase_data.assign(Sector=(phase_data.Bearing // 10).astype(int) * 10)
+            sector_stats = overall.groupby("Sector", as_index=False).agg(
+                Nodes=("Offset", "size"), AverageOffset=("Offset", "mean")) if len(overall) else pd.DataFrame(columns=["Sector","Nodes","AverageOffset"])
+            sector_stats = sector_stats.set_index("Sector").reindex(range(0,360,10)).reset_index()
+            sector_stats["Nodes"] = sector_stats.Nodes.fillna(0).astype(int)
+            sector_stats["Percent"] = sector_stats.Nodes / max(1, len(overall)) * 100
+            dominant_start = int(sector_stats.loc[sector_stats.Nodes.idxmax(), "Sector"]) if len(sector_stats) else 0
+            polar_statistics.append({
+                "label": group_label, "mean_direction": round(mean_direction, 1),
+                "mean_vector_length": round(vector_length, 3), "circular_std": round(circular_std, 1),
+                "observations": int(len(overall)), "dominant_sector": f"{dominant_start}–{dominant_start+10}°",
+                "sectors": [{"range": f"{int(r.Sector)}–{int(r.Sector)+10}", "nodes": int(r.Nodes),
+                             "percent": round(float(r.Percent), 1),
+                             "average": None if pd.isna(r.AverageOffset) else round(float(r.AverageOffset), 3),
+                             "dominant": int(r.Sector) == dominant_start}
+                            for r in sector_stats.itertuples(index=False)]})
+            group_html = []
             for rov, subset in phase_data.groupby("ROV"):
-                polar_data = subset.assign(Sector=(subset.Bearing // 22.5 * 22.5)).groupby("Sector", as_index=False).size().rename(columns={"size": "Nodes"})
-                polar_data["Percent"] = polar_data.Nodes / polar_data.Nodes.sum() * 100
-                fig = px.bar_polar(polar_data, r="Percent", theta="Sector", hover_data={"Nodes": True, "Percent": ":.1f"}, title=f"{phase} offset direction — {rov}")
-                fig.update_traces(name=str(rov), showlegend=True)
-                fig.update_layout(template="plotly_white", polar_bgcolor="white", paper_bgcolor="white", font_color="#243447", legend={"itemclick": "toggle", "itemdoubleclick": "toggleothers"})
-                polar_figures.append(fig)
+                subset = subset.assign(Sector=(subset.Bearing // 10).astype(int))
+                polar_data = subset.groupby("Sector", as_index=False).agg(
+                    Nodes=("Offset", "size"), AverageOffset=("Offset", "mean"))
+                polar_data["Percent"] = polar_data.Nodes / max(1, polar_data.Nodes.sum()) * 100
+                polar_data["Theta"] = polar_data.Sector * 10 + 5
+                dominant = polar_data.loc[polar_data.Percent.idxmax()]
+                dominant_start = int(dominant.Sector) * 10
+                dominant_end = dominant_start + 10
+                dominant_radius = float(dominant.AverageOffset)
+                custom = np.column_stack([polar_data.Nodes, polar_data.Percent])
+                fig = go.Figure(go.Barpolar(
+                    r=polar_data.AverageOffset, theta=polar_data.Theta, width=[10] * len(polar_data),
+                    marker={"color": polar_data.Percent, "colorscale": "Turbo", "cmin": 0, "cmax": 30,
+                            "colorbar": {"title": "% nodes", "x": 1.10, "thickness": 16}},
+                    customdata=custom,
+                    hovertemplate="Sector: %{theta:.1f}°<br>Average offset: %{r:.3f} m<br>Nodes: %{customdata[0]:.0f}<br>Sector share: %{customdata[1]:.1f}%<extra></extra>"
+                ))
+                # Plotly Barpolar does not support dashed borders per wedge, so
+                # overlay the dominant wedge boundary with a dashed Scatterpolar.
+                fig.add_trace(go.Scatterpolar(
+                    theta=[dominant_start, dominant_start, dominant_end, dominant_end, dominant_start],
+                    r=[0, dominant_radius, dominant_radius, 0, 0], mode="lines",
+                    line={"color":"#dc3545", "width":3, "dash":"dash"},
+                    hoverinfo="skip", showlegend=False))
+                fig.add_annotation(
+                    text=(f"<b>Dominant sector:</b> {dominant_start}–{dominant_end}° · "
+                          f"{int(dominant.Nodes):,} nodes · {float(dominant.Percent):.1f}%"),
+                    x=.5, y=-.10, xref="paper", yref="paper", showarrow=False,
+                    font={"color":"#c62828", "size":12})
+                fig.update_layout(title=f"{group_label} — {rov}", template="plotly_white", height=470,
+                                  polar={"bgcolor":"white", "radialaxis":{"title":"Average offset (m)"},
+                                         "angularaxis":{"direction":"clockwise", "rotation":90}},
+                                  paper_bgcolor="white", font_color="#243447", showlegend=False,
+                                  margin={"l":45,"r":105,"t":65,"b":72})
+                group_html.append(fig.to_html(full_html=False, include_plotlyjs=False,
+                                               config={"responsive": True, "displaylogo": False}))
+            polar_groups.append({"label": group_label, "plots": group_html})
         selected_stat = self._one_stat_row(df, selected, COMPARISONS[selected][0], 10)
         inside = max(0, selected_stat["count"] - (selected_stat["out_count"] or 0))
         donut = go.Figure(go.Pie(labels=["Within specification", "Out of specification"], values=[inside, selected_stat["out_count"] or 0], hole=.68, marker_colors=["#20a44b", "#dc3545"]))
         donut.update_layout(title="QC compliance", template="plotly_white", paper_bgcolor="white", font_color="#243447", legend={"itemclick": "toggle", "itemdoubleclick": "toggleothers"})
-        plotly_html = [fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True, "displaylogo": False}) for fig in (*polar_figures, donut)]
-        return {"plotly": plotly_html, "bokeh_script": script, "bokeh_divs": divs, "bokeh_resources": INLINE.render()}
+        plotly_html = [donut.to_html(full_html=False, include_plotlyjs=False,
+                                     config={"responsive": True, "displaylogo": False})]
+
+        planned = max(1, int(production["status"][0]["nodes"]))
+        production_donuts = []
+        donut_colors = {"Deployed": "#1677ff", "Recovered": "#20a44b", "Processed": "#f58220"}
+        for row in production["status"][1:4]:
+            completed = min(planned, int(row["nodes"]))
+            remaining = max(0, planned - completed)
+            fig = go.Figure(go.Pie(labels=[row["phase"], "Remaining"], values=[completed, remaining], hole=.70,
+                                   marker_colors=[donut_colors.get(row["phase"], "#00a6d6"), "#e5eaf0"],
+                                   textinfo="none", hovertemplate="%{label}: %{value:,} nodes (%{percent})<extra></extra>"))
+            fig.add_annotation(text=f"<b>{row['percent']:.1f}%</b><br><span style='font-size:11px'>{row['phase']}</span>", showarrow=False, font_size=18)
+            fig.update_layout(template="plotly_white", paper_bgcolor="white", margin=dict(l=8,r=8,t=8,b=8), height=210,
+                              showlegend=False)
+            production_donuts.append(fig.to_html(full_html=False, include_plotlyjs=False,
+                                                   config={"responsive": True, "displaylogo": False}))
+        return {"plotly": plotly_html, "polar_groups": polar_groups,
+                "polar_statistics": polar_statistics,
+                "production_donuts": production_donuts,
+                "histograms_selected": [divs[key] for key in selected_hist_keys],
+                "histograms_recdb": [divs[key] for key in recdb_hist_keys],
+                "matrix_maps": [{"label": label, "div": divs[key]}
+                                for label, key in zip(matrix_labels, matrix_keys)],
+                "bokeh_script": script, "bokeh_divs": divs, "bokeh_resources": INLINE.render()}

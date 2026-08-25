@@ -1,5 +1,6 @@
 import base64
 import html
+import math
 from pathlib import Path
 
 import numpy as np
@@ -85,6 +86,7 @@ class InteractiveNodePositionComparisonReport:
         metrics = (("dx", "dE"), ("dy", "dN"), ("dr", "Radial"),
                    ("il", "In-Line"), ("xl", "Cross-Line"))
         radial_values = np.array([])
+        plotted = False
         for index, (suffix, label) in enumerate(metrics):
             values = np.sort(np.abs(self._finite(df[f"{prefix}_{suffix}"])))
             if not len(values):
@@ -95,6 +97,7 @@ class InteractiveNodePositionComparisonReport:
                                  color=self.COLORS[index], line_width=2.4,
                                  legend_label=(f"{label} · P50 {np.percentile(values, 50):.2f} · "
                                                f"P95 {np.percentile(values, 95):.2f} m"))
+            plotted = True
             plot.add_tools(HoverTool(renderers=[renderer], tooltips=[
                 ("Metric", label), ("Offset", "@offset{0.00} m"), ("CDF", "@cdf{0.0}%")
             ]))
@@ -105,8 +108,9 @@ class InteractiveNodePositionComparisonReport:
                 x = float(np.percentile(radial_values, percentile))
                 plot.add_layout(Span(location=x, dimension="height", line_color=marker_color,
                                      line_dash="dashed", line_width=2))
-        plot.legend.location = "bottom_right"
-        plot.legend.click_policy = "hide"
+        if plotted:
+            plot.legend.location = "bottom_right"
+            plot.legend.click_policy = "hide"
         return plot
 
     @staticmethod
@@ -120,7 +124,7 @@ class InteractiveNodePositionComparisonReport:
         order = np.argsort(eigenvalues)[::-1]
         eigenvalues, eigenvectors = eigenvalues[order], eigenvectors[:, order]
         semi_axes = np.sqrt(np.maximum(eigenvalues, 0) * 5.991)
-        angle = float(np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0]))
+        angle = math.atan2(float(eigenvectors[1, 0]), float(eigenvectors[0, 0]))
         return {
             "min_x": float(work["x"].min()), "max_x": float(work["x"].max()),
             "avg_x": float(work["x"].mean()), "min_y": float(work["y"].min()),
@@ -170,25 +174,101 @@ class InteractiveNodePositionComparisonReport:
 
     def _water_depth_plot(self, df, x_range=None):
         plot = figure(
-            height=400, sizing_mode="stretch_width", title="Water Depth / Elevation vs Station",
-            x_axis_label="Station", y_axis_label="Elevation (m)",
+            height=420, sizing_mode="stretch_width", title="Deployment and Recovery Water Depth",
+            x_axis_label="Station", y_axis_label="Water depth (m)",
             tools="pan,wheel_zoom,box_zoom,reset,save,hover", active_scroll="wheel_zoom",
             tooltips=[("Station", "@station"), ("Value", "$y{0.00} m")],
             x_range=x_range,
         )
         source = ColumnDataSource({
-            "station": df["Station"], "deployment": pd.to_numeric(df["dep_z"], errors="coerce"),
-            "recovery": pd.to_numeric(df["rcv_z"], errors="coerce"),
-            "recdb": pd.to_numeric(df["fb_z"], errors="coerce"),
+            "station": df["Station"],
+            "deployment": pd.to_numeric(df["dep_z"], errors="coerce").abs(),
+            "recovery": pd.to_numeric(df["rcv_z"], errors="coerce").abs(),
         })
         for field, label, color, dash in (
             ("deployment", "Deployment", self.COLORS[0], "solid"),
             ("recovery", "Recovery", self.COLORS[1], "dashed"),
-            ("recdb", "REC_DB", self.COLORS[2], "dotted"),
         ):
             plot.line("station", field, source=source, color=color, line_width=2,
                       line_dash=dash, legend_label=label)
         plot.legend.click_policy = "hide"
+        return plot
+
+    def _water_depth_difference_plot(self, df, x_range=None):
+        deployment = pd.to_numeric(df["dep_z"], errors="coerce").abs()
+        recovery = pd.to_numeric(df["rcv_z"], errors="coerce").abs()
+        source = ColumnDataSource({
+            "station": df["Station"],
+            "difference": recovery - deployment,
+            "deployment": deployment,
+            "recovery": recovery,
+        })
+        plot = figure(
+            height=420, sizing_mode="stretch_width",
+            title="Recovery Water Depth minus Deployment Water Depth",
+            x_axis_label="Station", y_axis_label="Water-depth difference (m)",
+            tools="pan,wheel_zoom,box_zoom,reset,save", active_scroll="wheel_zoom",
+            x_range=x_range,
+        )
+        renderer = plot.line("station", "difference", source=source,
+                             color=self.COLORS[3], line_width=2.2,
+                             legend_label="Recovery - Deployment")
+        plot.scatter("station", "difference", source=source, color=self.COLORS[3],
+                     size=5, alpha=0.7)
+        plot.add_layout(Span(location=0, dimension="width", line_color="#263b5e",
+                             line_dash="dashed", line_width=1.5))
+        plot.add_tools(HoverTool(renderers=[renderer], tooltips=[
+            ("Station", "@station{0}"),
+            ("Deployment depth", "@deployment{0.00} m"),
+            ("Recovery depth", "@recovery{0.00} m"),
+            ("Difference", "@difference{0.00} m"),
+        ], mode="vline"))
+        plot.legend.location = "top_right"
+        return plot
+
+    def _nearest_station_distance_plot(self, df, mode, x_range=None):
+        if mode == "deployment":
+            x_col, y_col, rov_col = "dep_x", "dep_y", "ROV"
+            title = "Distance Between Nearest Deployment Stations"
+        else:
+            x_col, y_col, rov_col = "rcv_x", "rcv_y", "ROV1"
+            title = "Distance Between Nearest Recovery Stations"
+
+        work = pd.DataFrame({
+            "station": pd.to_numeric(df["Station"], errors="coerce"),
+            "x": pd.to_numeric(df[x_col], errors="coerce"),
+            "y": pd.to_numeric(df[y_col], errors="coerce"),
+            "rov": df.get(rov_col, pd.Series(["Unknown"] * len(df))).fillna("Unknown").astype(str),
+        }).dropna(subset=["station", "x", "y"]).sort_values("station")
+        work["previous_station"] = work["station"].shift(1)
+        work["distance"] = np.hypot(work["x"].diff(), work["y"].diff())
+
+        station_steps = np.diff(np.sort(work["station"].unique()))
+        bar_width = float(np.nanmedian(station_steps) * 0.38) if len(station_steps) else 1.0
+        plot = figure(
+            height=420, sizing_mode="stretch_width", title=title,
+            x_axis_label="Station", y_axis_label="Distance to previous station (m)",
+            tools="pan,wheel_zoom,box_zoom,reset,save", active_scroll="wheel_zoom",
+            x_range=x_range,
+        )
+        renderers = []
+        for index, rov in enumerate(sorted(work["rov"].unique())):
+            selected = work[(work["rov"] == rov) & work["distance"].notna()]
+            source = ColumnDataSource({
+                "station": selected["station"], "previous_station": selected["previous_station"],
+                "distance": selected["distance"], "rov": selected["rov"],
+            })
+            renderer = plot.vbar(x="station", top="distance", bottom=0, width=bar_width,
+                                 source=source, color=self.COLORS[index % len(self.COLORS)],
+                                 alpha=0.78, legend_label=rov)
+            renderers.append(renderer)
+        if renderers:
+            plot.add_tools(HoverTool(renderers=renderers, tooltips=[
+                ("ROV", "@rov"), ("Previous station", "@previous_station{0}"),
+                ("Station", "@station{0}"), ("Distance", "@distance{0.00} m"),
+            ]))
+            plot.legend.click_policy = "hide"
+            plot.legend.location = "top_right"
         return plot
 
     def _boxplot(self, df, title, prefix):
@@ -208,10 +288,11 @@ class InteractiveNodePositionComparisonReport:
                       tools="pan,wheel_zoom,box_zoom,reset,save,hover",
                       tooltips=[("Comparison", "@label"), ("Median", "@q2{0.00} m"),
                                 ("Q1", "@q1{0.00} m"), ("Q3", "@q3{0.00} m")])
-        plot.segment("label", "high", "label", "q3", source=source, color="#263b5e")
-        plot.segment("label", "low", "label", "q1", source=source, color="#263b5e")
-        plot.vbar("label", 0.65, "q2", "q3", source=source, fill_color="#8eb6d8", line_color="#263b5e")
-        plot.vbar("label", 0.65, "q1", "q2", source=source, fill_color="#bdd5e8", line_color="#263b5e")
+        if labels:
+            plot.segment("label", "high", "label", "q3", source=source, color="#263b5e")
+            plot.segment("label", "low", "label", "q1", source=source, color="#263b5e")
+            plot.vbar("label", 0.65, "q2", "q3", source=source, fill_color="#8eb6d8", line_color="#263b5e")
+            plot.vbar("label", 0.65, "q1", "q2", source=source, fill_color="#bdd5e8", line_color="#263b5e")
         plot.xaxis.major_label_orientation = 0.7
         return plot
 
@@ -220,7 +301,9 @@ class InteractiveNodePositionComparisonReport:
         for title, prefix, _color in comparisons:
             values = pd.to_numeric(df[f"{prefix}_dr"], errors="coerce")
             station.extend(df["Station"].astype(str)); comparison.extend([title] * len(df)); radial.extend(values)
-        high = max(qc_limit, float(np.nanpercentile(np.asarray(radial, dtype=float), 98)))
+        finite_radial = np.asarray(radial, dtype=float)
+        finite_radial = finite_radial[np.isfinite(finite_radial)]
+        high = max(qc_limit, float(np.percentile(finite_radial, 98))) if len(finite_radial) else qc_limit
         mapper = LinearColorMapper(palette=Turbo256, low=0, high=high)
         source = ColumnDataSource(dict(station=station, comparison=comparison, radial=radial))
         heatmap_rows = [c[0] for c in comparisons[:3]] + [" "] + [c[0] for c in comparisons[3:]]
@@ -238,8 +321,9 @@ class InteractiveNodePositionComparisonReport:
     def _offset_histogram(self, df, title, prefix, suffix, metric_label, color):
         values = self._finite(df[f"{prefix}_{suffix}"])
         std = float(np.std(values)) if len(values) else float("nan")
+        std_text = f"{std:.2f} m" if np.isfinite(std) else "—"
         plot = figure(height=400, sizing_mode="stretch_width",
-                      title=f"{title} — {metric_label} · STD {std:.2f} m",
+                      title=f"{title} — {metric_label} · STD {std_text}",
                       x_axis_label=f"{metric_label} (m)", y_axis_label="Nodes (%)",
                       tools="pan,wheel_zoom,box_zoom,reset,save,hover", active_scroll="wheel_zoom")
         if len(values):
@@ -265,7 +349,8 @@ class InteractiveNodePositionComparisonReport:
             density /= bandwidth * np.sqrt(2 * np.pi)
             kde_percent = density * 0.5 * 100.0
             plot.line(grid, kde_percent, color="#132a4f", line_width=3, legend_label="KDE")
-        plot.legend.click_policy = "hide"
+        if len(values):
+            plot.legend.click_policy = "hide"
         return plot
 
     @staticmethod
@@ -312,6 +397,58 @@ class InteractiveNodePositionComparisonReport:
         return pio.to_html(fig, full_html=False, include_plotlyjs=False,
                            config={"responsive": True, "displaylogo": False})
 
+    def _polar_statistics_html(self, df, title, prefix):
+        radial = pd.to_numeric(df[f"{prefix}_dr"], errors="coerce")
+        azimuth = pd.to_numeric(df[f"{prefix}_az"], errors="coerce") % 360.0
+        work = pd.DataFrame({"radial": radial, "azimuth": azimuth}).dropna()
+
+        if work.empty:
+            mean_direction = mean_vector = circular_std = None
+        else:
+            radians = np.radians(work["azimuth"].to_numpy(float))
+            mean_sin = float(np.mean(np.sin(radians)))
+            mean_cos = float(np.mean(np.cos(radians)))
+            mean_direction = (math.degrees(math.atan2(mean_sin, mean_cos)) + 360.0) % 360.0
+            mean_vector = float(np.hypot(mean_sin, mean_cos))
+            circular_std = float(np.degrees(np.sqrt(max(0.0, -2.0 * np.log(max(mean_vector, 1e-12))))))
+
+        directional_rows = (
+            ("Mean direction", f"{mean_direction:.1f}°" if mean_direction is not None else "—"),
+            ("Mean vector length", f"{mean_vector:.2f}" if mean_vector is not None else "—"),
+            ("Circular std. dev.", f"{circular_std:.1f}°" if circular_std is not None else "—"),
+            ("Observations", str(len(work))),
+        )
+        directional_body = "".join(
+            f"<tr><td>{label}</td><td>{value}</td></tr>" for label, value in directional_rows
+        )
+
+        sector_rows = []
+        total = len(work)
+        for sector_start in range(0, 360, 45):
+            sector_end = sector_start + 45
+            selected = work[(work["azimuth"] >= sector_start) & (work["azimuth"] < sector_end)]
+            count = len(selected)
+            percentage = count / total * 100.0 if total else 0.0
+            average_radial = float(selected["radial"].mean()) if count else None
+            sector_rows.append((sector_start, sector_end, count, percentage, average_radial))
+        dominant_count = max((row[2] for row in sector_rows), default=0)
+        sector_body = "".join(
+            f'<tr class="{"dominant-sector" if count == dominant_count and count > 0 else ""}">'
+            f"<td>{start}-{end}</td><td>{count}</td><td>{percentage:.1f}%</td>"
+            f"<td>{average:.2f}</td></tr>" if average is not None else
+            f'<tr class="{"dominant-sector" if count == dominant_count and count > 0 else ""}">'
+            f"<td>{start}-{end}</td><td>{count}</td><td>{percentage:.1f}%</td><td>—</td></tr>"
+            for start, end, count, percentage, average in sector_rows
+        )
+
+        return (
+            f'<div class="panel polar-stat-panel"><h2>{html.escape(title)}</h2>'
+            f'<table class="polar-stat-table"><thead><tr><th>Directional Statistics</th><th>Value</th></tr></thead>'
+            f'<tbody>{directional_body}</tbody></table>'
+            f'<table class="polar-sector-table"><thead><tr><th>Sector (°)</th><th>Nodes</th>'
+            f'<th>Line nodes (%)</th><th>Avg radial (m)</th></tr></thead><tbody>{sector_body}</tbody></table></div>'
+        )
+
     def generate_html(self, line, output_dir):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -355,6 +492,19 @@ class InteractiveNodePositionComparisonReport:
             "station_xline": self._station_plot(df, "Cross-Line Offset vs Station",
                 [(f"{p}_xl", f"{label} cross-line", color, dash) for p, label, color, dash in series], shared_station_range),
             "station_depth": self._water_depth_plot(df, shared_station_range),
+            "station_depth_difference": self._water_depth_difference_plot(df, shared_station_range),
+            "deployment_recovery_delta": self._station_plot(
+                df, "Deployment vs Recovery — Delta Easting and Delta Northing", [
+                    ("dep_rcv_dx", "Deployment - Recovery dE", self.COLORS[0], "solid"),
+                    ("dep_rcv_dy", "Deployment - Recovery dN", self.COLORS[1], "dashed"),
+                ], shared_station_range
+            ),
+            "nearest_station_deployment": self._nearest_station_distance_plot(
+                df, "deployment", shared_station_range
+            ),
+            "nearest_station_recovery": self._nearest_station_distance_plot(
+                df, "recovery", shared_station_range
+            ),
         }
         xy_specs = [
             ("Deployment vs Preplot", "dep_pp_dx", "dep_pp_dy", "ROV"),
@@ -382,6 +532,10 @@ class InteractiveNodePositionComparisonReport:
         scripts, divs = components(bokeh_plots)
         polar_divs = [
             self._polar_html(df, title, f"{prefix}_dr", f"{prefix}_az", percentage_scale_max)
+            for title, prefix, _color in comparisons
+        ]
+        polar_statistics_panels = [
+            self._polar_statistics_html(df, title, prefix)
             for title, prefix, _color in comparisons
         ]
 
@@ -415,6 +569,11 @@ class InteractiveNodePositionComparisonReport:
                     f"<td>{np.mean(values):.2f}</td><td>{np.std(values):.2f}</td>"
                     f"<td>{np.percentile(values, 50):.2f}</td><td>{np.percentile(values, 95):.2f}</td>"
                     f"<td>{np.max(values):.2f}</td></tr>"
+                )
+            else:
+                percentile_rows.append(
+                    f"<tr><td>{html.escape(title)}</td><td>0</td>"
+                    f"<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>"
                 )
 
         xy_panels = []
@@ -496,16 +655,19 @@ header{{display:flex;align-items:center;gap:18px;background:#fff;border:2px soli
 .metrics{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}}.metric{{background:#fff;border:1px solid #ccd5e1;padding:13px;border-radius:6px}}.metric span,.metric small{{display:block}}.metric b{{display:block;font-size:18px;margin:7px 0}}
 .tabs{{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}}button{{padding:9px 14px;border:1px solid #6e819e;background:#fff;color:#132a4f;border-radius:4px;cursor:pointer}}button.active{{background:#12336b;color:#fff}}section.page{{display:none}}section.page.active{{display:block}}.grid{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}.xy-grid,.three-col{{grid-template-columns:repeat(3,1fr)}}.panel{{background:#fff;border:1px solid #ccd5e1;padding:8px;min-width:0}}.wide{{grid-column:1/-1}}.table-wrap{{max-height:680px;overflow:auto;background:#fff}}table{{border-collapse:collapse;width:100%;font-size:12px}}th,td{{padding:7px 9px;border-bottom:1px solid #e2e7ed;text-align:right;white-space:nowrap}}th{{position:sticky;top:0;background:#12336b;color:#fff}}@media(max-width:1100px){{.xy-grid,.three-col{{grid-template-columns:1fr 1fr}}}}@media(max-width:900px){{.grid,.metrics,.xy-grid,.three-col{{grid-template-columns:1fr}}.wide{{grid-column:auto}}}}
 .summary-table th{{position:static;text-align:left;width:55%}}.summary-table td{{text-align:left}}.xy-table{{margin-top:8px}}.xy-table th{{position:static;background:#dfeaf3;color:#172a49}}.xy-table td:first-child{{text-align:left}}.xy-table .avg-row td{{font-weight:bold;color:#1549d1}}.note{{color:#53647d}}
+.polar-stat-panel h2{{text-align:center}}.polar-stat-table{{width:70%;margin:0 auto 22px}}.polar-sector-table{{width:100%}}.polar-stat-table th,.polar-sector-table th{{position:static;background:#287fb5;color:#fff;text-align:center}}.polar-stat-table td,.polar-sector-table td{{text-align:center}}.polar-stat-table td:first-child{{text-align:left}}.dominant-sector td{{font-weight:bold;background:#e8f3fa}}
 </style></head><body><main><header><img alt="TGS logo" src="data:{logo_mime};base64,{logo}"><div><h1>NODE POSITION COMPARISON — INTERACTIVE REPORT</h1><div class="sub">Project: {html.escape(str(project_name))} · Receiver Line: {line} · Planned nodes: {planned}</div></div></header>
-<div class="metrics">{''.join(cards)}</div><nav class="tabs"><button class="active" data-page="summary">Summary</button><button data-page="xy">XY offsets</button><button data-page="station">Station plots</button><button data-page="cdf">CDF</button><button data-page="histograms">Histograms</button><button data-page="boxplots">Boxplots</button><button data-page="heatmap">Heatmap</button><button data-page="polar">Polar plots</button><button data-page="nodes">Node table</button></nav>
+<div class="metrics">{''.join(cards)}</div><nav class="tabs"><button class="active" data-page="summary">Summary</button><button data-page="xy">XY offsets</button><button data-page="station">Station plots</button><button data-page="depl-vs-preplot">Depl vs Preplot</button><button data-page="cdf">CDF</button><button data-page="histograms">Histograms</button><button data-page="boxplots">Boxplots</button><button data-page="heatmap">Heatmap</button><button data-page="polar">Polar plots</button><button data-page="polar-stats">Polar statistics</button><button data-page="nodes">Node table</button></nav>
 <section id="summary" class="page active"><h2>Executive Summary - Overall QC Status: {overall_status}</h2><p class="note">Maximum primary radial offset: {primary_max:.2f} m · Project radial QC limit: {qc_limit:.2f} m</p><div class="grid"><div class="panel"><h2>Line Information</h2><table class="summary-table"><tbody>{line_rows}</tbody></table></div><div class="panel"><h2>Radial Offset Statistics</h2><table><thead><tr><th>Comparison</th><th>Nodes</th><th>Mean</th><th>STD</th><th>P50</th><th>P95</th><th>Max</th></tr></thead><tbody>{''.join(percentile_rows)}</tbody></table><p class="note">All offset values are in meters.</p></div></div></section>
 <section id="xy" class="page"><div class="grid xy-grid">{''.join(xy_panels)}</div></section>
-<section id="station" class="page"><div class="grid">{''.join(f'<div class="panel">{divs[key]}</div>' for key in ('station_de','station_dn','station_radial','station_inline','station_xline','station_depth'))}</div></section>
+<section id="station" class="page"><div class="grid">{''.join(f'<div class="panel">{divs[key]}</div>' for key in ('station_de','station_dn','station_radial','station_inline','station_xline'))}</div></section>
+<section id="depl-vs-preplot" class="page"><div class="grid"><div class="panel wide">{divs['deployment_recovery_delta']}</div><div class="panel wide">{divs['station_depth']}</div><div class="panel wide">{divs['station_depth_difference']}</div></div></section>
 <section id="cdf" class="page"><div class="grid">{''.join(f'<div class="panel">{divs[f"cdf_{index}"]}</div>' for index in range(5))}</div></section>
 <section id="histograms" class="page"><div class="grid three-col">{''.join(f'<div class="panel">{divs[f"hist_{index}_{suffix}"]}</div>' for index in range(3) for suffix in ("dx","dy","dr"))}</div></section>
 <section id="boxplots" class="page"><div class="grid">{''.join(f'<div class="panel">{divs[f"box_{index}"]}</div>' for index in range(5))}</div></section>
-<section id="heatmap" class="page"><div class="grid"><div class="panel wide">{divs['heatmap']}</div></div></section>
+<section id="heatmap" class="page"><div class="grid"><div class="panel wide">{divs['heatmap']}</div><div class="panel">{divs['nearest_station_deployment']}</div><div class="panel">{divs['nearest_station_recovery']}</div></div></section>
 <section id="polar" class="page"><div class="grid">{''.join(f'<div class="panel">{item}</div>' for item in polar_divs)}</div></section>
+<section id="polar-stats" class="page"><div class="grid xy-grid">{''.join(polar_statistics_panels)}</div></section>
 <section id="nodes" class="page"><div class="table-wrap"><table><thead><tr>{head}</tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
 {scripts}<script>document.querySelectorAll('.tabs button').forEach(function(button){{button.addEventListener('click',function(){{document.querySelectorAll('.tabs button,.page').forEach(function(item){{item.classList.remove('active')}});button.classList.add('active');document.getElementById(button.dataset.page).classList.add('active');window.dispatchEvent(new Event('resize'));}})}});</script>
 </main></body></html>'''

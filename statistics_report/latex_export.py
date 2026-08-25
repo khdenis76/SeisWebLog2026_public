@@ -71,6 +71,75 @@ def create_matplotlib_pages(payload, output_dir: Path):
     selected = _selected_rows(payload)[0]
     limit = float(selected.get("limit") or 10)
 
+    # EOL production section: put operational completion and day-by-day work
+    # before the coordinate-QC pages.
+    production = payload.get("production", {})
+    status = pd.DataFrame(production.get("status", []))
+    if not status.empty:
+        fig = plt.figure(figsize=(14, 7.5)); gs = fig.add_gridspec(2, 4, height_ratios=[1, 2.2])
+        stage_colors = {"Planned": "#64748b", "Deployment": "#1677ff", "Deployed": "#1677ff",
+                        "Recovery": "#20a44b", "Recovered": "#20a44b",
+                        "Processing": "#ff8c1a", "Processed": "#ff8c1a"}
+        for i, row in status.head(4).reset_index(drop=True).iterrows():
+            ax = fig.add_subplot(gs[0, i]); ax.axis("off")
+            c = stage_colors.get(str(row.get("phase")), COLORS[i % len(COLORS)])
+            ax.add_patch(plt.Rectangle((.03, .08), .94, .84, transform=ax.transAxes,
+                                       facecolor="#f8fafc", edgecolor=c, linewidth=2.5))
+            ax.text(.5, .64, f"{int(row.get('nodes', 0)):,}", ha="center", va="center",
+                    fontsize=23, fontweight="bold", color=c)
+            ax.text(.5, .34, str(row.get("phase", "")), ha="center", fontsize=11, fontweight="bold")
+            ax.text(.5, .18, f"{float(row.get('percent', 0)):.1f}% of plan", ha="center", fontsize=9, color="#475569")
+        ax = fig.add_subplot(gs[1, :])
+        names = status.phase.astype(str); values = pd.to_numeric(status.nodes, errors="coerce").fillna(0)
+        bars = ax.bar(names, values, color=[stage_colors.get(n, COLORS[i % len(COLORS)]) for i, n in enumerate(names)])
+        ax.bar_label(bars, labels=[f"{int(v):,}\n{float(p):.1f}%" for v, p in zip(values, status.percent)], padding=4, fontweight="bold")
+        ax.set_ylabel("Nodes"); ax.set_title("PLANNED AND COMPLETED NODES"); ax.grid(axis="y"); ax.set_axisbelow(True)
+        fig.suptitle("PROJECT PRODUCTION STATUS", fontsize=18, fontweight="bold", color=TGS_BLUE)
+        p=output_dir/"00a_project_production.png"; _save_figure(fig,p); paths.append(p)
+
+    daily_all = pd.DataFrame(production.get("daily", []))
+    predictions = {r.get("phase"): r for r in production.get("prediction", [])}
+    planned = max(1, int(status.iloc[0].nodes)) if not status.empty else 1
+    for page_no, phase in enumerate(("Deployment", "Recovery"), start=1):
+        daily = daily_all[daily_all.phase == phase].copy() if not daily_all.empty else pd.DataFrame()
+        if daily.empty:
+            continue
+        daily["date"] = pd.to_datetime(daily.date, errors="coerce"); daily = daily.dropna(subset=["date"])
+        pivot = daily.pivot_table(index="date", columns="rov", values="nodes", aggfunc="sum", fill_value=0).sort_index()
+        fig, (ax, ax2) = plt.subplots(2, 1, figsize=(14, 8), gridspec_kw={"height_ratios": [2.1, 1]}, sharex=True)
+        pivot.plot(kind="bar", stacked=True, ax=ax, width=.84,
+                   color=[COLORS[i % len(COLORS)] for i in range(len(pivot.columns))])
+        totals = pivot.sum(axis=1); average = float(totals.mean()) if len(totals) else 0
+        ax.plot(range(len(totals)), totals, color="#111827", marker="o", ms=3, lw=1.7, label="Daily total")
+        ax.axhline(average, color="#dc3545", ls="--", lw=1.8, label=f"Average {average:.1f} nodes/day")
+        ax.set_ylabel("Nodes"); ax.grid(axis="y"); ax.legend(ncol=min(5, len(pivot.columns)+2), loc="upper left")
+        progress = totals.cumsum() / planned * 100
+        ax2.fill_between(range(len(progress)), progress.to_numpy(), color="#00a6d6", alpha=.22)
+        ax2.plot(range(len(progress)), progress, color=TGS_BLUE, marker="o", ms=3, lw=2.2)
+        ax2.set_ylabel("Plan complete (%)"); ax2.set_xlabel("Production date"); ax2.set_ylim(0, max(100, float(progress.max()) * 1.08)); ax2.grid()
+        labels = [d.strftime("%Y-%m-%d") for d in pivot.index]
+        step = max(1, len(labels)//18); ax2.set_xticks(range(0, len(labels), step), labels[::step], rotation=45, ha="right")
+        pred = predictions.get(phase, {})
+        fig.suptitle(f"{phase.upper()} - DAY-BY-DAY PRODUCTION\n"
+                     f"Completed {int(pred.get('completed', totals.sum())):,} of {int(pred.get('planned', planned)):,} | "
+                     f"Average {float(pred.get('average_nodes_day', average)):.1f} nodes/day | "
+                     f"Predicted completion {pred.get('predicted_completion', '--')}",
+                     fontsize=16, fontweight="bold", color=TGS_BLUE)
+        p=output_dir/f"00{page_no+1}_{phase.lower()}_daily.png"; _save_figure(fig,p); paths.append(p)
+
+    if not daily_all.empty:
+        table = daily_all.pivot_table(index="date", columns=["phase", "rov"], values="nodes", aggfunc="sum", fill_value=0).sort_index()
+        fig, ax = plt.subplots(figsize=(14, max(6, min(10, .28*len(table)+2))))
+        image = ax.imshow(table.to_numpy(), aspect="auto", cmap="YlGnBu")
+        ax.set_yticks(range(len(table)), [str(x)[:10] for x in table.index], fontsize=7)
+        ax.set_xticks(range(len(table.columns)), [f"{a}\n{b}" for a,b in table.columns], rotation=45, ha="right")
+        maximum = max(1, float(table.to_numpy().max()))
+        for y in range(len(table)):
+            for x in range(len(table.columns)):
+                v=int(table.iloc[y,x]); ax.text(x,y,str(v),ha="center",va="center",fontsize=6,color="white" if v > maximum*.55 else "#0f172a")
+        fig.colorbar(image, ax=ax, label="Nodes"); ax.set_title("PROJECT DAILY PRODUCTION BY PHASE AND ROV", fontsize=16, fontweight="bold", color=TGS_BLUE)
+        p=output_dir/"00d_project_daily_matrix.png"; _save_figure(fig,p); paths.append(p)
+
     # 1 - executive QC dashboard
     fig = plt.figure(figsize=(14, 7.5)); grid = fig.add_gridspec(3, 4, height_ratios=[1, 1, 1.15])
     cards = [("Records", selected["count"], TGS_BLUE), ("Mean radial", f"{selected.get('mean') or 0:.2f} m", TGS_CYAN), ("CEP95", f"{selected.get('cep95') or 0:.2f} m", "#7c4dff"), ("Maximum", f"{selected.get('max') or 0:.2f} m", "#dc3545" if (selected.get('max') or 0)>limit else "#20a44b"), ("Bias DE", f"{selected.get('bias_de') or 0:.2f} m", "#1677ff"), ("Bias DN", f"{selected.get('bias_dn') or 0:.2f} m", "#ff8c1a"), ("In-line avg", f"{selected.get('inline_mean') or 0:.2f} m", "#20a44b"), ("X-line avg", f"{selected.get('crossline_mean') or 0:.2f} m", "#dc3545")]
@@ -109,6 +178,28 @@ def create_matplotlib_pages(payload, output_dir: Path):
         ax.axhline(95,color="#dc3545",ls="--",lw=1);ax.set_xlim(0,10);ax.set_ylim(0,101);ax.set_title(f"{phase} vs RPPreplot");ax.set_xlabel("Radial offset (m)");ax.grid();ax.legend()
     axes[0].set_ylabel("Cumulative probability (%)");fig.suptitle("RADIAL ECDF BY ROV",fontsize=16,fontweight="bold",color=TGS_BLUE);p=output_dir/"04_ecdf.png";_save_figure(fig,p);paths.append(p)
 
+    # Whole-project coordinate comparison page.  It deliberately uses all
+    # comparison rows, even when the web dashboard is focused on one solution.
+    overall = pd.DataFrame([r for r in payload.get("comparisons", []) if r.get("rov") == "All"])
+    if not overall.empty:
+        for c in ("cep95", "mean", "bias_de", "bias_dn", "count"):
+            overall[c] = pd.to_numeric(overall[c], errors="coerce").fillna(0)
+        overall = overall.sort_values(["phase", "name"])
+        fig, axes = plt.subplots(1, 2, figsize=(14, 7), gridspec_kw={"width_ratios": [1.35, 1]})
+        y = np.arange(len(overall))
+        axes[0].barh(y, overall.cep95, color=[COLORS[i%len(COLORS)] for i in range(len(overall))], alpha=.86, label="CEP95")
+        axes[0].scatter(overall["mean"], y, color="#111827", marker="D", s=28, label="Mean")
+        axes[0].set_yticks(y, [str(n)[:48] for n in overall.name]); axes[0].invert_yaxis()
+        axes[0].set_xlabel("Radial offset (m)"); axes[0].set_title("MEAN AND CEP95"); axes[0].grid(axis="x"); axes[0].legend()
+        axes[1].scatter(overall.bias_de, overall.bias_dn,
+                        s=np.clip(overall["count"]/20, 35, 300), c=range(len(overall)), cmap="tab20", alpha=.8)
+        for _,r in overall.iterrows():
+            axes[1].annotate(str(r["name"])[:28], (r.bias_de,r.bias_dn), fontsize=6, xytext=(3,3), textcoords="offset points")
+        axes[1].axhline(0,color="#777",ls="--"); axes[1].axvline(0,color="#777",ls="--")
+        axes[1].set_xlabel("Bias DE (m)"); axes[1].set_ylabel("Bias DN (m)"); axes[1].set_title("2D BIAS"); axes[1].grid()
+        fig.suptitle("ALL COORDINATE COMPARISONS",fontsize=17,fontweight="bold",color=TGS_BLUE)
+        p=output_dir/"04b_all_coordinate_comparisons.png";_save_figure(fig,p);paths.append(p)
+
     # 5 - offset series
     fig,axes=plt.subplots(3,1,figsize=(14,8),sharex=True);metrics=[("inline","In-line offset"),("crossline","Cross-line offset"),("offset","Radial offset")]
     for ax,(field,title) in zip(axes,metrics):
@@ -145,8 +236,15 @@ def build_latex(payload, charts, logo_name="tgs_logo.png"):
     summary_rows = [{"metric": key.replace("_", " ").title(), "value": value} for key, value in payload["summary"].items()]
     selected = _selected_rows(payload)
     all_comparisons = [row for row in payload["comparisons"] if row["rov"] == "All"]
+    daily = payload.get("production", {}).get("daily", [])
+    daily_deployment = [row for row in daily if row.get("phase") == "Deployment"]
+    daily_recovery = [row for row in daily if row.get("phase") == "Recovery"]
     columns = ["phase", "rov", "count", "bias_de", "bias_dn", "inline_mean", "crossline_mean", "mean", "cep50", "cep95", "std", "max", "out_pct"]
-    chart_pages = "\n".join(rf"\clearpage\section*{{{tex_escape(path.stem.replace('_',' ').title())}}}\begin{{center}}\includegraphics[width=0.98\textwidth,height=0.82\textheight,keepaspectratio]{{{path.name}}}\end{{center}}" for path in charts)
+    chart_pages = "\n".join(
+        rf"\clearpage\section*{{{tex_escape(path.stem.split('_', 1)[-1].replace('_',' ').title())}}}"
+        rf"\begin{{center}}\includegraphics[width=0.98\textwidth,height=0.82\textheight,keepaspectratio]{{{path.name}}}\end{{center}}"
+        for path in charts
+    )
     return rf"""\documentclass[9pt,a4paper]{{article}}\usepackage[utf8]{{inputenc}}\usepackage[T1]{{fontenc}}\usepackage{{graphicx,xcolor,longtable,booktabs,array,geometry,fancyhdr,textcomp}}\geometry{{landscape,margin=10mm,headheight=24pt}}\definecolor{{tgsblue}}{{HTML}}{{073B78}}\definecolor{{tgscyan}}{{HTML}}{{00A6D6}}\pagestyle{{fancy}}\fancyhf{{}}\lhead{{\includegraphics[height=14pt]{{{logo_name}}}}}\chead{{\color{{tgsblue}}\bfseries Receiver Statistics}}\rhead{{\small {tex_escape(payload.get('project_name'))}}}\cfoot{{\thepage}}\setlength{{\parindent}}{{0pt}}\renewcommand{{\arraystretch}}{{1.18}}\begin{{document}}
 \begin{{center}}\vspace*{{18mm}}\includegraphics[width=34mm]{{{logo_name}}}\\[9mm]{{\Huge\color{{tgsblue}}\bfseries RECEIVER STATISTICS REPORT}}\\[3mm]{{\Large {tex_escape(payload.get('project_name'))}}}\\[2mm]{{\color{{tgscyan}} {tex_escape(payload.get('selected_name'))}}}\end{{center}}\vfill\begin{{center}}SeisWebLog - DSR Primary / Secondary / REC\_DB Statistical Analysis\end{{center}}\clearpage
 \section*{{Executive Summary}}\begin{{longtable}}{{p{{65mm}}r}}\toprule\textbf{{Metric}}&\textbf{{Value}}\\\midrule
@@ -161,8 +259,16 @@ def build_latex(payload, charts, logo_name="tgs_logo.png"):
 \section*{{Production Prediction}}\begin{{longtable}}{{lrrrrrr}}\toprule Phase&Completed&Planned&Average/day&Remaining&Days left&Predicted completion\\\midrule
 {_rows(payload.get('production',{}).get('prediction',[]),['phase','completed','planned','average_nodes_day','remaining','days_left','predicted_completion'])}
 \bottomrule\end{{longtable}}
-\section*{{All Coordinate Comparisons}}\scriptsize\begin{{longtable}}{{p{{55mm}}rrrrrrrr}}\toprule Comparison&N&Bias DE&Bias DN&In-line&X-line&Radial&CEP95&STD\\\midrule
+\clearpage\section*{{All Coordinate Comparisons}}\scriptsize\begin{{longtable}}{{p{{55mm}}rrrrrrrr}}\toprule Comparison&N&Bias DE&Bias DN&In-line&X-line&Radial&CEP95&STD\\\midrule
 {_rows(all_comparisons,['name','count','bias_de','bias_dn','inline_mean','crossline_mean','mean','cep95','std'])}
+\bottomrule\end{{longtable}}
+\clearpage\section*{{Deployment - Daily Production by ROV}}\scriptsize
+\begin{{longtable}}{{llllr}}\toprule Phase&Date&ROV&Daily share (\%)&Nodes\\\midrule
+{_rows(daily_deployment,['phase','date','rov','percent','nodes'])}
+\bottomrule\end{{longtable}}
+\clearpage\section*{{Recovery - Daily Production by ROV}}\scriptsize
+\begin{{longtable}}{{llllr}}\toprule Phase&Date&ROV&Daily share (\%)&Nodes\\\midrule
+{_rows(daily_recovery,['phase','date','rov','percent','nodes'])}
 \bottomrule\end{{longtable}}
 {chart_pages}\end{{document}}"""
 
